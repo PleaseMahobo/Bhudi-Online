@@ -1,4 +1,10 @@
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+try:
+    from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+except ModuleNotFoundError as exc:
+    raise RuntimeError(
+        "FastAPI is required to run this application. Install it with 'pip install fastapi' "
+        "and activate the correct Python environment."
+    ) from exc
 
 app = FastAPI()
 
