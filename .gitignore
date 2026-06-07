@@ -1,0 +1,12 @@
+# Big folders to ignore
+**/node_modules/
+**/.next/
+**/build/
+**/dist/
+**/__pycache__/
+*.log
+.env
+# Temporary
+temp-*
+frontend1/
+.DS_Store
