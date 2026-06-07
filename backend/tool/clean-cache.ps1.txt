@@ -1,0 +1,6 @@
+Write-Host "Cleaning Python cache..." -ForegroundColor Yellow
+
+Get-ChildItem -Recurse -Include "__pycache__" | Remove-Item -Recurse -Force
+Get-ChildItem -Recurse -Include "*.pyc" | Remove-Item -Force
+
+Write-Host "Cache cleaned." -ForegroundColor Green

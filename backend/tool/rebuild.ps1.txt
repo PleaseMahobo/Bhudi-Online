@@ -1,0 +1,31 @@
+# =========================
+# Bhudi-RMM One-Command Rebuild
+# =========================
+
+Write-Host "Stopping any running Python processes..." -ForegroundColor Yellow
+Get-Process python -ErrorAction SilentlyContinue | Stop-Process -Force
+
+Write-Host "Removing old virtual environment..." -ForegroundColor Yellow
+if (Test-Path ".venv") {
+    Remove-Item -Recurse -Force .venv
+}
+
+Write-Host "Creating fresh virtual environment..." -ForegroundColor Green
+py -m venv .venv
+
+Write-Host "Activating environment..." -ForegroundColor Green
+& .\.venv\Scripts\Activate.ps1
+
+Write-Host "Upgrading pip, setuptools, wheel..." -ForegroundColor Green
+python -m ensurepip --upgrade
+python -m pip install --upgrade pip setuptools wheel
+
+if (Test-Path "requirements.txt") {
+    Write-Host "Installing requirements..." -ForegroundColor Green
+    pip install -r requirements.txt
+} else {
+    Write-Host "No requirements.txt found, skipping install." -ForegroundColor DarkYellow
+}
+
+Write-Host "Rebuild complete!" -ForegroundColor Cyan
+Write-Host "Virtual environment is ready." -ForegroundColor Cyan

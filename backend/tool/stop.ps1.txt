@@ -1,0 +1,17 @@
+Write-Host "=== STOPPING BHUDI-RMM STACK ===" -ForegroundColor Cyan
+
+Get-Process python -ErrorAction SilentlyContinue | Stop-Process -Force
+Get-Process node -ErrorAction SilentlyContinue | Stop-Process -Force
+
+# Kill known ports
+$ports = @(3000, 3001, 8000, 5000)
+
+foreach ($port in $ports) {
+    $proc = netstat -ano | findstr ":$port"
+    if ($proc) {
+        $pid = ($proc -split '\s+')[-1]
+        taskkill /PID $pid /F
+    }
+}
+
+Write-Host "All services stopped." -ForegroundColor Green

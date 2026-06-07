@@ -1,0 +1,28 @@
+Write-Host "=== STARTING BHUDI-RMM DEV STACK ===" -ForegroundColor Cyan
+
+# Activate venv
+& .\.venv\Scripts\Activate.ps1
+
+# Kill ports (important for EADDRINUSE issues)
+Write-Host "Checking ports..." -ForegroundColor Yellow
+
+$ports = @(3000, 3001, 8000, 5000)
+
+foreach ($port in $ports) {
+    $proc = netstat -ano | findstr ":$port"
+    if ($proc) {
+        $pid = ($proc -split '\s+')[-1]
+        Write-Host "Killing process on port $port (PID $pid)" -ForegroundColor Red
+        taskkill /PID $pid /F
+    }
+}
+
+# Start backend (adjust to your app entry)
+Write-Host "Starting Backend..." -ForegroundColor Green
+Start-Process powershell -ArgumentList "python main.py"
+
+# Start WebSocket server (example)
+Write-Host "Starting WebSocket Server..." -ForegroundColor Green
+Start-Process powershell -ArgumentList "uvicorn app.main:app --reload --port 8000"
+
+Write-Host "DEV STACK RUNNING" -ForegroundColor Cyan

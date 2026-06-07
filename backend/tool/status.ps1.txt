@@ -1,0 +1,10 @@
+Write-Host "=== BHUDI-RMM STATUS ===" -ForegroundColor Cyan
+
+Write-Host "`nPython processes:" -ForegroundColor Yellow
+Get-Process python -ErrorAction SilentlyContinue
+
+Write-Host "`nNode processes:" -ForegroundColor Yellow
+Get-Process node -ErrorAction SilentlyContinue
+
+Write-Host "`nListening ports:" -ForegroundColor Yellow
+netstat -ano | findstr LISTENING

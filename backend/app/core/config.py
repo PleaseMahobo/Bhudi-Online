@@ -1,0 +1,6 @@
+import os
+
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./rmm.db")
+HEARTBEAT_TIMEOUT_SECONDS = 90
+
+OFFLINE_SCAN_INTERVAL = 30
