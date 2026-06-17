@@ -33,3 +33,24 @@ throw new Error("Device status fetch failed");
 
 return res.json();
 }
+export async function sendCommand(
+  deviceId: number | string,
+  command: string
+) {
+  const res = await fetch(`${API_URL}/commands/send`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      device_id: deviceId,
+      command,
+    }),
+  });
+
+  if (!res.ok) {
+    throw new Error("Command execution failed");
+  }
+
+  return res.json();
+}

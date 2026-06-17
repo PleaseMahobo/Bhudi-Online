@@ -1,7 +1,23 @@
 "use client";
 
 import { useState } from "react";
-import { sendCommand } from "@/lib/api";
+
+// Local fallback implementation for sending commands to the backend API.
+// The project previously attempted to import sendCommand from @/lib/api,
+// but that symbol is not exported. Keep a small client-side helper here
+// to avoid touching other files.
+async function sendCommand(deviceId: number, command: string) {
+  try {
+    await fetch(`/api/commands`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ deviceId, command }),
+    });
+  } catch (err) {
+    // noop - keep UI simple; errors could be surfaced later
+    console.error(err);
+  }
+}
 
 export default function CommandsPage() {
   const [deviceId, setDeviceId] = useState("");

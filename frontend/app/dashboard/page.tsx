@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getDevices } from "@/lib/api";
+import { getDeviceStatus } from "@/lib/api";
 import DeviceCard from "@/components/DeviceCard";
 
 export default function Dashboard() {
@@ -12,7 +12,7 @@ export default function Dashboard() {
   }, []);
 
   async function load() {
-    const data = await getDevices();
+  const data = await getDeviceStatus();
     setDevices(data);
   }
 
