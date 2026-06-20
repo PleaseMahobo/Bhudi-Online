@@ -18,7 +18,7 @@ export default function Home() {
             })
           );
       } catch (err) {
-        setStatus("Backend not reachable");
+        setStatus(`ERROR: ${err?.message || String(err)}`);
       }
     }
 
