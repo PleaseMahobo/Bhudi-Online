@@ -10,3 +10,6 @@
 temp-*
 frontend1/
 .DS_Store
+venv/
+.venv/
+*.pyc

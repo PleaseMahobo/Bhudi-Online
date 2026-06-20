@@ -1,4 +1,10 @@
-const BASE_URL = "https://ubiquitous-space-potato-v6jq74wpxw4w3pwpj-8000.app.github.dev";
+declare var process: {
+  env: {
+    NEXT_PUBLIC_API_URL?: string;
+  };
+};
+
+const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
 
 export async function getHealth() {
   const res = await fetch(`${BASE_URL}/health`);

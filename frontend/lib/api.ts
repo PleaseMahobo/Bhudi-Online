@@ -1,6 +1,6 @@
 const API_URL =
 process.env.NEXT_PUBLIC_API_URL ||
-"https://ubiquitous-space-potato-v6jq74wpxw4w3pwpj-8000.app.github.dev";
+"https://bhudi-online-production.up.railway.app";
 
 export async function getHealth() {
 const res = await fetch(`${API_URL}/health`);

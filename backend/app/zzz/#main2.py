@@ -1,6 +1,7 @@
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi import FastAPI
+from app.api.router import api_router
 
 app = FastAPI()
 
@@ -17,7 +18,11 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+
 )
+
+# API ROUTER (ADD THIS)
+app.include_router(api_router, prefix="/api")
 
 # -----------------------------
 # HEALTH CHECK
