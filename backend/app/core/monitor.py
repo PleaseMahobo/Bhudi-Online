@@ -1,26 +1,13 @@
-import time
+import asyncio
+from app.state.device_state import devices, mark_offline
 from datetime import datetime, timedelta
-from app.core.db import SessionLocal
-from app.models.device import Device
 
-
-OFFLINE_THRESHOLD_SECONDS = 30
-
-
-def monitor_loop():
+async def monitor_devices():
     while True:
-        db = SessionLocal()
         now = datetime.utcnow()
 
-        devices = db.query(Device).all()
+        for device_id, device in list(devices.items()):
+            if (now - device["last_seen"]).seconds > 30:
+                mark_offline(device_id)
 
-        for d in devices:
-            if d.last_seen and now - d.last_seen > timedelta(seconds=OFFLINE_THRESHOLD_SECONDS):
-                if d.status != "offline":
-                    print(f"[OFFLINE] {d.device_id}")
-                    d.status = "offline"
-
-        db.commit()
-        db.close()
-
-        time.sleep(10)
+        await asyncio.sleep(10)
