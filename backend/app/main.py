@@ -10,7 +10,9 @@ app = FastAPI()
 # CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://bhudi-online-6bhc4pq5j-trusts-projects-97c4157c.vercel.app"],
+    allow_origins=[
+        "https://bhudi-online-6bhc4pq5j-trusts-projects-97c4157c.vercel.app"
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
