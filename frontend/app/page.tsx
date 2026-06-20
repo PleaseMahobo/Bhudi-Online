@@ -10,7 +10,13 @@ export default function Home() {
     async function run() {
       try {
         const data = await getHealth();
-        setStatus(JSON.stringify(data));
+
+          setStatus(
+            JSON.stringify({
+              apiUrl: process.env.NEXT_PUBLIC_API_URL,
+              response: data,
+            })
+          );
       } catch (err) {
         setStatus("Backend not reachable");
       }
