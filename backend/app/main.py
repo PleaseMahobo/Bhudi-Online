@@ -2,16 +2,30 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi import FastAPI
 
-app = FastAPI()
+from app.core.cors import setup_cors
+from app.api.routes_health import router as health_router
+from app.api.routes_commands import router as commands_router
+from app.api.routes_ws import router as ws_router
+from app.api import routes_health, routes_devices, routes_commands, routes_ws
 
+app = FastAPI(title="Bhudi RMM API")
+
+setup_cors(app)
+
+app.include_router(health_router)
+app.include_router(commands_router)
+app.include_router(ws_router)
 # -----------------------------
 # CORS (frontend connection)
 # -----------------------------
-from fastapi.middleware.cors import CORSMiddleware
-
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://bhudi-online-6bhc4pq5j-trusts-projects-97c4157c.vercel.app"],
+    allow_origins=[
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "https://bhudi.online",
+        "https://www.bhudi.online",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
