@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 import asyncio
 
 from app.core.monitor import monitor_devices
@@ -9,9 +10,10 @@ from app.api.routes_commands import router as commands_router
 from app.api.routes_ws import router as ws_router
 from app.api.routes_devices import router as devices_router
 from app.api.routes_agent import router as agent_router
-app.include_router(agent_router)
 
 app = FastAPI(title="Bhudi RMM API")
+
+app.include_router(agent_router)
 
 # -----------------------------
 # CORS (must be first)
