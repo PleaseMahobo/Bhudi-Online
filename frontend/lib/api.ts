@@ -1,56 +1,26 @@
-const API_URL =
-process.env.NEXT_PUBLIC_API_URL ||
-"https://bhudi-online-production.up.railway.app";
+// frontend/lib/api.ts
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "https://bhudi-online-production.up.railway.app";
 
-export async function getHealth() {
-const res = await fetch(`${API_URL}/health`);
+export const api = {
+  async getHealth() {
+    const res = await fetch(`${API_URL}/health`, { cache: 'no-store' });
+    if (!res.ok) throw new Error("Health check failed");
+    return res.json();
+  },
 
-if (!res.ok) {
-throw new Error("Health check failed");
-}
+  async getDevices() {
+    const res = await fetch(`${API_URL}/devices/status`, { cache: 'no-store' });
+    if (!res.ok) return { devices: [] };
+    return res.json();
+  },
 
-return res.json();
-}
-
-export async function sendHeartbeat(deviceId: string) {
-const res = await fetch(`${API_URL}/heartbeat/${deviceId}`, {
-method: "POST",
-});
-
-if (!res.ok) {
-throw new Error("Heartbeat failed");
-}
-
-return res.json();
-}
-
-export async function getDeviceStatus() {
-const res = await fetch(`${API_URL}/devices/status`);
-
-if (!res.ok) {
-throw new Error("Device status fetch failed");
-}
-
-return res.json();
-}
-export async function sendCommand(
-  deviceId: number | string,
-  command: string
-) {
-  const res = await fetch(`${API_URL}/commands/send`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      device_id: deviceId,
-      command,
-    }),
-  });
-
-  if (!res.ok) {
-    throw new Error("Command execution failed");
+  async sendCommand(deviceId: string | number, command: string) {
+    const res = await fetch(`${API_URL}/commands/send`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ device_id: deviceId, command }),
+    });
+    if (!res.ok) throw new Error("Command failed");
+    return res.json();
   }
-
-  return res.json();
-}
+};

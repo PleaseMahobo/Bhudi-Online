@@ -9,10 +9,12 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@remix-run/dev": "^2.17.5",
+    "lucide-react": "^1.21.0",
     "next": "latest",
     "react": "latest",
     "react-dom": "latest",
-    "@remix-run/dev": "^2.17.5"
+    "recharts": "^3.8.1"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.3.0",
