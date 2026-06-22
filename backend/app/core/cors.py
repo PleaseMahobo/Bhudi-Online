@@ -8,6 +8,7 @@ def setup_cors(app):
             "http://localhost:3000",
             "https://bhudi.online",
             "https://www.bhudi.online",
+            "https://bhudi-online.vercel.app",
             "https://*.vercel.app"
         ],
         allow_origin_regex=r"https://.*\.vercel\.app",
