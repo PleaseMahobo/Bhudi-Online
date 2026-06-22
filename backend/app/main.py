@@ -20,7 +20,11 @@ app.include_router(agent_router)
 # -----------------------------
 app.add_middleware( 
     CORSMiddleware,
-    allow_origins=["https://bhudi-online-production.up.railway.app"],                    # Change to specific domains in production
+    allow_origins=[ "https://bhudi.online",
+        "https://www.bhudi.online",
+        "https://bhudi-online.vercel.app",
+        "http://localhost:3000""
+    ],                   
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -37,6 +41,32 @@ app.include_router(agent_router)
 @app.on_event("startup")
 async def startup_event():
     asyncio.create_task(monitor_devices())
+
+# ====================== Devices Endpoint ======================
+
+@app.get("/devices/status")
+async def get_devices_status():
+    # TODO: Replace this with real device data from your database later
+    return {
+        "devices": [
+            {
+                "id": 1,
+                "name": "Endpoint-01",
+                "status": "online",
+                "last_seen": "Just now",
+                "ip": "192.168.1.45"
+            },
+            {
+                "id": 2,
+                "name": "Endpoint-02",
+                "status": "online",
+                "last_seen": "2 min ago",
+                "ip": "192.168.1.67"
+            }
+        ],
+        "total": 2,
+        "online": 2
+    }
 
 # ==================== WebSocket Support ====================
 
