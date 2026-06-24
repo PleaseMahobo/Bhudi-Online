@@ -1,12 +1,18 @@
 {
-  "dependencies": {
-    "lucide-react": "^1.21.0",
-    "recharts": "^3.8.1"
+  "name": "bhudi-online",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "frontend",
+    "backend"
+  ],
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "start": "turbo run start",
+    "lint": "turbo run lint"
+  },
+  "devDependencies": {
+    "turbo": "latest"
   }
-}
-
-"scripts": {
-  "dev": "next dev",
-  "build": "next build",
-  "start": "next start"
 }
