@@ -1,12 +1,14 @@
 {
-  "name": "frontend",
-  "version": "1.0.0",
+  "name": "bhudi-frontend",
+  "version": "0.1.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
     "lint": "next lint"
+    "clean": "rm -rf .next && rm -rf node_modules/.cache",
+    "deploy": "npm run build && vercel --prod"
   },
   "dependencies": {
     "@remix-run/dev": "^2.17.5",
