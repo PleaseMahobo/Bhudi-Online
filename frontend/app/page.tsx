@@ -1,68 +1,35 @@
-// frontend/app/dashboard/page.tsx
+// frontend/app/page.tsx
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import Link from 'next/link';
 
-export default function Dashboard() {
-  const [backendStatus, setBackendStatus] = useState<any>(null);
-  const [devices, setDevices] = useState<any[]>([]);
-
-  useEffect(() => {
-    fetchBackendStatus();
-    fetchDevices();
-  }, []);
-
-  const fetchBackendStatus = async () => {
-    try {
-      const res = await fetch('/api/health'); // or use your api.ts
-      const data = await res.json();
-      setBackendStatus(data);
-    } catch (err) {
-      console.error(err);
-    }
-  };
-
-  const fetchDevices = async () => {
-    try {
-      const res = await fetch('/api/devices/status');
-      const data = await res.json();
-      setDevices(data.devices || []);
-    } catch (err) {
-      console.error(err);
-    }
-  };
-
+export default function HomePage() {
   return (
-    <div className="min-h-screen bg-zinc-950 text-white p-8">
-      <div className="max-w-7xl mx-auto">
-        <h1 className="text-4xl font-bold mb-8">Bhudi RMM Dashboard</h1>
-
-        {/* Backend Status */}
-        <div className="bg-zinc-900 p-6 rounded-xl mb-8">
-          <h2 className="text-xl font-semibold mb-4">Backend Status</h2>
-          <pre className="bg-black p-4 rounded-lg overflow-auto">
-            {JSON.stringify(backendStatus, null, 2)}
-          </pre>
-        </div>
-
-        {/* Devices Overview */}
-        <div className="bg-zinc-900 p-6 rounded-xl">
-          <h2 className="text-xl font-semibold mb-4">Devices ({devices.length})</h2>
-          
-          {devices.length === 0 ? (
-            <p className="text-gray-400">No devices connected yet.</p>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {devices.map((device, i) => (
-                <div key={i} className="bg-zinc-800 p-4 rounded-lg">
-                  <p className="font-medium">{device.name || 'Unknown Device'}</p>
-                  <p className="text-sm text-green-400">Online</p>
-                </div>
-              ))}
-            </div>
-          )}
+    <div className="min-h-screen bg-zinc-950 text-white flex items-center justify-center">
+      <div className="text-center max-w-4xl mx-auto px-6">
+        <h1 className="text-6xl font-bold mb-6">Bhudi RMM</h1>
+        <p className="text-2xl text-zinc-400 mb-10">
+          Remote Monitoring & Management Platform
+        </p>
+        
+        <div className="space-x-4">
+          <Link 
+            href="/dashboard" 
+            className="bg-white text-black px-8 py-4 rounded-xl font-semibold hover:bg-zinc-200 transition"
+          >
+            Go to Dashboard
+          </Link>
+          <a 
+            href="https://bhudi-online-production.up.railway.app/docs" 
+            target="_blank"
+            className="border border-white px-8 py-4 rounded-xl font-semibold hover:bg-white/10 transition"
+          >
+            View API Docs
+          </a>
         </div>
       </div>
     </div>
+  );
+}
   );
 }
