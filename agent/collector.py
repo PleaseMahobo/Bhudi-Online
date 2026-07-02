@@ -1,12 +1,10 @@
-import platform
-import psutil
 import socket
+import psutil
 
 def collect():
     return {
-        "agent_id": socket.gethostname(),
-        "hostname": socket.gethostname(),
-        "os": platform.system(),
+        "device_id": socket.gethostname(),
         "cpu": psutil.cpu_percent(),
-        "ram": psutil.virtual_memory().percent
+        "ram": psutil.virtual_memory().percent,
+        "status": "online"
     }

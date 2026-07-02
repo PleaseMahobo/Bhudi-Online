@@ -1,77 +1,64 @@
+from dotenv import load_dotenv
+load_dotenv()
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import asyncio
 
-from app.core.monitor import monitor_devices
+from app.api.v1.router import api_router
 from app.core.cors import setup_cors
+from app.core.monitor import monitor_devices
 
-from app.api.routes_health import router as health_router
-from app.api.routes_commands import router as commands_router
-from app.api.routes_ws import router as ws_router
-from app.api.routes_devices import router as devices_router
-from app.api.routes_agent import router as agent_router
-
-app = FastAPI(title="Bhudi RMM API")
-
-app.include_router(agent_router)
-
-# -----------------------------
-# CORS (must be first)
-# -----------------------------
-app.add_middleware( 
-    CORSMiddleware,
-    allow_origins=[ "https://bhudi.online",
-        "https://www.bhudi.online",
-        "https://bhudi-online.vercel.app",
-        "http://localhost:3000"
-    ],                   
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+# ====================== MAIN APP ======================
+app = FastAPI(
+    title="Bhudi RMM API",
+    description="Enterprise Remote Monitoring & Management Platform",
+    version="1.0.0",
+    docs_url="/docs",
+    redoc_url="/redoc"
 )
-# -----------------------------
-# ROUTES (API LAYER)
-# -----------------------------
-app.include_router(health_router)
-app.include_router(commands_router)
-app.include_router(ws_router)
-app.include_router(devices_router)
-app.include_router(agent_router)
 
+# ====================== CORS ======================
+setup_cors(app)
+
+# ====================== ROUTERS ======================
+app.include_router(api_router, prefix="/api/v1")
+
+# ====================== STARTUP EVENTS ======================
 @app.on_event("startup")
 async def startup_event():
+    """Start background tasks"""
+    print("🚀 Bhudi RMM API starting...")
     asyncio.create_task(monitor_devices())
 
-# ====================== Devices Endpoint ======================
+@app.on_event("shutdown")
+async def shutdown_event():
+    print("🛑 Bhudi RMM API shutting down...")
 
-@app.get("/devices/status")
-async def get_devices_status():
-    # TODO: Replace this with real device data from your database later
+# ====================== HEALTH CHECK ======================
+@app.get("/health", tags=["Health"])
+async def health_check():
     return {
-        "devices": [
-            {
-                "id": 1,
-                "name": "Endpoint-01",
-                "status": "online",
-                "last_seen": "Just now",
-                "ip": "192.168.1.45"
-            },
-            {
-                "id": 2,
-                "name": "Endpoint-02",
-                "status": "online",
-                "last_seen": "2 min ago",
-                "ip": "192.168.1.67"
-            }
-        ],
-        "total": 2,
-        "online": 2
+        "status": "running",
+        "service": "Bhudi RMM API",
+        "version": "1.0.0"
     }
 
-# ==================== WebSocket Support ====================
+# ====================== ROOT ======================
+@app.get("/", tags=["Health"])
+async def root():
+    return {
+        "message": "Bhudi RMM API is running",
+        "docs": "/docs",
+        "health": "/health"
+    }
 
+print("✅ Bhudi RMM API initialized successfully")
+
+# ====================== WebSocket Device Heartbeat ======================
 from fastapi import WebSocket, WebSocketDisconnect
 from typing import List
+import asyncio
 
 class ConnectionManager:
     def __init__(self):
@@ -85,11 +72,11 @@ class ConnectionManager:
         self.active_connections.remove(websocket)
 
     async def broadcast(self, message: dict):
-        for connection in self.active_connections:
+        for connection in self.active_connections[:]:
             try:
                 await connection.send_json(message)
             except:
-                pass
+                self.disconnect(connection)
 
 manager = ConnectionManager()
 
@@ -99,11 +86,10 @@ async def websocket_endpoint(websocket: WebSocket):
     try:
         while True:
             data = await websocket.receive_text()
-            # You can process incoming messages here if needed
             await manager.broadcast({
-                "type": "update",
-                "message": data,
-                "timestamp": "now"
+                "type": "live_update",
+                "timestamp": asyncio.get_event_loop().time(),
+                "message": data
             })
     except WebSocketDisconnect:
         manager.disconnect(websocket)

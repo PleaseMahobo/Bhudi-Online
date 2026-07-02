@@ -1,30 +1,18 @@
-from datetime import datetime
-from sqlalchemy.orm import Session
-from app.models.device import Device
+from app.core.database import get_supabase
 
-class DeviceService:
+def upsert_device(device: dict):
+    return get_supabase().table("devices").upsert(device).execute()
 
-    @staticmethod
-    def register(db: Session, device_id: str):
 
-        device = (
-            db.query(Device)
-            .filter(Device.device_id == device_id)
-            .first()
-        )
+def get_devices():
+    return get_supabase().table("devices").select("*").execute()
 
-        if device:
-            device.last_seen = datetime.utcnow()
-            device.status = "online"
-        else:
-            device = Device(
-                device_id=device_id,
-                status="online",
-                last_seen=datetime.utcnow()
-            )
-            db.add(device)
 
-        db.commit()
-        db.refresh(device)
-
-        return device
+def update_device_status(device_id: str, status: dict):
+    return (
+        get_supabase()
+        .table("devices")
+        .update(status)
+        .eq("device_id", device_id)
+        .execute()
+    )

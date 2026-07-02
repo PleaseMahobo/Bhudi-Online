@@ -1,6 +1,17 @@
-from app.core.database import Base, engine
-from app.models import device  # ensures model is loaded
+from sqlalchemy import create_engine
+from sqlalchemy.orm import declarative_base, sessionmaker
 
+DATABASE_URL = "sqlite:///./bhudi_rmm.db"
 
-def init_db():
-    Base.metadata.create_all(bind=engine)
+engine = create_engine(
+    DATABASE_URL,
+    connect_args={"check_same_thread": False}
+)
+
+SessionLocal = sessionmaker(
+    autocommit=False,
+    autoflush=False,
+    bind=engine
+)
+
+Base = declarative_base()
