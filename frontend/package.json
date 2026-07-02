@@ -11,7 +11,7 @@
     "deploy": "npm run build && vercel --prod"
   },
   "dependencies": {
-<<<<<<< HEAD
+    
     "@emotion/react": "^11.14.0",
     "@emotion/styled": "^11.14.1",
     "@remix-run/dev": "^2.17.5",
@@ -22,7 +22,7 @@
     "react": "latest",
     "react-dom": "latest",
     "recharts": "^3.8.1"
-=======
+
     "bcryptjs": "^3.0.3",
     "framer-motion": "^11.0.0",
     "jose": "^6.2.3",
@@ -32,7 +32,7 @@
     "react-dom": "^19.0.0",
     "recharts": "^3.8.1",
     "zod": "^4.4.3"
->>>>>>> 4203add43249bd87f9817086888a01cd290a3ed5
+
   },
   "devDependencies": {
     "@prisma/client": "^5.22.0",
