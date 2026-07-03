@@ -1,7 +1,7 @@
-// frontend/lib/useHeartbeat.ts
+// frontend/src/lib/useHeartbeat.ts
 import { useEffect, useRef } from 'react';
 
-export function useHeartbeat(deviceId: string = "default-device") {
+export function useHeartbeat(deviceId: string = "main-agent") {
   const socketRef = useRef<WebSocket | null>(null);
 
   useEffect(() => {
@@ -12,18 +12,19 @@ export function useHeartbeat(deviceId: string = "default-device") {
     socketRef.current = socket;
 
     socket.onopen = () => {
-      console.log("WebSocket connected - Heartbeat started");
+      console.log("WebSocket connected - Heartbeat active");
       // Send initial heartbeat
       socket.send(JSON.stringify({
         type: "heartbeat",
         device_id: deviceId,
-        timestamp: Date.now()
+        timestamp: Date.now(),
+        status: "online"
       }));
     };
 
     socket.onmessage = (event) => {
       const data = JSON.parse(event.data);
-      console.log("Live update:", data);
+      console.log("Heartbeat update:", data);
     };
 
     // Send heartbeat every 10 seconds
@@ -45,31 +46,4 @@ export function useHeartbeat(deviceId: string = "default-device") {
   }, [deviceId]);
 
   return socketRef;
-}
-
-// frontend/lib/useWebSocket.ts
-import { useAuth } from "@/shared/auth/AuthContext";
-import { User2 } from 'lucide-react';
-
-export function useWebSocket() {
-  const { user } = useAuth();
-  // ... existing code ...
-
-  useEffect(() => {
-    if (!user) return;
-
-    const wsUrl = `wss://${process.env.NEXT_PUBLIC_API_URL?.replace('https://', '')}/ws`;
-    const socket = new WebSocket(wsUrl);
-
-    socket.onopen = () => {
-      // Send JWT token for authentication
-      const token = (user as any)?.accessToken ?? "demo-token";
-      socket.send(JSON.stringify({
-        type: "auth",
-        token
-      }));
-    };
-
-    // ... rest of your code
-  }, [User2]);
 }

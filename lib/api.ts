@@ -1,23 +1,33 @@
 // frontend/lib/api.ts
-const envApiUrl = typeof globalThis !== 'undefined' && 'process' in globalThis
-  ? (globalThis as any).process?.env?.NEXT_PUBLIC_API_URL
-  : undefined;
-const API_BASE = envApiUrl || "https://bhudi-online-production.up.railway.app";
+declare const process: { env: { NEXT_PUBLIC_API_URL?: string } };
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "https://bhudi-online-production.up.railway.app";
 
 export async function getHealth() {
-  const res = await fetch(`${API_BASE}/health`, {
-    cache: 'no-store',
-    headers: { "Content-Type": "application/json" }
-  });
-  if (!res.ok) throw new Error("Health check failed");
-  return res.json();
+  try {
+    const res = await fetch(`${API_URL}/health`, {
+      method: 'GET',
+      headers: { 'Content-Type': 'application/json' },
+      cache: 'no-store'
+    });
+    if (!res.ok) return { status: "error", message: `HTTP ${res.status}` };
+    return await res.json();
+  } catch (error) {
+    console.error("Health check failed:", error);
+    return { status: "error", message: "Backend unreachable" };
+  }
 }
 
 export async function getDeviceStatus() {
-  const res = await fetch(`${API_BASE}/devices/status`, {
-    cache: 'no-store',
-    headers: { "Content-Type": "application/json" }
-  });
-  if (!res.ok) return { devices: [] };
-  return res.json();
+  try {
+    const res = await fetch(`${API_URL}/devices/status`, {
+      method: 'GET',
+      headers: { 'Content-Type': 'application/json' },
+      cache: 'no-store'
+    });
+    if (!res.ok) return { devices: [] };
+    return await res.json();
+  } catch (error) {
+    console.error("Device status failed:", error);
+    return { devices: [] };
+  }
 }

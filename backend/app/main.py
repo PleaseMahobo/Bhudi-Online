@@ -93,3 +93,56 @@ async def websocket_endpoint(websocket: WebSocket):
             })
     except WebSocketDisconnect:
         manager.disconnect(websocket)
+
+        # ====================== WebSocket Heartbeat ======================
+from fastapi import WebSocket, WebSocketDisconnect
+from typing import List, Dict
+import asyncio
+import json
+
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: List[WebSocket] = []
+        self.device_heartbeats: Dict[str, dict] = {}
+
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.append(websocket)
+
+    def disconnect(self, websocket: WebSocket):
+        self.active_connections.remove(websocket)
+
+    async def broadcast(self, message: dict):
+        for connection in self.active_connections[:]:
+            try:
+                await connection.send_json(message)
+            except:
+                self.disconnect(connection)
+
+    async def handle_heartbeat(self, device_id: str, data: dict):
+        self.device_heartbeats[device_id] = {
+            "status": "online",
+            "last_heartbeat": asyncio.get_event_loop().time(),
+            "timestamp": data.get("timestamp"),
+            **data
+        }
+        await self.broadcast({
+            "type": "heartbeat",
+            "device_id": device_id,
+            "status": "online",
+            "data": self.device_heartbeats[device_id]
+        })
+
+manager = ConnectionManager()
+
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    await manager.connect(websocket)
+    try:
+        while True:
+            data = await websocket.receive_json()
+            if data.get("type") == "heartbeat":
+                await manager.handle_heartbeat(data.get("device_id"), data)
+            await asyncio.sleep(10)  # Send periodic updates
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)

@@ -1,6 +1,6 @@
 'use client';
 
-import { signIn } from "next-auth/react";
+import { useAuth } from "@/shared/auth/AuthContext";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 
@@ -16,19 +16,17 @@ export default function Login() {
     setLoading(true);
     setError("");
 
-    const result = await signIn("credentials", {
-      email,
-      password,
-      redirect: false,
-    });
+   const { login } = useAuth();
+
+const success = await login(email, password);
+
+if (success) {
+  router.push("/");
+} else {
+  setError("Invalid email or password");
+}
 
     setLoading(false);
-
-    if (result?.error) {
-      setError("Invalid email or password");
-    } else {
-      router.push("/dashboard");
-    }
   };
 
   return (
