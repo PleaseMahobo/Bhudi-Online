@@ -1,8 +1,8 @@
 {
   "compilerOptions": {
+    "ignoreDeprecations": "5.0",
     "baseUrl": ".",
-    "ignoreDeprecations": "6.0",
-    "paths": {
+        "paths": {
       "@/*": ["src/*"],
       "@/shared/*": ["src/shared/*"],
       "@/modules/*": ["src/modules/*"],
