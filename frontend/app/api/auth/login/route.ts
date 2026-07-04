@@ -42,7 +42,8 @@ export async function POST(request: Request) {
     const validPassword = await verifyPassword(
       parsed.data.password,
       user.passwordHash
-    );
+     );
+    
 
     if (!validPassword) {
       return NextResponse.json(
@@ -87,11 +88,13 @@ export async function POST(request: Request) {
     });
 
     return response;
-  } catch {
+  } catch (error) {
+    console.error("LOGIN ERROR:", error);
+
     return NextResponse.json(
       {
         success: false,
-        message: "Internal server error",
+        error: String(error),
       },
       { status: 500 }
     );
