@@ -69,7 +69,9 @@ if (success) {
         </form>
 
         <p className="text-center text-xs text-zinc-500 mt-8">
-          Demo Account: admin@bhudi.com / admin123
+          <p className="text-center text-xs text-zinc-500 mt-8">
+                Sign in with your BHUDI RMM account.
+          </p>
         </p>
       </div>
     </div>

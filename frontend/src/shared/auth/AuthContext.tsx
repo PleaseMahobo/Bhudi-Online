@@ -27,6 +27,11 @@ type AuthContextType = {
 
 const AuthContext = createContext<AuthContextType | null>(null);
 
+// Railway Backend URL
+const API_URL =
+  process.env.NEXT_PUBLIC_API_URL ||
+  "https://bhudi-online-production.up.railway.app";
+
 export function AuthProvider({
   children,
 }: {
@@ -37,8 +42,12 @@ export function AuthProvider({
 
   async function refreshUser() {
     try {
-      const res = await fetch("/api/auth/me", {
+      const res = await fetch(`${API_URL}/api/auth/me`, {
+        method: "GET",
         credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+        },
       });
 
       if (!res.ok) {
@@ -48,37 +57,62 @@ export function AuthProvider({
 
       const data = await res.json();
       setUser(data.user);
-    } catch {
+    } catch (error) {
+      console.error("Failed to refresh user:", error);
       setUser(null);
     }
   }
 
-  async function login(email: string, password: string) {
-    const res = await fetch("/api/auth/login", {
-      method: "POST",
-      credentials: "include",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        email,
-        password,
-      }),
-    });
+  async function login(email: string, password: string): Promise<boolean> {
+    try {
+      const res = await fetch(`${API_URL}/api/auth/login`, {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          email,
+          password,
+        }),
+      });
 
-    if (!res.ok) return false;
+      if (!res.ok) {
+        console.error("Login failed:", await res.text());
+        return false;
+      }
 
-    await refreshUser();
+      const data = await res.json();
 
-    return true;
+      // Store JWT if returned
+      if (data.access_token) {
+        localStorage.setItem("access_token", data.access_token);
+      }
+
+      if (data.user) {
+        setUser(data.user);
+      } else {
+        await refreshUser();
+      }
+
+      return true;
+    } catch (error) {
+      console.error("Login error:", error);
+      return false;
+    }
   }
 
   async function logout() {
-    await fetch("/api/auth/logout", {
-      method: "POST",
-      credentials: "include",
-    });
+    try {
+      await fetch(`${API_URL}/api/auth/logout`, {
+        method: "POST",
+        credentials: "include",
+      });
+    } catch (error) {
+      console.error("Logout error:", error);
+    }
 
+    localStorage.removeItem("access_token");
     setUser(null);
   }
 
