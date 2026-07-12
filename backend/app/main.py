@@ -8,6 +8,8 @@ import asyncio
 from app.api.v1.router import api_router
 from app.core.cors import setup_cors
 from app.core.monitor import monitor_devices
+from app.api.schema_routes import router as schema_router
+
 
 # ====================== MAIN APP ======================
 app = FastAPI(
@@ -17,6 +19,8 @@ app = FastAPI(
     docs_url="/docs",
     redoc_url="/redoc"
 )
+
+app.include_router(schema_router)
 
 # ====================== CORS ======================
 setup_cors(app)
