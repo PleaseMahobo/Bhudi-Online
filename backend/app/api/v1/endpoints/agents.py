@@ -1,27 +1,13 @@
 from fastapi import APIRouter
-from datetime import datetime
-from app.services.device_service import upsert_device
 
-router = APIRouter()
+router = APIRouter(
+    prefix="/agents",
+    tags=["Agents"],
+)
 
-@router.post("/heartbeat")
-def heartbeat(payload: dict):
 
-    device_id = payload.get("device_id")
-
-    device = {
-        "device_id": device_id,
-        "status": "online",
-        "last_seen": datetime.utcnow().isoformat(),
-        "cpu": payload.get("cpu"),
-        "ram": payload.get("ram")
-    }
-
-    upsert_device(device)
-
+@router.get("/")
+def list_agents():
     return {
-        "status": "stored",
-        "device_id": device_id
+        "message": "Agents endpoint is working"
     }
-
-    print("HEARTBEAT RECEIVED:", device)    

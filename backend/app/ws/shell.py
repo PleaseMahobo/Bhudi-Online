@@ -1,6 +1,10 @@
+from datetime import datetime
+import json
+
 from fastapi import WebSocket, WebSocketDisconnect, APIRouter
 from app.core.database import SessionLocal
 from app.models.shell_session import ShellSession
+from app.ws.agent_shell import agent_socket
 
 router = APIRouter()
 
@@ -26,23 +30,24 @@ async def shell_ws(websocket: WebSocket, session_id: str):
     try:
         while True:
             from app.ws.agent_shell import agent_socket
-import json
 
-data = await websocket.receive_text()
+            data = await websocket.receive_text()
 
-if agent_socket:
-    await agent_socket.send_text(json.dumps({
-        "session_id": session_id,
-        "command": data
-    })
-    
-    )
+            if agent_socket:
+                await agent_socket.send_text(
+                    json.dumps(
+                        {
+                            "session_id": session_id,
+                            "command": data,
+                        }
+                    )
+                )
 
-            # In REAL RMM:
-            # this is forwarded to agent via command queue or agent socket
+            # In the production RMM this will be forwarded
+            # through the command queue to the agent.
             print(f"[SHELL INPUT] {session_id}: {data}")
 
-            # echo placeholder (replace with agent response stream)
+            # Temporary echo until live shell streaming is implemented.
             await websocket.send_text(f"executed: {data}")
 
             session.last_activity = datetime.utcnow()
@@ -50,5 +55,11 @@ if agent_socket:
 
     except WebSocketDisconnect:
         active_connections.pop(session_id, None)
+
         session.status = "closed"
         db.commit()
+
+    finally:
+        db.close()
+
+

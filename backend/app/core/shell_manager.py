@@ -1,32 +1,20 @@
-from fastapi import WebSocket
+from passlib.context import CryptContext
+
+pwd_context = CryptContext(
+    schemes=["bcrypt"],
+    deprecated="auto",
+)
 
 
-class ShellManager:
-
-    def __init__(self):
-        self.agents = {}
-
-    async def connect_agent(self, device_id: str, websocket: WebSocket):
-        await websocket.accept()
-        self.agents[device_id] = websocket
-
-    def disconnect_agent(self, device_id: str):
-        if device_id in self.agents:
-            del self.agents[device_id]
-
-    async def send_command(self, device_id: str, command: str):
-
-        agent = self.agents.get(device_id)
-
-        if not agent:
-            return False
-
-        await agent.send_json({
-            "type": "command",
-            "command": command
-        })
-
-        return True
+def hash_password(password: str) -> str:
+    return pwd_context.hash(password)
 
 
-shell_manager = ShellManager()
+def verify_password(
+    plain_password: str,
+    hashed_password: str,
+) -> bool:
+    return pwd_context.verify(
+        plain_password,
+        hashed_password,
+    )

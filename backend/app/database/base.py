@@ -1,3 +1,11 @@
-from sqlalchemy.orm import declarative_base
+from sqlalchemy.orm import DeclarativeBase
 
-Base = declarative_base()
+
+class Base(DeclarativeBase):
+    """
+    Root SQLAlchemy declarative base for the entire Bhudi-Online backend.
+
+    Every ORM model in the project MUST inherit from this class.
+    """
+
+    pass

@@ -1,5 +1,5 @@
 from sqlalchemy import Column, Integer, String, DateTime
-from app.core.database import Base
+from app.database.base import Base
 from datetime import datetime
 
 class Alert(Base):

@@ -22,3 +22,25 @@ class AuthService:
     @staticmethod
     def verify(token: str):
         return verify_jwt(token)
+
+    from app.core.jwt import (
+    create_access_token,
+    create_refresh_token,
+)
+
+access_token = create_access_token(str(user.id))
+refresh_token = create_refresh_token(str(user.id))
+
+return {
+    "access_token": access_token,
+    "refresh_token": refresh_token,
+    "token_type": "bearer",
+    "user": {
+        "id": str(user.id),
+        "email": user.email,
+        "firstName": user.first_name,
+        "lastName": user.last_name,
+        "role": user.role,
+        "active": user.active,
+    },
+}

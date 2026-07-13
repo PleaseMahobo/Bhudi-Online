@@ -1,7 +1,7 @@
 from sqlalchemy import Column, Integer, String, DateTime, Text
 from datetime import datetime
 
-from app.core.database import Base
+from app.database.base import Base
 
 
 class AuditLog(Base):

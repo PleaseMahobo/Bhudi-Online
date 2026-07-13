@@ -1,32 +1,22 @@
-from tools.schema_sync import SchemaSynchronizer
+from tools.schema_sync import (
+    SchemaSynchronizer,
+    SchemaInspector,
+)
 
+from app.core.database import engine
 
 class SchemaService:
 
     def __init__(self):
         self.synchronizer = SchemaSynchronizer()
+        self.inspector = SchemaInspector(engine)
 
     def get_status(self):
         # Temporary schemas until we connect the real DB introspection
-        source_schema = {
-            "devices": {
-                "id": "uuid",
-                "hostname": "string"
-            },
-            "users": {
-                "id": "uuid"
-            }
-        }
+        current_schema = self.inspector.inspect()
 
-        target_schema = {
-            "devices": {
-                "id": "uuid",
-                "hostname": "string"
-            },
-            "users": {
-                "id": "uuid"
-            }
-        }
+        source_schema = current_schema
+        target_schema = current_schema
 
         result = self.synchronizer.analyze(
             source_schema,

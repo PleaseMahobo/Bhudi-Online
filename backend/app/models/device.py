@@ -1,5 +1,5 @@
 from sqlalchemy import Column, String, Integer, DateTime
-from app.core.database import Base
+from app.database.base import Base
 
 class Device(Base):
     __tablename__ = "devices"
