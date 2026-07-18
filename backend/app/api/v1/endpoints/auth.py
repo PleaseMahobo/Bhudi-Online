@@ -1,11 +1,11 @@
-from fastapi import (
+from fastapi import (  # type: ignore[import]
     APIRouter,
     Depends,
     HTTPException,
     Response,
     status,
 )
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session  # type: ignore[import]
 
 from app.database.session import get_db
 from app.core.dependencies import get_current_user

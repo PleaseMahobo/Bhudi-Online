@@ -65,7 +65,7 @@ export function AuthProvider({
 
   async function login(email: string, password: string): Promise<boolean> {
     try {
-      const res = await fetch(`${API_URL}/api/auth/login`, {
+      const res = await fetch(`${API_URL}/api/v1/auth/login`, {
         method: "POST",
         credentials: "include",
         headers: {
