@@ -1,11 +1,12 @@
-from fastapi import (  # type: ignore[import]
+from fastapi import (
     APIRouter,
     Depends,
-    HTTPException,
     Response,
+    Request,
     status,
 )
-from sqlalchemy.orm import Session  # type: ignore[import]
+
+from sqlalchemy.orm import Session
 
 from app.database.session import get_db
 from app.core.dependencies import get_current_user
@@ -23,11 +24,44 @@ from app.schemas.auth import (
 
 from app.services.auth_service import AuthService
 
+
 router = APIRouter(
     prefix="/auth",
     tags=["Authentication"],
 )
 
+
+
+def set_auth_cookies(
+    response: Response,
+    access_token: str,
+    refresh_token: str,
+):
+
+    response.set_cookie(
+        key="access_token",
+        value=access_token,
+        httponly=True,
+        secure=True,
+        samesite="lax",
+        max_age=60 * 15,
+    )
+
+
+    response.set_cookie(
+        key="refresh_token",
+        value=refresh_token,
+        httponly=True,
+        secure=True,
+        samesite="lax",
+        max_age=60 * 60 * 24 * 30,
+    )
+
+
+
+# -------------------------------------------------
+# REGISTER
+# -------------------------------------------------
 
 @router.post(
     "/register",
@@ -41,24 +75,18 @@ def register(
 
     service = AuthService(db)
 
-    try:
+    return service.register(
+        email=request.email,
+        password=request.password,
+        first_name=request.first_name,
+        last_name=request.last_name,
+    )
 
-        user = service.register(
-            email=request.email,
-            password=request.password,
-            first_name=request.first_name,
-            last_name=request.last_name,
-        )
 
-        return user
 
-    except ValueError as exc:
-
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(exc),
-        )
-
+# -------------------------------------------------
+# LOGIN
+# -------------------------------------------------
 
 @router.post(
     "/login",
@@ -72,38 +100,30 @@ def login(
 
     service = AuthService(db)
 
-    result = service.authenticate(
+
+    user = service.authenticate(
         request.email,
         request.password,
     )
 
-    if result is None:
 
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid email or password",
-        )
+    tokens = service.login(user)
 
-    response.set_cookie(
-        key="access_token",
-        value=result["access_token"],
-        httponly=True,
-        secure=True,
-        samesite="lax",
-        max_age=60 * 15,
+
+    set_auth_cookies(
+        response,
+        tokens["access_token"],
+        tokens["refresh_token"],
     )
 
-    response.set_cookie(
-        key="refresh_token",
-        value=result["refresh_token"],
-        httponly=True,
-        secure=True,
-        samesite="lax",
-        max_age=60 * 60 * 24 * 30,
-    )
 
-    return result
+    return tokens
 
+
+
+# -------------------------------------------------
+# CURRENT USER
+# -------------------------------------------------
 
 @router.get(
     "/me",
@@ -116,63 +136,99 @@ def me(
     return current_user
 
 
+
+# -------------------------------------------------
+# REFRESH TOKEN
+# -------------------------------------------------
+
 @router.post(
     "/refresh",
     response_model=TokenResponse,
 )
 def refresh(
-    request: RefreshTokenRequest,
+    request: Request,
     response: Response,
+    body: RefreshTokenRequest | None = None,
     db: Session = Depends(get_db),
 ):
 
     service = AuthService(db)
 
-    result = service.refresh_access_token(
-        request.refresh_token
+
+    refresh_token = (
+        request.cookies.get(
+            "refresh_token"
+        )
     )
 
-    if result is None:
+
+    if not refresh_token and body:
+        refresh_token = body.refresh_token
+
+
+    if not refresh_token:
+
+        from fastapi import HTTPException
 
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid refresh token",
+            status_code=401,
+            detail="Refresh token missing",
         )
 
-    response.set_cookie(
-        key="access_token",
-        value=result["access_token"],
-        httponly=True,
-        secure=True,
-        samesite="lax",
-        max_age=60 * 15,
+
+    tokens = service.refresh_access_token(
+        refresh_token
     )
 
-    response.set_cookie(
-        key="refresh_token",
-        value=result["refresh_token"],
-        httponly=True,
-        secure=True,
-        samesite="lax",
-        max_age=60 * 60 * 24 * 30,
+
+    set_auth_cookies(
+        response,
+        tokens["access_token"],
+        tokens["refresh_token"],
     )
 
-    return result
 
+    return tokens
+
+
+
+# -------------------------------------------------
+# LOGOUT
+# -------------------------------------------------
 
 @router.post(
     "/logout",
     response_model=MessageResponse,
 )
 def logout(
+    request: Request,
     response: Response,
     db: Session = Depends(get_db),
 ):
 
-    AuthService(db).logout()
+    service = AuthService(db)
 
-    response.delete_cookie("access_token")
-    response.delete_cookie("refresh_token")
+
+    refresh_token = request.cookies.get(
+        "refresh_token"
+    )
+
+
+    if refresh_token:
+
+        service.logout(
+            refresh_token
+        )
+
+
+    response.delete_cookie(
+        "access_token"
+    )
+
+    response.delete_cookie(
+        "refresh_token"
+    )
+
 
     return MessageResponse(
         message="Logged out successfully"

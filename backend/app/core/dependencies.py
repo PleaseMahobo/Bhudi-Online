@@ -1,64 +1,141 @@
-from fastapi import Depends, HTTPException, status
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from jose import JWTError
+from __future__ import annotations
+
+from fastapi import (
+    Depends,
+    HTTPException,
+    Request,
+    status,
+)
+
 from sqlalchemy.orm import Session
 
-from app.core.jwt import verify_access_token
 from app.database.session import get_db
+from app.core.jwt import get_subject
 from app.repositories.user_repository import UserRepository
-from app.models.user import User
 
-# Bearer authentication for Swagger and API clients
-security = HTTPBearer(auto_error=True)
+
+
+def get_access_token(
+    request: Request,
+) -> str:
+
+    """
+    Extract JWT access token.
+
+    Priority:
+    1. Authorization Bearer header
+    2. HttpOnly access_token cookie
+
+    Supports:
+    - Browser clients
+    - API clients
+    """
+
+
+    # ----------------------------------------
+    # 1. Authorization Header
+    # ----------------------------------------
+
+    authorization = request.headers.get(
+        "Authorization"
+    )
+
+
+    if authorization:
+
+        scheme, _, token = authorization.partition(
+            " "
+        )
+
+
+        if scheme.lower() == "bearer" and token:
+
+            return token
+
+
+
+    # ----------------------------------------
+    # 2. Browser Cookie
+    # ----------------------------------------
+
+    cookie_token = request.cookies.get(
+        "access_token"
+    )
+
+
+    if cookie_token:
+
+        return cookie_token
+
+
+
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Authentication credentials missing",
+        headers={
+            "WWW-Authenticate": "Bearer"
+        },
+    )
+
+
 
 
 def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(security),
+    token: str = Depends(get_access_token),
     db: Session = Depends(get_db),
-) -> User:
+):
+
     """
-    Resolve the currently authenticated user from a Bearer JWT.
+    Resolve authenticated user from JWT.
+
+    Supports:
+    - Authorization header
+    - Secure HttpOnly cookie
     """
 
-    token = credentials.credentials
 
     try:
-        payload = verify_access_token(token)
 
-    except JWTError:
+        user_id = get_subject(token)
+
+
+    except Exception:
+
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired access token",
+            detail="Invalid authentication credentials",
+            headers={
+                "WWW-Authenticate": "Bearer"
+            },
         )
 
-    user = UserRepository(db).get_by_id(payload["sub"])
+
+
+    repository = UserRepository(db)
+
+
+    user = repository.get_by_id(
+        user_id
+    )
+
 
     if user is None:
+
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="User not found",
         )
 
+
+
+    # Existing Bhudi schema uses "active"
     if not user.active:
+
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="User account is disabled",
         )
 
+
+
     return user
-
-
-def get_current_admin(
-    current_user: User = Depends(get_current_user),
-) -> User:
-    """
-    Require an administrator account.
-    """
-
-    if current_user.role.lower() != "admin":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Administrator privileges required",
-        )
-
-    return current_user

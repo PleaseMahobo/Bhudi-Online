@@ -1,295 +1,352 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timezone
 
-from jose import JWTError
+from fastapi import HTTPException, status
+from sqlalchemy.orm import Session
 
 from app.core.jwt import (
     create_access_token,
     create_refresh_token,
-    get_refresh_token_details,
     verify_refresh_token,
+    get_refresh_token_details,
 )
 
 from app.core.security import (
     hash_password,
-    hash_refresh_token,
     verify_password,
+    hash_refresh_token,
 )
 
-from app.models.refresh_token import RefreshToken
 from app.models.user import User
+from app.models.refresh_token import RefreshToken
 
+from app.repositories.user_repository import UserRepository
 from app.repositories.refresh_token_repository import (
     RefreshTokenRepository,
 )
-from app.repositories.user_repository import UserRepository
 
 
 class AuthService:
-    def __init__(self, db):
+    """
+    Enterprise authentication service.
+
+    Responsibilities:
+    - User registration
+    - Credential validation
+    - JWT issuance
+    - Refresh token rotation
+    - Logout/revocation
+
+    Does NOT:
+    - Manage JWT internals
+    - Manage password hashing algorithms
+    - Execute raw SQL
+    """
+
+    def __init__(self, db: Session):
+
         self.db = db
-        self.users = UserRepository(db)
-        self.refresh_tokens = RefreshTokenRepository(db)
 
-    # =====================================================
-    # Internal helpers
-    # =====================================================
+        self.user_repository = UserRepository(db)
 
-    def _build_refresh_record(
-        self,
-        *,
-        user: User,
-        refresh_token: str,
-        token_family: str,
-        generation: int = 1,
-        ip_address: str | None = None,
-        user_agent: str | None = None,
-        device_name: str | None = None,
-    ) -> RefreshToken:
+        self.refresh_repository = RefreshTokenRepository(db)
 
-        details = get_refresh_token_details(refresh_token)
 
-        return RefreshToken(
-            user_id=user.id,
-            token_hash=hash_refresh_token(refresh_token),
-            jwt_id=details["jwt_id"],
-            session_id=details["session_id"],
-            token_family=token_family,
-            generation=generation,
-            expires_at=details["expires_at"],
-            ip_address=ip_address,
-            user_agent=user_agent,
-            device_name=device_name,
-        )
-
-    def _issue_token_pair(
-        self,
-        user: User,
-    ):
-
-        refresh = create_refresh_token(
-            str(user.id),
-        )
-
-        access = create_access_token(
-            str(user.id),
-        )
-
-        family = str(uuid.uuid4())
-
-        refresh_record = self._build_refresh_record(
-            user=user,
-            refresh_token=refresh,
-            token_family=family,
-            generation=1,
-        )
-
-        self.refresh_tokens.create(refresh_record)
-
-        return {
-            "access_token": access,
-            "refresh_token": refresh,
-            "token_type": "bearer",
-            "user": user,
-        }
-
-    # =====================================================
-    # Register
-    # =====================================================
+    # ---------------------------------------------------------
+    # REGISTER
+    # ---------------------------------------------------------
 
     def register(
         self,
         email: str,
         password: str,
-        first_name: str,
-        last_name: str,
+        first_name: str | None = None,
+        last_name: str | None = None,
     ) -> User:
 
-        email = email.lower().strip()
-
-        existing = self.users.get_by_email(email)
-
-        if existing:
-            raise ValueError("Email already exists")
-
-        user = User(
-            email=email,
-            password_hash=hash_password(password),
-            first_name=first_name.strip(),
-            last_name=last_name.strip(),
-            role="admin",
-            active=True,
+        existing_user = (
+            self.user_repository
+            .get_by_email(email)
         )
 
-        return self.users.create(user)
+        if existing_user:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Unable to create account",
+            )
 
-    # =====================================================
-    # Login
-    # =====================================================
+
+        user = User(
+            id=uuid.uuid4(),
+            email=email.lower().strip(),
+            password_hash=hash_password(password),
+            first_name=first_name,
+            last_name=last_name,
+            role="user",
+            is_active=True,
+        )
+
+
+        try:
+
+            self.user_repository.create(user)
+
+            self.db.commit()
+
+            self.db.refresh(user)
+
+            return user
+
+
+        except Exception:
+
+            self.db.rollback()
+
+            raise
+
+
+
+    # ---------------------------------------------------------
+    # AUTHENTICATE
+    # ---------------------------------------------------------
 
     def authenticate(
         self,
         email: str,
         password: str,
-    ):
+    ) -> User:
 
-        email = email.lower().strip()
 
-        user = self.users.get_by_email(email)
+        user = (
+            self.user_repository
+            .get_by_email(email.lower().strip())
+        )
 
-        if user is None:
-            return None
 
-        if not user.active:
-            return None
+        if not user:
+
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid email or password",
+            )
+
+
+        if not user.is_active:
+
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Account disabled",
+            )
+
 
         if not verify_password(
             password,
             user.password_hash,
         ):
-            return None
 
-        return self._issue_token_pair(user)
-    
-        # =====================================================
-    # Current User
-    # =====================================================
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid email or password",
+            )
 
-    def get_current_user(
-        self,
-        user_id: str,
-    ):
-
-        user = self.users.get_by_id(user_id)
-
-        if user is None:
-            return None
-
-        if not user.active:
-            return None
 
         return user
-    
-    # =====================================================
-    # Refresh Token Rotation
-    # =====================================================
+
+
+
+    # ---------------------------------------------------------
+    # LOGIN TOKEN CREATION
+    # ---------------------------------------------------------
+
+    def login(
+        self,
+        user: User,
+    ) -> dict:
+
+
+        access_token = create_access_token(
+            subject=str(user.id),
+        )
+
+
+        refresh_token = create_refresh_token(
+            subject=str(user.id),
+        )
+
+
+        refresh_details = get_refresh_token_details(
+            refresh_token
+        )
+
+
+        token_record = RefreshToken(
+
+            id=uuid.uuid4(),
+
+            user_id=user.id,
+
+            token_hash=hash_refresh_token(
+                refresh_token
+            ),
+
+            expires_at=refresh_details["expires"],
+
+            revoked=False,
+
+        )
+
+
+        try:
+
+            self.refresh_repository.create(
+                token_record
+            )
+
+            self.db.commit()
+
+
+        except Exception:
+
+            self.db.rollback()
+
+            raise
+
+
+
+        return {
+
+            "access_token": access_token,
+
+            "refresh_token": refresh_token,
+
+            "token_type": "bearer",
+
+            "user": user,
+
+        }
+
+
+
+    # ---------------------------------------------------------
+    # REFRESH TOKEN ROTATION
+    # ---------------------------------------------------------
 
     def refresh_access_token(
         self,
         refresh_token: str,
-    ):
+    ) -> dict:
 
-        try:
-            verify_refresh_token(refresh_token)
 
-        except JWTError:
-            return None
-
-        token_hash = hash_refresh_token(refresh_token)
-
-        stored = self.refresh_tokens.get_by_token_hash(
-            token_hash
+        payload = verify_refresh_token(
+            refresh_token
         )
 
-        if stored is None:
-            return None
+
+        user_id = payload.get("sub")
+
+
+        if not user_id:
+
+            raise HTTPException(
+                status_code=401,
+                detail="Invalid refresh token",
+            )
+
+
+
+        stored = (
+            self.refresh_repository
+            .get_by_hash(
+                hash_refresh_token(refresh_token)
+            )
+        )
+
+
+        if not stored:
+
+            raise HTTPException(
+                status_code=401,
+                detail="Invalid refresh token",
+            )
+
 
         if stored.revoked:
 
-            # Reuse detection
-            self.refresh_tokens.revoke_token_family(
-                stored.token_family,
-                reason="refresh_token_reuse",
+            raise HTTPException(
+                status_code=401,
+                detail="Refresh token revoked",
             )
 
-            return None
 
-        if stored.is_expired:
-            return None
+        if stored.expires_at < datetime.now(
+            timezone.utc
+        ):
 
-        user = self.get_current_user(
-            str(stored.user_id)
+            raise HTTPException(
+                status_code=401,
+                detail="Refresh token expired",
+            )
+
+
+        user = (
+            self.user_repository
+            .get_by_id(
+                uuid.UUID(user_id)
+            )
         )
 
-        if user is None:
-            return None
 
-        access = create_access_token(
-            str(user.id),
-            session_id=stored.session_id,
-        )
+        if not user:
 
-        refresh = create_refresh_token(
-            str(user.id),
-            session_id=stored.session_id,
-        )
+            raise HTTPException(
+                status_code=401,
+                detail="User not found",
+            )
 
-        new_record = self._build_refresh_record(
-            user=user,
-            refresh_token=refresh,
-            token_family=stored.token_family,
-            generation=stored.generation + 1,
-            ip_address=stored.ip_address,
-            user_agent=stored.user_agent,
-            device_name=stored.device_name,
-        )
 
-        self.refresh_tokens.rotate(
-            stored,
-            new_record,
-        )
+        # Rotate token
 
-        return {
-            "access_token": access,
-            "refresh_token": refresh,
-            "token_type": "bearer",
-            "user": user,
-        }
-    # =====================================================
-    # Logout
-    # =====================================================
+        stored.revoked = True
+
+        new_tokens = self.login(user)
+
+
+        self.db.commit()
+
+
+        return new_tokens
+
+
+
+    # ---------------------------------------------------------
+    # LOGOUT
+    # ---------------------------------------------------------
 
     def logout(
         self,
         refresh_token: str,
-    ) -> bool:
+    ) -> None:
+
 
         token_hash = hash_refresh_token(
             refresh_token
         )
 
-        token = self.refresh_tokens.get_by_token_hash(
-            token_hash
+
+        stored = (
+            self.refresh_repository
+            .get_by_hash(token_hash)
         )
 
-        if token is None:
-            return False
 
-        self.refresh_tokens.revoke(
-            token,
-            reason="logout",
-        )
+        if stored:
 
-        return True
+            stored.revoked = True
 
-    # =====================================================
-    # Logout All Sessions
-    # =====================================================
+            stored.revoked_at = (
+                datetime.now(timezone.utc)
+            )
 
-    def logout_all(
-        self,
-        user_id: str,
-    ) -> bool:
-
-        user = self.get_current_user(user_id)
-
-        if user is None:
-            return False
-
-        self.refresh_tokens.revoke_all_for_user(
-            user.id,
-            reason="logout_all",
-        )
-
-        return True
+            self.db.commit()

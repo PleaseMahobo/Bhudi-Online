@@ -68,11 +68,11 @@ if (success) {
           </button>
         </form>
 
-        <p className="text-center text-xs text-zinc-500 mt-8">
+        <div className="text-center text-xs text-zinc-500 mt-8">
           <p className="text-center text-xs text-zinc-500 mt-8">
                 Sign in with your BHUDI RMM account.
           </p>
-        </p>
+        </div>
       </div>
     </div>
   );
