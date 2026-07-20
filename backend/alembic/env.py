@@ -6,6 +6,12 @@ from alembic import context
 from dotenv import load_dotenv
 from sqlalchemy import engine_from_config, pool
 
+import app.models
+
+from app.models.base import Base
+
+target_metadata = Base.metadata
+
 # Make backend package importable
 sys.path.insert(
     0,

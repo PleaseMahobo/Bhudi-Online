@@ -1,0 +1,2231 @@
+{
+  "actions": {
+    "columns": [
+      {
+        "name": "id",
+        "type": "UUID",
+        "nullable": false,
+        "default": "gen_random_uuid()",
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "device_id",
+        "type": "UUID",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "tenant_id",
+        "type": "UUID",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "type",
+        "type": "TEXT",
+        "nullable": false,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "payload",
+        "type": "JSONB",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "status",
+        "type": "TEXT",
+        "nullable": true,
+        "default": "'pending'::text",
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "result",
+        "type": "TEXT",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "created_at",
+        "type": "TIMESTAMP",
+        "nullable": true,
+        "default": "now()",
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "completed_at",
+        "type": "TIMESTAMP",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      }
+    ],
+    "primary_key": {
+      "constrained_columns": [
+        "id"
+      ],
+      "name": "actions_pkey",
+      "comment": null,
+      "dialect_options": {
+        "postgresql_include": []
+      }
+    },
+    "foreign_keys": [
+      {
+        "name": "actions_device_id_fkey",
+        "constrained_columns": [
+          "device_id"
+        ],
+        "referred_schema": null,
+        "referred_table": "devices",
+        "referred_columns": [
+          "id"
+        ],
+        "options": {},
+        "comment": null
+      }
+    ],
+    "indexes": [],
+    "unique_constraints": [],
+    "check_constraints": []
+  },
+  "agents": {
+    "columns": [
+      {
+        "name": "id",
+        "type": "UUID",
+        "nullable": false,
+        "default": "gen_random_uuid()",
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "hostname",
+        "type": "TEXT",
+        "nullable": false,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "ip_address",
+        "type": "TEXT",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "status",
+        "type": "TEXT",
+        "nullable": true,
+        "default": "'offline'::text",
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "last_seen",
+        "type": "TIMESTAMP",
+        "nullable": true,
+        "default": "now()",
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "tenant_id",
+        "type": "UUID",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      }
+    ],
+    "primary_key": {
+      "constrained_columns": [
+        "id"
+      ],
+      "name": "agents_pkey",
+      "comment": null,
+      "dialect_options": {
+        "postgresql_include": []
+      }
+    },
+    "foreign_keys": [
+      {
+        "name": "agents_tenant_id_fkey",
+        "constrained_columns": [
+          "tenant_id"
+        ],
+        "referred_schema": null,
+        "referred_table": "tenants",
+        "referred_columns": [
+          "id"
+        ],
+        "options": {},
+        "comment": null
+      }
+    ],
+    "indexes": [],
+    "unique_constraints": [],
+    "check_constraints": []
+  },
+  "alembic_version": {
+    "columns": [
+      {
+        "name": "version_num",
+        "type": "VARCHAR(32)",
+        "nullable": false,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      }
+    ],
+    "primary_key": {
+      "constrained_columns": [
+        "version_num"
+      ],
+      "name": "alembic_version_pkc",
+      "comment": null,
+      "dialect_options": {
+        "postgresql_include": []
+      }
+    },
+    "foreign_keys": [],
+    "indexes": [],
+    "unique_constraints": [],
+    "check_constraints": []
+  },
+  "alerts": {
+    "columns": [
+      {
+        "name": "id",
+        "type": "UUID",
+        "nullable": false,
+        "default": "gen_random_uuid()",
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "device_id",
+        "type": "UUID",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "tenant_id",
+        "type": "UUID",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "type",
+        "type": "TEXT",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "severity",
+        "type": "TEXT",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "message",
+        "type": "TEXT",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "resolved",
+        "type": "BOOLEAN",
+        "nullable": true,
+        "default": "false",
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "created_at",
+        "type": "TIMESTAMP",
+        "nullable": true,
+        "default": "now()",
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "threat_score",
+        "type": "INTEGER",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "mitre_id",
+        "type": "TEXT",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "mitre_name",
+        "type": "TEXT",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "incident_id",
+        "type": "UUID",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      }
+    ],
+    "primary_key": {
+      "constrained_columns": [
+        "id"
+      ],
+      "name": "alerts_pkey",
+      "comment": null,
+      "dialect_options": {
+        "postgresql_include": []
+      }
+    },
+    "foreign_keys": [
+      {
+        "name": "alerts_device_id_fkey",
+        "constrained_columns": [
+          "device_id"
+        ],
+        "referred_schema": null,
+        "referred_table": "devices",
+        "referred_columns": [
+          "id"
+        ],
+        "options": {},
+        "comment": null
+      },
+      {
+        "name": "alerts_tenant_id_fkey",
+        "constrained_columns": [
+          "tenant_id"
+        ],
+        "referred_schema": null,
+        "referred_table": "tenants",
+        "referred_columns": [
+          "id"
+        ],
+        "options": {},
+        "comment": null
+      }
+    ],
+    "indexes": [],
+    "unique_constraints": [],
+    "check_constraints": []
+  },
+  "audit_trail": {
+    "columns": [
+      {
+        "name": "id",
+        "type": "UUID",
+        "nullable": false,
+        "default": "gen_random_uuid()",
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "tenant_id",
+        "type": "UUID",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "user_id",
+        "type": "UUID",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "action",
+        "type": "TEXT",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "resource",
+        "type": "TEXT",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "details",
+        "type": "JSONB",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "created_at",
+        "type": "TIMESTAMP",
+        "nullable": true,
+        "default": "now()",
+        "autoincrement": false,
+        "comment": null
+      }
+    ],
+    "primary_key": {
+      "constrained_columns": [
+        "id"
+      ],
+      "name": "audit_trail_pkey",
+      "comment": null,
+      "dialect_options": {
+        "postgresql_include": []
+      }
+    },
+    "foreign_keys": [],
+    "indexes": [],
+    "unique_constraints": [],
+    "check_constraints": []
+  },
+  "automation_log": {
+    "columns": [
+      {
+        "name": "id",
+        "type": "UUID",
+        "nullable": false,
+        "default": "gen_random_uuid()",
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "incident_id",
+        "type": "UUID",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "action",
+        "type": "TEXT",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "result",
+        "type": "TEXT",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "created_at",
+        "type": "TIMESTAMP",
+        "nullable": true,
+        "default": "now()",
+        "autoincrement": false,
+        "comment": null
+      }
+    ],
+    "primary_key": {
+      "constrained_columns": [
+        "id"
+      ],
+      "name": "automation_log_pkey",
+      "comment": null,
+      "dialect_options": {
+        "postgresql_include": []
+      }
+    },
+    "foreign_keys": [],
+    "indexes": [],
+    "unique_constraints": [],
+    "check_constraints": []
+  },
+  "commands": {
+    "columns": [
+      {
+        "name": "id",
+        "type": "UUID",
+        "nullable": false,
+        "default": "gen_random_uuid()",
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "device_id",
+        "type": "UUID",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "command",
+        "type": "TEXT",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "args",
+        "type": "JSONB",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "status",
+        "type": "TEXT",
+        "nullable": true,
+        "default": "'pending'::text",
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "output",
+        "type": "TEXT",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "created_at",
+        "type": "TIMESTAMP",
+        "nullable": true,
+        "default": "now()",
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "executed_at",
+        "type": "TIMESTAMP",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      }
+    ],
+    "primary_key": {
+      "constrained_columns": [
+        "id"
+      ],
+      "name": "commands_pkey",
+      "comment": null,
+      "dialect_options": {
+        "postgresql_include": []
+      }
+    },
+    "foreign_keys": [],
+    "indexes": [],
+    "unique_constraints": [],
+    "check_constraints": []
+  },
+  "compliance_reports": {
+    "columns": [
+      {
+        "name": "id",
+        "type": "UUID",
+        "nullable": false,
+        "default": "gen_random_uuid()",
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "tenant_id",
+        "type": "UUID",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "framework",
+        "type": "TEXT",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "generated_by",
+        "type": "TEXT",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "report_data",
+        "type": "JSONB",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "created_at",
+        "type": "TIMESTAMP",
+        "nullable": true,
+        "default": "now()",
+        "autoincrement": false,
+        "comment": null
+      }
+    ],
+    "primary_key": {
+      "constrained_columns": [
+        "id"
+      ],
+      "name": "compliance_reports_pkey",
+      "comment": null,
+      "dialect_options": {
+        "postgresql_include": []
+      }
+    },
+    "foreign_keys": [],
+    "indexes": [],
+    "unique_constraints": [],
+    "check_constraints": []
+  },
+  "device_events": {
+    "columns": [
+      {
+        "name": "id",
+        "type": "BIGINT",
+        "nullable": false,
+        "default": "nextval('device_events_id_seq'::regclass)",
+        "autoincrement": true,
+        "comment": null
+      },
+      {
+        "name": "device_id",
+        "type": "UUID",
+        "nullable": false,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "tenant_id",
+        "type": "UUID",
+        "nullable": false,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "event_type",
+        "type": "TEXT",
+        "nullable": false,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "cpu_usage",
+        "type": "REAL",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "ram_usage",
+        "type": "REAL",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "disk_usage",
+        "type": "REAL",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "network_in",
+        "type": "REAL",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "network_out",
+        "type": "REAL",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "status",
+        "type": "TEXT",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "created_at",
+        "type": "TIMESTAMP",
+        "nullable": true,
+        "default": "now()",
+        "autoincrement": false,
+        "comment": null
+      }
+    ],
+    "primary_key": {
+      "constrained_columns": [
+        "id"
+      ],
+      "name": "device_events_pkey",
+      "comment": null,
+      "dialect_options": {
+        "postgresql_include": []
+      }
+    },
+    "foreign_keys": [
+      {
+        "name": "device_events_device_id_fkey",
+        "constrained_columns": [
+          "device_id"
+        ],
+        "referred_schema": null,
+        "referred_table": "devices",
+        "referred_columns": [
+          "id"
+        ],
+        "options": {
+          "ondelete": "CASCADE"
+        },
+        "comment": null
+      },
+      {
+        "name": "device_events_tenant_id_fkey",
+        "constrained_columns": [
+          "tenant_id"
+        ],
+        "referred_schema": null,
+        "referred_table": "tenants",
+        "referred_columns": [
+          "id"
+        ],
+        "options": {
+          "ondelete": "CASCADE"
+        },
+        "comment": null
+      }
+    ],
+    "indexes": [
+      {
+        "name": "idx_events_device",
+        "unique": false,
+        "column_names": [
+          "device_id"
+        ],
+        "include_columns": [],
+        "dialect_options": {
+          "postgresql_include": []
+        }
+      },
+      {
+        "name": "idx_events_tenant",
+        "unique": false,
+        "column_names": [
+          "tenant_id"
+        ],
+        "include_columns": [],
+        "dialect_options": {
+          "postgresql_include": []
+        }
+      },
+      {
+        "name": "idx_events_time",
+        "unique": false,
+        "column_names": [
+          "created_at"
+        ],
+        "column_sorting": {
+          "created_at": [
+            "desc"
+          ]
+        },
+        "include_columns": [],
+        "dialect_options": {
+          "postgresql_include": []
+        }
+      },
+      {
+        "name": "idx_events_type",
+        "unique": false,
+        "column_names": [
+          "event_type"
+        ],
+        "include_columns": [],
+        "dialect_options": {
+          "postgresql_include": []
+        }
+      }
+    ],
+    "unique_constraints": [],
+    "check_constraints": []
+  },
+  "device_heartbeats": {
+    "columns": [
+      {
+        "name": "id",
+        "type": "UUID",
+        "nullable": false,
+        "default": "gen_random_uuid()",
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "device_id",
+        "type": "UUID",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "status",
+        "type": "TEXT",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "cpu",
+        "type": "NUMERIC",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "ram",
+        "type": "NUMERIC",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "disk",
+        "type": "NUMERIC",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "ip",
+        "type": "TEXT",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "timestamp",
+        "type": "TIMESTAMP",
+        "nullable": true,
+        "default": "now()",
+        "autoincrement": false,
+        "comment": null
+      }
+    ],
+    "primary_key": {
+      "constrained_columns": [
+        "id"
+      ],
+      "name": "device_heartbeats_pkey",
+      "comment": null,
+      "dialect_options": {
+        "postgresql_include": []
+      }
+    },
+    "foreign_keys": [
+      {
+        "name": "device_heartbeats_device_id_fkey",
+        "constrained_columns": [
+          "device_id"
+        ],
+        "referred_schema": null,
+        "referred_table": "devices",
+        "referred_columns": [
+          "id"
+        ],
+        "options": {},
+        "comment": null
+      }
+    ],
+    "indexes": [],
+    "unique_constraints": [],
+    "check_constraints": []
+  },
+  "device_metrics": {
+    "columns": [
+      {
+        "name": "id",
+        "type": "UUID",
+        "nullable": false,
+        "default": "gen_random_uuid()",
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "device_id",
+        "type": "UUID",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "cpu_usage",
+        "type": "NUMERIC",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "ram_usage",
+        "type": "NUMERIC",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "disk_usage",
+        "type": "NUMERIC",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "recorded_at",
+        "type": "TIMESTAMP",
+        "nullable": true,
+        "default": "now()",
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "tenant_id",
+        "type": "UUID",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      }
+    ],
+    "primary_key": {
+      "constrained_columns": [
+        "id"
+      ],
+      "name": "device_metrics_pkey",
+      "comment": null,
+      "dialect_options": {
+        "postgresql_include": []
+      }
+    },
+    "foreign_keys": [
+      {
+        "name": "device_metrics_device_id_fkey",
+        "constrained_columns": [
+          "device_id"
+        ],
+        "referred_schema": null,
+        "referred_table": "devices",
+        "referred_columns": [
+          "id"
+        ],
+        "options": {},
+        "comment": null
+      }
+    ],
+    "indexes": [],
+    "unique_constraints": [],
+    "check_constraints": []
+  },
+  "devices": {
+    "columns": [
+      {
+        "name": "hostname",
+        "type": "TEXT",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "ip",
+        "type": "TEXT",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "status",
+        "type": "TEXT",
+        "nullable": true,
+        "default": "'offline'::text",
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "cpu",
+        "type": "INTEGER",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "ram",
+        "type": "INTEGER",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "disk",
+        "type": "INTEGER",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "agent_version",
+        "type": "TEXT",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "last_seen",
+        "type": "TIMESTAMP",
+        "nullable": true,
+        "default": "now()",
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "created_at",
+        "type": "TIMESTAMP",
+        "nullable": true,
+        "default": "now()",
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "id",
+        "type": "UUID",
+        "nullable": false,
+        "default": "gen_random_uuid()",
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "tenant_id",
+        "type": "UUID",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "agent_token",
+        "type": "TEXT",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "consecutive_misses",
+        "type": "INTEGER",
+        "nullable": true,
+        "default": "0",
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "health_score",
+        "type": "INTEGER",
+        "nullable": true,
+        "default": "100",
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "missed_heartbeats",
+        "type": "INTEGER",
+        "nullable": true,
+        "default": "0",
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "ip_address",
+        "type": "TEXT",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "os",
+        "type": "TEXT",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "version",
+        "type": "TEXT",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      }
+    ],
+    "primary_key": {
+      "constrained_columns": [
+        "id"
+      ],
+      "name": "devices_pkey",
+      "comment": null,
+      "dialect_options": {
+        "postgresql_include": []
+      }
+    },
+    "foreign_keys": [
+      {
+        "name": "devices_tenant_id_fkey",
+        "constrained_columns": [
+          "tenant_id"
+        ],
+        "referred_schema": null,
+        "referred_table": "tenants",
+        "referred_columns": [
+          "id"
+        ],
+        "options": {},
+        "comment": null
+      }
+    ],
+    "indexes": [
+      {
+        "name": "idx_devices_health",
+        "unique": false,
+        "column_names": [
+          "health_score"
+        ],
+        "include_columns": [],
+        "dialect_options": {
+          "postgresql_include": []
+        }
+      },
+      {
+        "name": "idx_devices_last_seen",
+        "unique": false,
+        "column_names": [
+          "last_seen"
+        ],
+        "include_columns": [],
+        "dialect_options": {
+          "postgresql_include": []
+        }
+      },
+      {
+        "name": "idx_devices_status",
+        "unique": false,
+        "column_names": [
+          "status"
+        ],
+        "include_columns": [],
+        "dialect_options": {
+          "postgresql_include": []
+        }
+      },
+      {
+        "name": "idx_devices_tenant",
+        "unique": false,
+        "column_names": [
+          "tenant_id"
+        ],
+        "include_columns": [],
+        "dialect_options": {
+          "postgresql_include": []
+        }
+      }
+    ],
+    "unique_constraints": [],
+    "check_constraints": []
+  },
+  "events": {
+    "columns": [
+      {
+        "name": "id",
+        "type": "UUID",
+        "nullable": false,
+        "default": "gen_random_uuid()",
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "device_id",
+        "type": "TEXT",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "event_type",
+        "type": "TEXT",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "severity",
+        "type": "TEXT",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "source",
+        "type": "TEXT",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "message",
+        "type": "TEXT",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "raw_data",
+        "type": "JSONB",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "created_at",
+        "type": "TIMESTAMP",
+        "nullable": true,
+        "default": "now()",
+        "autoincrement": false,
+        "comment": null
+      }
+    ],
+    "primary_key": {
+      "constrained_columns": [
+        "id"
+      ],
+      "name": "events_pkey",
+      "comment": null,
+      "dialect_options": {
+        "postgresql_include": []
+      }
+    },
+    "foreign_keys": [],
+    "indexes": [],
+    "unique_constraints": [],
+    "check_constraints": []
+  },
+  "file_tasks": {
+    "columns": [
+      {
+        "name": "id",
+        "type": "UUID",
+        "nullable": false,
+        "default": "gen_random_uuid()",
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "device_id",
+        "type": "TEXT",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "file_url",
+        "type": "TEXT",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "destination",
+        "type": "TEXT",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "status",
+        "type": "TEXT",
+        "nullable": true,
+        "default": "'pending'::text",
+        "autoincrement": false,
+        "comment": null
+      }
+    ],
+    "primary_key": {
+      "constrained_columns": [
+        "id"
+      ],
+      "name": "file_tasks_pkey",
+      "comment": null,
+      "dialect_options": {
+        "postgresql_include": []
+      }
+    },
+    "foreign_keys": [],
+    "indexes": [],
+    "unique_constraints": [],
+    "check_constraints": []
+  },
+  "hunt_results": {
+    "columns": [
+      {
+        "name": "id",
+        "type": "UUID",
+        "nullable": false,
+        "default": "gen_random_uuid()",
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "hunt_id",
+        "type": "UUID",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "device_id",
+        "type": "TEXT",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "matched",
+        "type": "BOOLEAN",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "evidence",
+        "type": "JSONB",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "created_at",
+        "type": "TIMESTAMP",
+        "nullable": true,
+        "default": "now()",
+        "autoincrement": false,
+        "comment": null
+      }
+    ],
+    "primary_key": {
+      "constrained_columns": [
+        "id"
+      ],
+      "name": "hunt_results_pkey",
+      "comment": null,
+      "dialect_options": {
+        "postgresql_include": []
+      }
+    },
+    "foreign_keys": [],
+    "indexes": [],
+    "unique_constraints": [],
+    "check_constraints": []
+  },
+  "incident_timeline": {
+    "columns": [
+      {
+        "name": "id",
+        "type": "UUID",
+        "nullable": false,
+        "default": "gen_random_uuid()",
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "incident_id",
+        "type": "UUID",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "device_id",
+        "type": "TEXT",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "event_type",
+        "type": "TEXT",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "source",
+        "type": "TEXT",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "message",
+        "type": "TEXT",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "severity",
+        "type": "TEXT",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "raw_data",
+        "type": "JSONB",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "created_at",
+        "type": "TIMESTAMP",
+        "nullable": true,
+        "default": "now()",
+        "autoincrement": false,
+        "comment": null
+      }
+    ],
+    "primary_key": {
+      "constrained_columns": [
+        "id"
+      ],
+      "name": "incident_timeline_pkey",
+      "comment": null,
+      "dialect_options": {
+        "postgresql_include": []
+      }
+    },
+    "foreign_keys": [],
+    "indexes": [],
+    "unique_constraints": [],
+    "check_constraints": []
+  },
+  "incidents": {
+    "columns": [
+      {
+        "name": "id",
+        "type": "UUID",
+        "nullable": false,
+        "default": "gen_random_uuid()",
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "device_id",
+        "type": "TEXT",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "title",
+        "type": "TEXT",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "severity",
+        "type": "TEXT",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "threat_score",
+        "type": "INTEGER",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "status",
+        "type": "TEXT",
+        "nullable": true,
+        "default": "'open'::text",
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "summary",
+        "type": "TEXT",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "created_at",
+        "type": "TIMESTAMP",
+        "nullable": true,
+        "default": "now()",
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "updated_at",
+        "type": "TIMESTAMP",
+        "nullable": true,
+        "default": "now()",
+        "autoincrement": false,
+        "comment": null
+      }
+    ],
+    "primary_key": {
+      "constrained_columns": [
+        "id"
+      ],
+      "name": "incidents_pkey",
+      "comment": null,
+      "dialect_options": {
+        "postgresql_include": []
+      }
+    },
+    "foreign_keys": [],
+    "indexes": [],
+    "unique_constraints": [],
+    "check_constraints": []
+  },
+  "profiles": {
+    "columns": [
+      {
+        "name": "id",
+        "type": "UUID",
+        "nullable": false,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "tenant_id",
+        "type": "UUID",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "email",
+        "type": "TEXT",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "role",
+        "type": "TEXT",
+        "nullable": true,
+        "default": "'technician'::text",
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "created_at",
+        "type": "TIMESTAMP",
+        "nullable": true,
+        "default": "now()",
+        "autoincrement": false,
+        "comment": null
+      }
+    ],
+    "primary_key": {
+      "constrained_columns": [
+        "id"
+      ],
+      "name": "profiles_pkey",
+      "comment": null,
+      "dialect_options": {
+        "postgresql_include": []
+      }
+    },
+    "foreign_keys": [
+      {
+        "name": "profiles_id_fkey",
+        "constrained_columns": [
+          "id"
+        ],
+        "referred_schema": "auth",
+        "referred_table": "users",
+        "referred_columns": [
+          "id"
+        ],
+        "options": {},
+        "comment": null
+      },
+      {
+        "name": "profiles_tenant_id_fkey",
+        "constrained_columns": [
+          "tenant_id"
+        ],
+        "referred_schema": null,
+        "referred_table": "tenants",
+        "referred_columns": [
+          "id"
+        ],
+        "options": {},
+        "comment": null
+      }
+    ],
+    "indexes": [],
+    "unique_constraints": [],
+    "check_constraints": []
+  },
+  "response_actions": {
+    "columns": [
+      {
+        "name": "id",
+        "type": "UUID",
+        "nullable": false,
+        "default": "gen_random_uuid()",
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "incident_id",
+        "type": "UUID",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "device_id",
+        "type": "TEXT",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "action",
+        "type": "TEXT",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "status",
+        "type": "TEXT",
+        "nullable": true,
+        "default": "'pending'::text",
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "initiated_by",
+        "type": "TEXT",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "output",
+        "type": "TEXT",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "created_at",
+        "type": "TIMESTAMP",
+        "nullable": true,
+        "default": "now()",
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "completed_at",
+        "type": "TIMESTAMP",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      }
+    ],
+    "primary_key": {
+      "constrained_columns": [
+        "id"
+      ],
+      "name": "response_actions_pkey",
+      "comment": null,
+      "dialect_options": {
+        "postgresql_include": []
+      }
+    },
+    "foreign_keys": [],
+    "indexes": [],
+    "unique_constraints": [],
+    "check_constraints": []
+  },
+  "script_tasks": {
+    "columns": [
+      {
+        "name": "id",
+        "type": "UUID",
+        "nullable": false,
+        "default": "gen_random_uuid()",
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "script_id",
+        "type": "UUID",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "device_id",
+        "type": "TEXT",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "status",
+        "type": "TEXT",
+        "nullable": true,
+        "default": "'pending'::text",
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "output",
+        "type": "TEXT",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "created_at",
+        "type": "TIMESTAMP",
+        "nullable": true,
+        "default": "now()",
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "executed_at",
+        "type": "TIMESTAMP",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      }
+    ],
+    "primary_key": {
+      "constrained_columns": [
+        "id"
+      ],
+      "name": "script_tasks_pkey",
+      "comment": null,
+      "dialect_options": {
+        "postgresql_include": []
+      }
+    },
+    "foreign_keys": [],
+    "indexes": [],
+    "unique_constraints": [],
+    "check_constraints": []
+  },
+  "scripts": {
+    "columns": [
+      {
+        "name": "id",
+        "type": "UUID",
+        "nullable": false,
+        "default": "gen_random_uuid()",
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "name",
+        "type": "TEXT",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "content",
+        "type": "TEXT",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "shell",
+        "type": "TEXT",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "created_at",
+        "type": "TIMESTAMP",
+        "nullable": true,
+        "default": "now()",
+        "autoincrement": false,
+        "comment": null
+      }
+    ],
+    "primary_key": {
+      "constrained_columns": [
+        "id"
+      ],
+      "name": "scripts_pkey",
+      "comment": null,
+      "dialect_options": {
+        "postgresql_include": []
+      }
+    },
+    "foreign_keys": [],
+    "indexes": [],
+    "unique_constraints": [],
+    "check_constraints": []
+  },
+  "telemetry": {
+    "columns": [
+      {
+        "name": "id",
+        "type": "BIGINT",
+        "nullable": false,
+        "default": "nextval('telemetry_id_seq'::regclass)",
+        "autoincrement": true,
+        "comment": null
+      },
+      {
+        "name": "agent_id",
+        "type": "TEXT",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "cpu_usage",
+        "type": "DOUBLE PRECISION",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "memory_usage",
+        "type": "DOUBLE PRECISION",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "disk_usage",
+        "type": "DOUBLE PRECISION",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "uptime",
+        "type": "BIGINT",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "created_at",
+        "type": "TIMESTAMP",
+        "nullable": true,
+        "default": "now()",
+        "autoincrement": false,
+        "comment": null
+      }
+    ],
+    "primary_key": {
+      "constrained_columns": [
+        "id"
+      ],
+      "name": "telemetry_pkey",
+      "comment": null,
+      "dialect_options": {
+        "postgresql_include": []
+      }
+    },
+    "foreign_keys": [],
+    "indexes": [],
+    "unique_constraints": [],
+    "check_constraints": []
+  },
+  "tenants": {
+    "columns": [
+      {
+        "name": "id",
+        "type": "UUID",
+        "nullable": false,
+        "default": "gen_random_uuid()",
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "name",
+        "type": "TEXT",
+        "nullable": false,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "created_at",
+        "type": "TIMESTAMP",
+        "nullable": true,
+        "default": "now()",
+        "autoincrement": false,
+        "comment": null
+      }
+    ],
+    "primary_key": {
+      "constrained_columns": [
+        "id"
+      ],
+      "name": "tenants_pkey",
+      "comment": null,
+      "dialect_options": {
+        "postgresql_include": []
+      }
+    },
+    "foreign_keys": [],
+    "indexes": [],
+    "unique_constraints": [],
+    "check_constraints": []
+  },
+  "threat_hunts": {
+    "columns": [
+      {
+        "name": "id",
+        "type": "UUID",
+        "nullable": false,
+        "default": "gen_random_uuid()",
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "name",
+        "type": "TEXT",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "hunt_type",
+        "type": "TEXT",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "indicator",
+        "type": "TEXT",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "status",
+        "type": "TEXT",
+        "nullable": true,
+        "default": "'pending'::text",
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "created_by",
+        "type": "TEXT",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "created_at",
+        "type": "TIMESTAMP",
+        "nullable": true,
+        "default": "now()",
+        "autoincrement": false,
+        "comment": null
+      }
+    ],
+    "primary_key": {
+      "constrained_columns": [
+        "id"
+      ],
+      "name": "threat_hunts_pkey",
+      "comment": null,
+      "dialect_options": {
+        "postgresql_include": []
+      }
+    },
+    "foreign_keys": [],
+    "indexes": [],
+    "unique_constraints": [],
+    "check_constraints": []
+  },
+  "users": {
+    "columns": [
+      {
+        "name": "id",
+        "type": "UUID",
+        "nullable": false,
+        "default": "gen_random_uuid()",
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "email",
+        "type": "TEXT",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "role",
+        "type": "TEXT",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "tenant_id",
+        "type": "UUID",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "created_at",
+        "type": "TIMESTAMP",
+        "nullable": true,
+        "default": "now()",
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "password_hash",
+        "type": "VARCHAR(255)",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "first_name",
+        "type": "VARCHAR(100)",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "last_name",
+        "type": "VARCHAR(100)",
+        "nullable": true,
+        "default": null,
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "active",
+        "type": "BOOLEAN",
+        "nullable": false,
+        "default": "true",
+        "autoincrement": false,
+        "comment": null
+      },
+      {
+        "name": "updated_at",
+        "type": "TIMESTAMP",
+        "nullable": true,
+        "default": "now()",
+        "autoincrement": false,
+        "comment": null
+      }
+    ],
+    "primary_key": {
+      "constrained_columns": [
+        "id"
+      ],
+      "name": "users_pkey",
+      "comment": null,
+      "dialect_options": {
+        "postgresql_include": []
+      }
+    },
+    "foreign_keys": [],
+    "indexes": [
+      {
+        "name": "users_email_key",
+        "unique": true,
+        "column_names": [
+          "email"
+        ],
+        "duplicates_constraint": "users_email_key",
+        "include_columns": [],
+        "dialect_options": {
+          "postgresql_include": []
+        }
+      }
+    ],
+    "unique_constraints": [
+      {
+        "column_names": [
+          "email"
+        ],
+        "name": "users_email_key",
+        "comment": null,
+        "dialect_options": {
+          "postgresql_include": [],
+          "postgresql_nulls_not_distinct": false
+        }
+      }
+    ],
+    "check_constraints": []
+  }
+}

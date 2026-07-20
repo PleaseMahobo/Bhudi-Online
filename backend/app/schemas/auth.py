@@ -1,3 +1,4 @@
+from uuid import UUID
 from pydantic import BaseModel, EmailStr, Field, ConfigDict
 
 
@@ -34,7 +35,7 @@ class RefreshTokenRequest(BaseModel):
 # ==========================================================
 
 class UserResponse(BaseModel):
-    id: str
+    id: UUID
     email: EmailStr
     first_name: str
     last_name: str

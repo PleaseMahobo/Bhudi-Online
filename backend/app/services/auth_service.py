@@ -74,7 +74,7 @@ class AuthService:
         if existing_user:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Unable to create account",
+                detail="Email address is already registered",
             )
 
 
@@ -85,7 +85,7 @@ class AuthService:
             first_name=first_name,
             last_name=last_name,
             role="user",
-            is_active=True,
+            active=True,
         )
 
 
@@ -133,7 +133,7 @@ class AuthService:
             )
 
 
-        if not user.is_active:
+        if not user.active:
 
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,

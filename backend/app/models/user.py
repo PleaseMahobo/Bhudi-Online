@@ -1,73 +1,100 @@
+from __future__ import annotations
+
 import uuid
 from datetime import datetime
+from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, Column, DateTime, String
-from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import relationship
+from sqlalchemy import Boolean, ForeignKey, String, Text, func
+from sqlalchemy.dialects.postgresql import TIMESTAMP, UUID
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.database.base import Base
+from app.database.session import Base
+
+if TYPE_CHECKING:
+    from .refresh_token import RefreshToken
+    from .tenant import Tenant
 
 
 class User(Base):
     __tablename__ = "users"
 
-    id = Column(
+    id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         primary_key=True,
-        default=uuid.uuid4,
+        server_default=func.gen_random_uuid(),
     )
 
-    email = Column(
-        String(255),
+    email: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
         unique=True,
-        nullable=False,
-        index=True,
     )
 
-    password_hash = Column(
+    role: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+
+    tenant_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("tenants.id"),
+        nullable=True,
+    )
+
+    created_at: Mapped[datetime | None] = mapped_column(
+        TIMESTAMP,
+        nullable=True,
+        server_default=func.now(),
+    )
+
+    password_hash: Mapped[str | None] = mapped_column(
         String(255),
-        nullable=False,
+        nullable=True,
     )
 
-    first_name = Column(
+    first_name: Mapped[str | None] = mapped_column(
         String(100),
-        nullable=False,
+        nullable=True,
     )
 
-    last_name = Column(
+    last_name: Mapped[str | None] = mapped_column(
         String(100),
-        nullable=False,
+        nullable=True,
     )
 
-    role = Column(
-        String(50),
-        nullable=False,
-        default="technician",
-    )
-
-    active = Column(
+    active: Mapped[bool] = mapped_column(
         Boolean,
         nullable=False,
-        default=True,
+        server_default="true",
     )
 
-    created_at = Column(
-        DateTime,
-        nullable=False,
-        default=datetime.utcnow,
+    updated_at: Mapped[datetime | None] = mapped_column(
+        TIMESTAMP,
+        nullable=True,
+        server_default=func.now(),
     )
 
-    updated_at = Column(
-        DateTime,
-        nullable=False,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
+    tenant: Mapped["Tenant | None"] = relationship(
+        back_populates="users",
     )
 
-    refresh_tokens = relationship(
-        "RefreshToken",
+    refresh_tokens: Mapped[list["RefreshToken"]] = relationship(
         back_populates="user",
         cascade="all, delete-orphan",
         passive_deletes=True,
-        order_by="RefreshToken.created_at.desc()",
     )
+
+    @property
+    def full_name(self) -> str:
+        first = self.first_name or ""
+        last = self.last_name or ""
+        return f"{first} {last}".strip()
+
+    def __repr__(self) -> str:
+        return (
+            f"<User("
+            f"id={self.id}, "
+            f"email={self.email!r}, "
+            f"role={self.role!r}"
+            f")>"
+        )
