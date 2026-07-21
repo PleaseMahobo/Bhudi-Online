@@ -2,52 +2,66 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from typing import Any
-
-from jose import jwt, JWTError
+from uuid import uuid4
 
 from fastapi import HTTPException, status
+from jose import JWTError, jwt
 
 from app.core.config import settings
 
-
-
 ALGORITHM = settings.JWT_ALGORITHM
-
 SECRET_KEY = settings.JWT_SECRET_KEY
 
 
+# ==========================================================
+# Internal Helpers
+# ==========================================================
 
-# --------------------------------------------------
-# Internal token creator
-# --------------------------------------------------
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
 
 def _create_token(
+    *,
     subject: str,
     token_type: str,
     expires_delta: timedelta,
+    session_id: str | None = None,
+    token_family: str | None = None,
+    generation: int = 1,
+    jwt_id: str | None = None,
 ) -> str:
+    """
+    Enterprise JWT creator.
 
+    Access tokens contain:
+        sub
+        type
+        jti
+        iat
+        exp
 
-    now = datetime.now(
-        timezone.utc
-    )
+    Refresh tokens additionally contain:
+        sid
+        fam
+        gen
+    """
 
+    now = _utcnow()
 
     payload: dict[str, Any] = {
-
         "sub": subject,
-
         "type": token_type,
-
-        "iat": now,
-
-        "exp": now + expires_delta,
-
-        "jti": subject + "-" + str(
-            int(now.timestamp())
-        ),
+        "iat": int(now.timestamp()),
+        "exp": int((now + expires_delta).timestamp()),
+        "jti": jwt_id or str(uuid4()),
     }
 
+    if token_type == "refresh":
+        payload["sid"] = session_id or str(uuid4())
+        payload["fam"] = token_family or str(uuid4())
+        payload["gen"] = generation
 
     return jwt.encode(
         payload,
@@ -56,15 +70,15 @@ def _create_token(
     )
 
 
+# ==========================================================
+# Token Creation
+# ==========================================================
 
-# --------------------------------------------------
-# Access token
-# --------------------------------------------------
 
 def create_access_token(
+    *,
     subject: str,
 ) -> str:
-
 
     return _create_token(
         subject=subject,
@@ -75,15 +89,13 @@ def create_access_token(
     )
 
 
-
-# --------------------------------------------------
-# Refresh token
-# --------------------------------------------------
-
 def create_refresh_token(
+    *,
     subject: str,
+    session_id: str | None = None,
+    token_family: str | None = None,
+    generation: int = 1,
 ) -> str:
-
 
     return _create_token(
         subject=subject,
@@ -91,13 +103,35 @@ def create_refresh_token(
         expires_delta=timedelta(
             days=settings.JWT_REFRESH_EXPIRE_DAYS
         ),
+        session_id=session_id,
+        token_family=token_family,
+        generation=generation,
     )
 
 
+def rotate_refresh_token(
+    *,
+    subject: str,
+    session_id: str,
+    token_family: str,
+    generation: int,
+) -> str:
+    """
+    Issue the next refresh token in an existing token family.
+    """
 
-# --------------------------------------------------
-# Decode JWT
-# --------------------------------------------------
+    return create_refresh_token(
+        subject=subject,
+        session_id=session_id,
+        token_family=token_family,
+        generation=generation + 1,
+    )
+
+
+# ==========================================================
+# Decode
+# ==========================================================
+
 
 def decode_token(
     token: str,
@@ -105,17 +139,11 @@ def decode_token(
 
     try:
 
-        payload = jwt.decode(
+        return jwt.decode(
             token,
             SECRET_KEY,
-            algorithms=[
-                ALGORITHM
-            ],
+            algorithms=[ALGORITHM],
         )
-
-
-        return payload
-
 
     except JWTError:
 
@@ -125,116 +153,93 @@ def decode_token(
         )
 
 
+# ==========================================================
+# Validation
+# ==========================================================
 
-# --------------------------------------------------
-# Extract user ID
-# --------------------------------------------------
 
 def get_subject(
     token: str,
 ) -> str:
 
+    payload = decode_token(token)
 
-    payload = decode_token(
-        token
-    )
-
-
-    token_type = payload.get(
-        "type"
-    )
-
-
-    if token_type != "access":
+    if payload.get("type") != "access":
 
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
+            status_code=401,
             detail="Invalid access token",
         )
 
-
-    subject = payload.get(
-        "sub"
-    )
-
+    subject = payload.get("sub")
 
     if not subject:
 
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
+            status_code=401,
             detail="Invalid token subject",
         )
 
-
     return subject
 
-
-
-# --------------------------------------------------
-# Refresh token validation
-# --------------------------------------------------
 
 def verify_refresh_token(
     token: str,
 ) -> dict[str, Any]:
 
+    payload = decode_token(token)
 
-    payload = decode_token(
-        token
-    )
-
-
-    if payload.get(
-        "type"
-    ) != "refresh":
-
+    if payload.get("type") != "refresh":
 
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
+            status_code=401,
             detail="Invalid refresh token",
         )
 
+    required = (
+        "sub",
+        "jti",
+        "sid",
+        "fam",
+        "gen",
+        "exp",
+    )
 
-    if not payload.get(
-        "sub"
-    ):
+    missing = [
+        key
+        for key in required
+        if payload.get(key) is None
+    ]
 
+    if missing:
 
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid token subject",
+            status_code=401,
+            detail=f"Refresh token missing claims: {', '.join(missing)}",
         )
-
 
     return payload
 
 
+# ==========================================================
+# Metadata
+# ==========================================================
 
-# --------------------------------------------------
-# Refresh token metadata
-# --------------------------------------------------
 
 def get_refresh_token_details(
     token: str,
 ) -> dict[str, Any]:
 
-
-    payload = verify_refresh_token(
-        token
-    )
-
+    payload = verify_refresh_token(token)
 
     return {
-
         "user_id": payload["sub"],
-
+        "jwt_id": payload["jti"],
+        "session_id": payload["sid"],
+        "token_family": payload["fam"],
+        "generation": int(payload["gen"]),
         "expires": datetime.fromtimestamp(
             payload["exp"],
             tz=timezone.utc,
         ),
-
-        "jti": payload.get(
-            "jti"
-        ),
-
     }

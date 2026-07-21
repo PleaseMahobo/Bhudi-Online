@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
 
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
@@ -9,6 +8,7 @@ from sqlalchemy.orm import Session
 from app.core.jwt import (
     create_access_token,
     create_refresh_token,
+    rotate_refresh_token,
     verify_refresh_token,
     get_refresh_token_details,
 )
@@ -32,17 +32,15 @@ class AuthService:
     """
     Enterprise authentication service.
 
-    Responsibilities:
-    - User registration
-    - Credential validation
-    - JWT issuance
-    - Refresh token rotation
-    - Logout/revocation
-
-    Does NOT:
-    - Manage JWT internals
-    - Manage password hashing algorithms
-    - Execute raw SQL
+    Responsibilities
+    ----------------
+    • User registration
+    • Authentication
+    • Login
+    • Refresh token rotation
+    • Replay detection
+    • Logout
+    • Logout-all
     """
 
     def __init__(self, db: Session):
@@ -53,10 +51,9 @@ class AuthService:
 
         self.refresh_repository = RefreshTokenRepository(db)
 
-
-    # ---------------------------------------------------------
-    # REGISTER
-    # ---------------------------------------------------------
+    # =====================================================
+    # Registration
+    # =====================================================
 
     def register(
         self,
@@ -66,28 +63,33 @@ class AuthService:
         last_name: str | None = None,
     ) -> User:
 
-        existing_user = (
-            self.user_repository
-            .get_by_email(email)
-        )
+        email = email.lower().strip()
 
-        if existing_user:
+        existing = self.user_repository.get_by_email(email)
+
+        if existing:
+
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Email address is already registered",
             )
 
-
         user = User(
+
             id=uuid.uuid4(),
-            email=email.lower().strip(),
+
+            email=email,
+
             password_hash=hash_password(password),
+
             first_name=first_name,
+
             last_name=last_name,
+
             role="user",
+
             active=True,
         )
-
 
         try:
 
@@ -99,18 +101,15 @@ class AuthService:
 
             return user
 
-
         except Exception:
 
             self.db.rollback()
 
             raise
 
-
-
-    # ---------------------------------------------------------
-    # AUTHENTICATE
-    # ---------------------------------------------------------
+    # =====================================================
+    # Authentication
+    # =====================================================
 
     def authenticate(
         self,
@@ -118,20 +117,16 @@ class AuthService:
         password: str,
     ) -> User:
 
-
-        user = (
-            self.user_repository
-            .get_by_email(email.lower().strip())
+        user = self.user_repository.get_by_email(
+            email.lower().strip()
         )
 
-
-        if not user:
+        if user is None:
 
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid email or password",
             )
-
 
         if not user.active:
 
@@ -139,7 +134,6 @@ class AuthService:
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Account disabled",
             )
-
 
         if not verify_password(
             password,
@@ -151,35 +145,36 @@ class AuthService:
                 detail="Invalid email or password",
             )
 
-
         return user
-
-
-
-    # ---------------------------------------------------------
-    # LOGIN TOKEN CREATION
-    # ---------------------------------------------------------
+    
+    # =====================================================
+    # Login
+    # =====================================================
 
     def login(
         self,
         user: User,
+        *,
+        ip_address: str | None = None,
+        user_agent: str | None = None,
+        device_name: str | None = None,
     ) -> dict:
 
-
-        access_token = create_access_token(
-            subject=str(user.id),
-        )
-
+        #
+        # First login in a new session
+        #
 
         refresh_token = create_refresh_token(
             subject=str(user.id),
         )
 
-
         refresh_details = get_refresh_token_details(
             refresh_token
         )
 
+        access_token = create_access_token(
+            subject=str(user.id),
+        )
 
         token_record = RefreshToken(
 
@@ -191,29 +186,47 @@ class AuthService:
                 refresh_token
             ),
 
+            jwt_id=refresh_details["jwt_id"],
+
+            session_id=refresh_details["session_id"],
+
+            token_family=refresh_details["token_family"],
+
+            generation=refresh_details["generation"],
+
             expires_at=refresh_details["expires"],
 
             revoked=False,
 
+            ip_address=ip_address,
+
+            user_agent=user_agent,
+
+            device_name=device_name,
         )
 
-
         try:
+
+            #
+            # Repository persists the token.
+            #
 
             self.refresh_repository.create(
                 token_record
             )
 
-            self.db.commit()
+            #
+            # Repository refreshes the entity,
+            # so only one commit is required.
+            #
 
+            self.db.commit()
 
         except Exception:
 
             self.db.rollback()
 
             raise
-
-
 
         return {
 
@@ -225,128 +238,258 @@ class AuthService:
 
             "user": user,
 
+            "session_id": refresh_details["session_id"],
+
+            "token_family": refresh_details["token_family"],
         }
 
-
-
-    # ---------------------------------------------------------
-    # REFRESH TOKEN ROTATION
-    # ---------------------------------------------------------
+    # =====================================================
+    # Refresh Token Rotation
+    # =====================================================
 
     def refresh_access_token(
         self,
         refresh_token: str,
     ) -> dict:
+        """
+        Enterprise refresh token rotation.
 
+        Workflow
+        --------
+        1. Verify JWT signature and expiry.
+        2. Lookup stored refresh token.
+        3. Detect replay/reuse.
+        4. Rotate refresh token.
+        5. Issue new access token.
+        6. Commit atomically.
+        """
 
-        payload = verify_refresh_token(
+        payload = verify_refresh_token(refresh_token)
+
+        token_details = get_refresh_token_details(
             refresh_token
         )
 
-
-        user_id = payload.get("sub")
-
-
-        if not user_id:
-
-            raise HTTPException(
-                status_code=401,
-                detail="Invalid refresh token",
-            )
-
-
-
-        stored = (
-            self.refresh_repository
-            .get_by_hash(
-                hash_refresh_token(refresh_token)
-            )
+        token_hash = hash_refresh_token(
+            refresh_token
         )
 
+        try:
 
-        if not stored:
+            with self.db.begin():
 
-            raise HTTPException(
-                status_code=401,
-                detail="Invalid refresh token",
-            )
+                stored = (
+                    self.refresh_repository
+                    .get_active_token(token_hash)
+                )
 
+                if stored is None:
 
-        if stored.revoked:
+                    raise HTTPException(
+                        status_code=status.HTTP_401_UNAUTHORIZED,
+                        detail="Refresh token not recognized",
+                    )
 
-            raise HTTPException(
-                status_code=401,
-                detail="Refresh token revoked",
-            )
+                #
+                # Replay detection
+                #
 
+                if stored.revoked:
 
-        if stored.expires_at < datetime.now(
-            timezone.utc
-        ):
+                    raise HTTPException(
+                        status_code=status.HTTP_401_UNAUTHORIZED,
+                        detail="Refresh token revoked",
+                    )
 
-            raise HTTPException(
-                status_code=401,
-                detail="Refresh token expired",
-            )
+                if stored.is_expired:
 
+                    raise HTTPException(
+                        status_code=status.HTTP_401_UNAUTHORIZED,
+                        detail="Refresh token expired",
+                    )
 
-        user = (
-            self.user_repository
-            .get_by_id(
-                uuid.UUID(user_id)
-            )
-        )
+                #
+                # Rotation replay detection
+                #
 
+                if stored.replaced_by_token_id is not None:
 
-        if not user:
+                    self.refresh_repository.revoke_token_family(
+                        stored.token_family,
+                        reason="refresh_token_reuse_detected",
+                    )
 
-            raise HTTPException(
-                status_code=401,
-                detail="User not found",
-            )
+                    raise HTTPException(
+                        status_code=status.HTTP_401_UNAUTHORIZED,
+                        detail="Refresh token reuse detected",
+                    )
 
+                #
+                # Load user
+                #
 
-        # Rotate token
+                user = (
+                    self.user_repository
+                    .get_by_id(
+                        uuid.UUID(payload["sub"])
+                    )
+                )
 
-        stored.revoked = True
+                if user is None:
 
-        new_tokens = self.login(user)
+                    raise HTTPException(
+                        status_code=status.HTTP_401_UNAUTHORIZED,
+                        detail="User no longer exists",
+                    )
 
+                if not user.active:
 
-        self.db.commit()
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="Account disabled",
+                    )
 
+                #
+                # Update usage timestamp
+                #
 
-        return new_tokens
+                self.refresh_repository.update_last_used(
+                    stored
+                )
 
+                #
+                # Create replacement tokens
+                #
 
+                new_access_token = create_access_token(
+                    subject=str(user.id),
+                )
 
-    # ---------------------------------------------------------
-    # LOGOUT
-    # ---------------------------------------------------------
+                new_refresh_token = create_refresh_token(
+                    subject=str(user.id),
+                    session_id=stored.session_id,
+                    token_family=stored.token_family,
+                    generation=stored.generation + 1,
+                )
+
+                new_details = get_refresh_token_details(
+                    new_refresh_token
+                )
+                
+                                #
+                # Persist replacement token
+                #
+
+                replacement = RefreshToken(
+
+                    id=uuid.uuid4(),
+
+                    user_id=user.id,
+
+                    token_hash=hash_refresh_token(
+                        new_refresh_token
+                    ),
+
+                    jwt_id=new_details["jti"],
+
+                    session_id=stored.session_id,
+
+                    token_family=stored.token_family,
+
+                    generation=stored.generation + 1,
+
+                    expires_at=new_details["expires"],
+
+                    revoked=False,
+
+                    ip_address=stored.ip_address,
+
+                    user_agent=stored.user_agent,
+
+                    device_name=stored.device_name,
+                )
+
+                self.refresh_repository.rotate(
+                    old_token=stored,
+                    new_token=replacement,
+                )
+
+                return {
+
+                    "access_token": new_access_token,
+
+                    "refresh_token": new_refresh_token,
+
+                    "token_type": "bearer",
+
+                    "user": user,
+                }
+
+        except HTTPException:
+            raise
+
+        except Exception:
+
+            self.db.rollback()
+
+            raise
+
+    # =====================================================
+    # Logout
+    # =====================================================
 
     def logout(
         self,
         refresh_token: str,
     ) -> None:
 
-
         token_hash = hash_refresh_token(
             refresh_token
         )
 
-
         stored = (
             self.refresh_repository
-            .get_by_hash(token_hash)
+            .get_by_token_hash(token_hash)
         )
 
+        if stored is None:
+            return
 
-        if stored:
+        try:
 
-            stored.revoked = True
-
-            stored.revoked_at = (
-                datetime.now(timezone.utc)
+            self.refresh_repository.revoke(
+                stored,
+                reason="logout",
             )
 
             self.db.commit()
+
+        except Exception:
+
+            self.db.rollback()
+
+            raise
+
+    # =====================================================
+    # Logout All Sessions
+    # =====================================================
+
+    def logout_all(
+        self,
+        user: User,
+    ) -> None:
+
+        try:
+
+            self.refresh_repository.revoke_all_for_user(
+                user.id,
+                reason="logout_all",
+            )
+
+            self.db.commit()
+
+        except Exception:
+
+            self.db.rollback()
+
+            raise

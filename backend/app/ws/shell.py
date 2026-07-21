@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 import json
 
 from fastapi import WebSocket, WebSocketDisconnect, APIRouter
@@ -50,7 +50,7 @@ async def shell_ws(websocket: WebSocket, session_id: str):
             # Temporary echo until live shell streaming is implemented.
             await websocket.send_text(f"executed: {data}")
 
-            session.last_activity = datetime.utcnow()
+            session.last_activity = datetime.now(timezone.utc)
             db.commit()
 
     except WebSocketDisconnect:

@@ -9,6 +9,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
 
+# cspell:ignore ondelete
 
 class Profile(Base):
     __tablename__ = "profiles"

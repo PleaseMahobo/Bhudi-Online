@@ -1,6 +1,6 @@
 from sqlalchemy import Column, String, DateTime, Text
 from app.models.base import Base
-from datetime import datetime
+from datetime import datetime, timezone
 import uuid
 
 
@@ -12,5 +12,12 @@ class ShellSession(Base):
 
     status = Column(String, default="active")  # active, closed
 
-    created_at = Column(DateTime, default=datetime.utcnow)
-    last_activity = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(
+    DateTime(timezone=True),
+    default=lambda: datetime.now(timezone.utc),
+)
+
+last_activity = Column(
+    DateTime(timezone=True),
+    default=lambda: datetime.now(timezone.utc),
+)

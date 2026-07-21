@@ -1,5 +1,5 @@
 from sqlalchemy import Column, Integer, String, DateTime, Text
-from datetime import datetime
+from datetime import datetime, timezone
 
 from app.models.base import Base
 
@@ -15,4 +15,7 @@ class AuditLog(Base):
 
     payload = Column(Text)
 
-    timestamp = Column(DateTime, default=datetime.utcnow)
+    timestamp = Column(
+    DateTime(timezone=True),
+    default=lambda: datetime.now(timezone.utc),
+)

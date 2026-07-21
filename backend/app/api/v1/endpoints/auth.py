@@ -63,24 +63,24 @@ def set_auth_cookies(
 # -------------------------------------------------
 
 @router.post(
-    "/register",
-    response_model=UserResponse,
-    status_code=status.HTTP_201_CREATED,
+    "/refresh",
+    response_model=TokenResponse,
 )
-def register(
-    request: RegisterRequest,
+def refresh_access_token(
+    request: RefreshTokenRequest,
     db: Session = Depends(get_db),
 ):
+    """
+    Rotate a refresh token and issue a new access token.
 
-    service = AuthService(db)
+    All business logic is delegated to AuthService.
+    """
 
-    return service.register(
-        email=request.email,
-        password=request.password,
-        first_name=request.first_name,
-        last_name=request.last_name,
+    auth_service = AuthService(db)
+
+    return auth_service.refresh_access_token(
+        request.refresh_token,
     )
-
 
 
 # -------------------------------------------------

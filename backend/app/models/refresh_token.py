@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import (
     Boolean,
@@ -89,25 +89,25 @@ class RefreshToken(Base):
     # =====================================================
 
     expires_at = Column(
-        DateTime,
+        DateTime(timezone=True),
         nullable=False,
     )
 
     created_at = Column(
-        DateTime,
+        DateTime(timezone=True),
         nullable=False,
-        default=datetime.utcnow,
+        default=lambda: datetime.now(timezone.utc),
     )
 
     updated_at = Column(
-        DateTime,
+        DateTime(timezone=True),
         nullable=False,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
     )
 
     last_used_at = Column(
-        DateTime,
+        DateTime(timezone=True),
         nullable=True,
     )
 
@@ -122,7 +122,7 @@ class RefreshToken(Base):
     )
 
     revoked_at = Column(
-        DateTime,
+        DateTime(timezone=True),
         nullable=True,
     )
 
@@ -181,12 +181,12 @@ class RefreshToken(Base):
     def is_active(self) -> bool:
         return (
             not self.revoked
-            and self.expires_at > datetime.utcnow()
+            and self.expires_at > datetime.now(timezone.utc)
         )
 
     @property
     def is_expired(self) -> bool:
-        return datetime.utcnow() >= self.expires_at
+        return datetime.now(timezone.utc) >= self.expires_at
 
     @property
     def is_replaced(self) -> bool:
@@ -197,12 +197,12 @@ class RefreshToken(Base):
     # =====================================================
 
     def mark_used(self) -> None:
-        self.last_used_at = datetime.utcnow()
+        self.last_used_at = datetime.now(timezone.utc)
 
     def revoke(
         self,
         reason: str | None = None,
     ) -> None:
         self.revoked = True
-        self.revoked_at = datetime.utcnow()
+        self.revoked_at = datetime.now(timezone.utc)
         self.revoked_reason = reason
