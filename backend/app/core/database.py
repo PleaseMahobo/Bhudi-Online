@@ -10,7 +10,7 @@ This module exists so older modules continue to work while the
 project is migrated to the standardized database package.
 """
 
-from app.database.base import Base
+from app.models.base import Base
 from app.database.session import (
     engine,
     SessionLocal,

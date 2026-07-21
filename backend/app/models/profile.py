@@ -7,15 +7,15 @@ from sqlalchemy import ForeignKey, Text, text
 from sqlalchemy.dialects.postgresql import TIMESTAMP, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.database.base import Base
+from app.models.base import Base
 
 
 class Profile(Base):
     __tablename__ = "profiles"
 
-    id: Mapped[uuid.UUID] = mapped_column(
+    id = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("auth.users.id"),
+        ForeignKey("users.id", ondelete="CASCADE"),
         primary_key=True,
     )
 

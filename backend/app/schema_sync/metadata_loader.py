@@ -19,7 +19,7 @@ from sqlalchemy.sql.schema import Table
 
 import app.models  # noqa: F401
 
-from app.database.base import Base
+from app.models.base import Base
 
 from .types import (
     CheckConstraintDefinition,

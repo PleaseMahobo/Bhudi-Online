@@ -3,11 +3,11 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import BigInteger, ForeignKey, Index, Real, Text, text
+from sqlalchemy import BigInteger, ForeignKey, Index, REAL, Text, text
 from sqlalchemy.dialects.postgresql import TIMESTAMP, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.database.base import Base
+from app.models.base import Base
 
 
 class DeviceEvent(Base):
@@ -40,15 +40,15 @@ class DeviceEvent(Base):
 
     event_type: Mapped[str] = mapped_column(Text, nullable=False)
 
-    cpu_usage: Mapped[float | None] = mapped_column(Real)
+    cpu_usage: Mapped[float | None] = mapped_column(REAL)
 
-    ram_usage: Mapped[float | None] = mapped_column(Real)
+    ram_usage: Mapped[float | None] = mapped_column(REAL)
 
-    disk_usage: Mapped[float | None] = mapped_column(Real)
+    disk_usage: Mapped[float | None] = mapped_column(REAL)
 
-    network_in: Mapped[float | None] = mapped_column(Real)
+    network_in: Mapped[float | None] = mapped_column(REAL)
 
-    network_out: Mapped[float | None] = mapped_column(Real)
+    network_out: Mapped[float | None] = mapped_column(REAL)
 
     status: Mapped[str | None] = mapped_column(Text)
 

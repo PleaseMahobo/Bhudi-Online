@@ -6,7 +6,7 @@ from sqlalchemy import BigInteger, Double, Text, text
 from sqlalchemy.dialects.postgresql import TIMESTAMP
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.database.base import Base
+from app.models.base import Base
 
 
 class Telemetry(Base):

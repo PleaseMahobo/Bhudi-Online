@@ -8,7 +8,7 @@ from sqlalchemy import Boolean, Text, text
 from sqlalchemy.dialects.postgresql import JSONB, TIMESTAMP, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.database.base import Base
+from app.models.base import Base
 
 
 class HuntResult(Base):
