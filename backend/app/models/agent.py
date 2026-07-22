@@ -51,6 +51,10 @@ class Agent(Base):
         nullable=True,
     )
 
+    # ---------------------------------------------------------
+    # Relationships
+    # ---------------------------------------------------------
+
     tenant: Mapped["Tenant | None"] = relationship(
         back_populates="agents",
     )
