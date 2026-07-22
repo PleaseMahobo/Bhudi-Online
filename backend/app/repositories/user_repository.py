@@ -1,90 +1,42 @@
 from __future__ import annotations
 
-from typing import Optional
 from uuid import UUID
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.user import User
+from app.repositories.base_repository import BaseRepository
 
 
-class UserRepository:
-    def __init__(self, db: Session):
-        self.db = db
+class UserRepository(BaseRepository[User]):
+    """
+    Repository responsible only for User persistence.
+    """
 
-    # =====================================================
+    def __init__(self, session: Session) -> None:
+        super().__init__(session, User)
+
+    # ---------------------------------------------------------
     # Queries
-    # =====================================================
-
-    def get_by_email(
-        self,
-        email: str,
-    ) -> Optional[User]:
-
-        return (
-            self.db.query(User)
-            .filter(User.email == email)
-            .first()
-        )
+    # ---------------------------------------------------------
 
     def get_by_id(
         self,
         user_id: UUID,
-    ) -> Optional[User]:
+    ) -> User | None:
+        return self.session.get(User, user_id)
 
-        return (
-            self.db.query(User)
-            .filter(User.id == user_id)
-            .first()
+    def get_by_email(
+        self,
+        email: str,
+    ) -> User | None:
+        return self.session.scalar(
+            select(User).where(User.email == email)
         )
 
     def exists_by_email(
         self,
         email: str,
     ) -> bool:
-
-        return (
-            self.get_by_email(email)
-            is not None
-        )
-
-    # =====================================================
-    # Persistence
-    # =====================================================
-
-    def create(
-        self,
-        user: User,
-    ) -> User:
-
-        self.db.add(user)
-        self.db.commit()
-        self.db.refresh(user)
-
-        return user
-
-    def update(
-        self,
-        user: User,
-    ) -> User:
-
-        self.db.add(user)
-        self.db.commit()
-        self.db.refresh(user)
-
-        return user
-
-    def save(
-        self,
-        user: User,
-    ) -> User:
-
-        return self.update(user)
-
-    def delete(
-        self,
-        user: User,
-    ) -> None:
-
-        self.db.delete(user)
-        self.db.commit()
+        return self.get_by_email(email) is not None

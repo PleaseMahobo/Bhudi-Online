@@ -2,28 +2,24 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING
 
-from sqlalchemy import (
-    Boolean,
-    Column,
-    DateTime,
-    ForeignKey,
-    Integer,
-    String,
-)
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
+
+if TYPE_CHECKING:
+    from .user import User
 
 
 class RefreshToken(Base):
     """
     Persisted refresh token.
 
-    Only a SHA-256 hash of the JWT is stored.
-    The plaintext refresh token never touches
-    persistent storage.
+    Only the SHA-256 hash of the JWT is stored.
+    The plaintext refresh token is never persisted.
     """
 
     __tablename__ = "refresh_tokens"
@@ -32,13 +28,13 @@ class RefreshToken(Base):
     # Identity
     # =====================================================
 
-    id = Column(
+    id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         primary_key=True,
         default=uuid.uuid4,
     )
 
-    user_id = Column(
+    user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey(
             "users.id",
@@ -52,33 +48,33 @@ class RefreshToken(Base):
     # Token Information
     # =====================================================
 
-    token_hash = Column(
+    token_hash: Mapped[str] = mapped_column(
         String(64),
-        nullable=False,
         unique=True,
+        nullable=False,
         index=True,
     )
 
-    jwt_id = Column(
+    jwt_id: Mapped[str] = mapped_column(
         String(64),
-        nullable=False,
         unique=True,
+        nullable=False,
         index=True,
     )
 
-    session_id = Column(
+    session_id: Mapped[str] = mapped_column(
         String(64),
         nullable=False,
         index=True,
     )
 
-    token_family = Column(
+    token_family: Mapped[str] = mapped_column(
         String(64),
         nullable=False,
         index=True,
     )
 
-    generation = Column(
+    generation: Mapped[int] = mapped_column(
         Integer,
         nullable=False,
         default=1,
@@ -88,25 +84,25 @@ class RefreshToken(Base):
     # Lifetime
     # =====================================================
 
-    expires_at = Column(
+    expires_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
     )
 
-    created_at = Column(
+    created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
         default=lambda: datetime.now(timezone.utc),
     )
 
-    updated_at = Column(
+    updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc),
     )
 
-    last_used_at = Column(
+    last_used_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
     )
@@ -115,23 +111,23 @@ class RefreshToken(Base):
     # Revocation
     # =====================================================
 
-    revoked = Column(
+    revoked: Mapped[bool] = mapped_column(
         Boolean,
         nullable=False,
         default=False,
     )
 
-    revoked_at = Column(
+    revoked_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
     )
 
-    revoked_reason = Column(
+    revoked_reason: Mapped[str | None] = mapped_column(
         String(100),
         nullable=True,
     )
 
-    replaced_by_token_id = Column(
+    replaced_by_token_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("refresh_tokens.id"),
         nullable=True,
@@ -141,17 +137,17 @@ class RefreshToken(Base):
     # Device Information
     # =====================================================
 
-    ip_address = Column(
+    ip_address: Mapped[str | None] = mapped_column(
         String(64),
         nullable=True,
     )
 
-    user_agent = Column(
+    user_agent: Mapped[str | None] = mapped_column(
         String(512),
         nullable=True,
     )
 
-    device_name = Column(
+    device_name: Mapped[str | None] = mapped_column(
         String(255),
         nullable=True,
     )
@@ -160,18 +156,17 @@ class RefreshToken(Base):
     # Relationships
     # =====================================================
 
-    user = relationship(
+    user: Mapped["User"] = relationship(
         "User",
         back_populates="refresh_tokens",
     )
 
-    replacement = relationship(
+    replacement: Mapped["RefreshToken | None"] = relationship(
         "RefreshToken",
         remote_side=[id],
         uselist=False,
         backref="previous_token",
     )
-
 
     # =====================================================
     # Convenience Properties
@@ -199,10 +194,16 @@ class RefreshToken(Base):
     def mark_used(self) -> None:
         self.last_used_at = datetime.now(timezone.utc)
 
-    def revoke(
-        self,
-        reason: str | None = None,
-    ) -> None:
+    def revoke(self, reason: str | None = None) -> None:
         self.revoked = True
         self.revoked_at = datetime.now(timezone.utc)
         self.revoked_reason = reason
+
+    def __repr__(self) -> str:
+        return (
+            f"<RefreshToken("
+            f"id={self.id}, "
+            f"user_id={self.user_id}, "
+            f"revoked={self.revoked}"
+            f")>"
+        )

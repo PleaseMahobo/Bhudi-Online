@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import Text, text
+from sqlalchemy import ForeignKey, Text, text
 from sqlalchemy.dialects.postgresql import JSONB, TIMESTAMP, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -20,23 +20,53 @@ class IncidentTimeline(Base):
         server_default=text("gen_random_uuid()"),
     )
 
-    incident_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True)
+    incident_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("incidents.id", ondelete="CASCADE"),
+        nullable=False,
     )
 
-    device_id: Mapped[str | None] = mapped_column(Text)
+    device_id: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
 
-    event_type: Mapped[str | None] = mapped_column(Text)
+    event_type: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+    )
 
-    source: Mapped[str | None] = mapped_column(Text)
+    source: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
 
-    message: Mapped[str | None] = mapped_column(Text)
+    message: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
 
-    severity: Mapped[str | None] = mapped_column(Text)
+    severity: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
 
-    raw_data: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    raw_data: Mapped[dict[str, Any] | None] = mapped_column(
+        JSONB,
+        nullable=True,
+    )
 
-    created_at: Mapped[datetime | None] = mapped_column(
-        TIMESTAMP,
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True),
+        nullable=False,
         server_default=text("now()"),
     )
+
+    def __repr__(self) -> str:
+        return (
+            f"<IncidentTimeline("
+            f"id={self.id}, "
+            f"incident_id={self.incident_id}, "
+            f"event_type={self.event_type!r}"
+            f")>"
+        )

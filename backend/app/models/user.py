@@ -13,6 +13,7 @@ from app.models.base import Base
 if TYPE_CHECKING:
     from .refresh_token import RefreshToken
     from .tenant import Tenant
+    from .profile import Profile
 
 
 class User(Base):
@@ -24,42 +25,30 @@ class User(Base):
         server_default=func.gen_random_uuid(),
     )
 
-    email: Mapped[str | None] = mapped_column(
+    email: Mapped[str] = mapped_column(
         Text,
-        nullable=True,
         unique=True,
+        nullable=False,
+        index=True,
     )
 
-    role: Mapped[str | None] = mapped_column(
-        Text,
-        nullable=True,
-    )
-
-    tenant_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("tenants.id"),
-        nullable=True,
-    )
-
-    created_at: Mapped[datetime | None] = mapped_column(
-        TIMESTAMP,
-        nullable=True,
-        server_default=func.now(),
-    )
-
-    password_hash: Mapped[str | None] = mapped_column(
+    password_hash: Mapped[str] = mapped_column(
         String(255),
-        nullable=True,
+        nullable=False,
     )
 
     first_name: Mapped[str | None] = mapped_column(
         String(100),
-        nullable=True,
     )
 
     last_name: Mapped[str | None] = mapped_column(
         String(100),
-        nullable=True,
+    )
+
+    role: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        server_default="technician",
     )
 
     active: Mapped[bool] = mapped_column(
@@ -68,27 +57,51 @@ class User(Base):
         server_default="true",
     )
 
-    updated_at: Mapped[datetime | None] = mapped_column(
-        TIMESTAMP,
+    tenant_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("tenants.id"),
         nullable=True,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True),
+        nullable=False,
         server_default=func.now(),
     )
 
+    updated_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    #
+    # Relationships
+    #
+
     tenant: Mapped["Tenant | None"] = relationship(
+        "Tenant",
         back_populates="users",
     )
 
     refresh_tokens: Mapped[list["RefreshToken"]] = relationship(
+        "RefreshToken",
         back_populates="user",
         cascade="all, delete-orphan",
         passive_deletes=True,
     )
+    
+    profile: Mapped["Profile | None"] = relationship(
+        "Profile",
+        back_populates="user",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
 
     @property
     def full_name(self) -> str:
-        first = self.first_name or ""
-        last = self.last_name or ""
-        return f"{first} {last}".strip()
+        return f"{self.first_name or ''} {self.last_name or ''}".strip()
 
     def __repr__(self) -> str:
         return (

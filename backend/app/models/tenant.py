@@ -18,7 +18,12 @@ if TYPE_CHECKING:
     from .device_event import DeviceEvent
     from .device_metric import DeviceMetric
     from .profile import Profile
+    from .telemetry import Telemetry
     from .user import User
+    from .action import Action
+    from .incident import Incident
+    from .response_action import ResponseAction
+    from .script_task import ScriptTask
 
 
 class Tenant(Base):
@@ -82,6 +87,35 @@ class Tenant(Base):
     device_metrics: Mapped[list["DeviceMetric"]] = relationship(
         "DeviceMetric",
         back_populates="tenant",
+        
+    )    
+    telemetry: Mapped[list["Telemetry"]] = relationship(
+        back_populates="tenant",
+        cascade="all, delete-orphan",
+    )
+    
+    actions: Mapped[list["Action"]] = relationship(
+        "Action",
+        back_populates="tenant",
+        cascade="all, delete-orphan",
+    )
+    
+    incidents: Mapped[list["Incident"]] = relationship(
+        "Incident",
+        back_populates="tenant",
+        cascade="all, delete-orphan",
+    )
+    
+    response_actions: Mapped[list["ResponseAction"]] = relationship(
+        "ResponseAction",
+        back_populates="tenant",
+        cascade="all, delete-orphan",
+    )
+    
+    script_tasks: Mapped[list["ScriptTask"]] = relationship(
+        "ScriptTask",
+        back_populates="tenant",
+        cascade="all, delete-orphan",
     )
 
     def __repr__(self) -> str:

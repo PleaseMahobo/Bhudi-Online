@@ -3,12 +3,16 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 from decimal import Decimal
+from typing import TYPE_CHECKING
 
 from sqlalchemy import ForeignKey, Numeric, Text, text
 from sqlalchemy.dialects.postgresql import TIMESTAMP, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
+
+if TYPE_CHECKING:
+    from app.models.device import Device
 
 
 class DeviceHeartbeat(Base):
@@ -22,8 +26,7 @@ class DeviceHeartbeat(Base):
 
     device_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("devices.id"),
-        nullable=True,
+        ForeignKey("devices.id", ondelete="CASCADE"),  # cspell:ignore ondelete
     )
 
     status: Mapped[str | None] = mapped_column(Text)

@@ -33,29 +33,30 @@ class Agent(Base):
         nullable=True,
     )
 
-    status: Mapped[str | None] = mapped_column(
+    status: Mapped[str] = mapped_column(
         Text,
-        nullable=True,
+        nullable=False,
         server_default="offline",
     )
 
-    last_seen: Mapped[datetime | None] = mapped_column(
-        TIMESTAMP,
-        nullable=True,
+    last_seen: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True),
+        nullable=False,
         server_default=func.now(),
     )
 
     tenant_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("tenants.id"),
+        ForeignKey("tenants.id", ondelete="SET NULL"),
         nullable=True,
     )
 
-    # ---------------------------------------------------------
+    #
     # Relationships
-    # ---------------------------------------------------------
+    #
 
     tenant: Mapped["Tenant | None"] = relationship(
+        "Tenant",
         back_populates="agents",
     )
 

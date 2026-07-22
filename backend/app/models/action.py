@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import ForeignKey, Text, func
+from sqlalchemy import ForeignKey, Index, Text, func
 from sqlalchemy.dialects.postgresql import JSONB, TIMESTAMP, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -12,10 +12,18 @@ from app.models.base import Base
 
 if TYPE_CHECKING:
     from .device import Device
+    from .tenant import Tenant
 
 
 class Action(Base):
     __tablename__ = "actions"
+
+    __table_args__ = (
+        Index("idx_actions_device", "device_id"),
+        Index("idx_actions_tenant", "tenant_id"),
+        Index("idx_actions_status", "status"),
+        Index("idx_actions_created", "created_at"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
@@ -25,12 +33,19 @@ class Action(Base):
 
     device_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("devices.id"),
+        ForeignKey(
+            "devices.id",
+            ondelete="CASCADE",
+        ),
         nullable=True,
     )
 
     tenant_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
+        ForeignKey(
+            "tenants.id",
+            ondelete="CASCADE",
+        ),
         nullable=True,
     )
 
@@ -44,9 +59,9 @@ class Action(Base):
         nullable=True,
     )
 
-    status: Mapped[str | None] = mapped_column(
+    status: Mapped[str] = mapped_column(
         Text,
-        nullable=True,
+        nullable=False,
         server_default="pending",
     )
 
@@ -55,9 +70,9 @@ class Action(Base):
         nullable=True,
     )
 
-    created_at: Mapped[datetime | None] = mapped_column(
+    created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP,
-        nullable=True,
+        nullable=False,
         server_default=func.now(),
     )
 
@@ -66,13 +81,25 @@ class Action(Base):
         nullable=True,
     )
 
+    #
+    # Relationships
+    #
+
     device: Mapped["Device | None"] = relationship(
+        "Device",
+        back_populates="actions",
+    )
+
+    tenant: Mapped["Tenant | None"] = relationship(
+        "Tenant",
         back_populates="actions",
     )
 
     def __repr__(self) -> str:
         return (
-            f"<Action(id={self.id}, "
+            f"<Action("
+            f"id={self.id}, "
             f"type={self.type!r}, "
-            f"status={self.status!r})>"
+            f"status={self.status!r}"
+            f")>"
         )

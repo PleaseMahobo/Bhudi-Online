@@ -18,7 +18,11 @@ if TYPE_CHECKING:
     from .device_metric import DeviceMetric
     from .tenant import Tenant
     from .command import Command
-
+    from .telemetry import Telemetry
+    from .incident import Incident
+    from .response_action import ResponseAction
+    from .script_task import ScriptTask
+    
 class Device(Base):
     __tablename__ = "devices"
 
@@ -157,6 +161,28 @@ class Device(Base):
     metrics: Mapped[list["DeviceMetric"]] = relationship(
         back_populates="device",
         cascade="all, delete-orphan",
+    )
+    
+    telemetry: Mapped[list["Telemetry"]] = relationship(
+        back_populates="device",
+        cascade="all, delete-orphan",
+    )
+    
+    incidents: Mapped[list["Incident"]] = relationship(
+         "Incident",
+         back_populates="device",
+         cascade="all, delete-orphan",
+    )
+    
+    response_actions: Mapped[list["ResponseAction"]] = relationship(
+        "ResponseAction",
+        back_populates="device",
+        cascade="all, delete-orphan",
+    )
+    
+    script_tasks: Mapped[list["ScriptTask"]] = relationship(
+    back_populates="device",
+    cascade="all, delete-orphan",
     )
 
     def __repr__(self) -> str:

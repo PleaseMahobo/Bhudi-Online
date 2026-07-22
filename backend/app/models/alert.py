@@ -2,58 +2,105 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, ForeignKey, Integer, Text, text
+from sqlalchemy import Boolean, ForeignKey, Index, Integer, Text, func
 from sqlalchemy.dialects.postgresql import TIMESTAMP, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
 
+if TYPE_CHECKING:
+    from .device import Device
+    from .tenant import Tenant
+
 
 class Alert(Base):
     __tablename__ = "alerts"
 
+    __table_args__ = (
+        Index("idx_alerts_device", "device_id"),
+        Index("idx_alerts_tenant", "tenant_id"),
+        Index("idx_alerts_severity", "severity"),
+        Index("idx_alerts_type", "type"),
+        Index("idx_alerts_resolved", "resolved"),
+        Index("idx_alerts_created", "created_at"),
+    )
+
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         primary_key=True,
-        server_default=text("gen_random_uuid()"),
+        server_default=func.gen_random_uuid(),
     )
 
     device_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("devices.id"),
+        ForeignKey(
+            "devices.id",
+            ondelete="CASCADE",
+        ),
         nullable=True,
     )
 
     tenant_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("tenants.id"),
+        ForeignKey(
+            "tenants.id",
+            ondelete="CASCADE",
+        ),
         nullable=True,
     )
 
-    type: Mapped[str | None] = mapped_column(Text)
+    type: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+    )
 
-    severity: Mapped[str | None] = mapped_column(Text)
+    severity: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+    )
 
-    message: Mapped[str | None] = mapped_column(Text)
+    message: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+    )
 
-    resolved: Mapped[bool | None] = mapped_column(
+    resolved: Mapped[bool] = mapped_column(
         Boolean,
-        server_default=text("false"),
+        nullable=False,
+        server_default="false",
     )
 
-    created_at: Mapped[datetime | None] = mapped_column(
+    threat_score: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+    )
+
+    mitre_id: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+
+    mitre_name: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+
+    incident_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        nullable=True,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP,
-        server_default=text("now()"),
+        nullable=False,
+        server_default=func.now(),
     )
 
-    threat_score: Mapped[int | None] = mapped_column(Integer)
-
-    mitre_id: Mapped[str | None] = mapped_column(Text)
-
-    mitre_name: Mapped[str | None] = mapped_column(Text)
-
-    incident_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    #
+    # Relationships
+    #
 
     device: Mapped["Device | None"] = relationship(
         "Device",
@@ -64,3 +111,13 @@ class Alert(Base):
         "Tenant",
         back_populates="alerts",
     )
+
+    def __repr__(self) -> str:
+        return (
+            f"<Alert("
+            f"id={self.id}, "
+            f"severity={self.severity!r}, "
+            f"type={self.type!r}, "
+            f"resolved={self.resolved}"
+            f")>"
+        )

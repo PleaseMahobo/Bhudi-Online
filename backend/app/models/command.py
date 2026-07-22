@@ -2,13 +2,16 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import ForeignKey, Text, text
 from sqlalchemy.dialects.postgresql import JSONB, TIMESTAMP, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
+
+if TYPE_CHECKING:
+    from app.models.device import Device
 
 
 class Command(Base):
@@ -22,8 +25,7 @@ class Command(Base):
 
     device_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("devices.id"),
-        nullable=True,
+        ForeignKey("devices.id", **{"ondelete": "CASCADE"}),
     )
 
     command: Mapped[str | None] = mapped_column(Text)
