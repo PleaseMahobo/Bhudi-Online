@@ -17,7 +17,7 @@ if TYPE_CHECKING:
     from .device_heartbeat import DeviceHeartbeat
     from .device_metric import DeviceMetric
     from .tenant import Tenant
-
+    from .command import Command
 
 class Device(Base):
     __tablename__ = "devices"
@@ -137,6 +137,11 @@ class Device(Base):
 
     actions: Mapped[list["Action"]] = relationship(
         back_populates="device",
+    )
+    
+    commands: Mapped[list["Command"]] = relationship(
+    back_populates="device",
+    cascade="all, delete-orphan",
     )
 
     events: Mapped[list["DeviceEvent"]] = relationship(

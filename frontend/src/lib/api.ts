@@ -1,94 +1,227 @@
 // frontend/src/lib/api.ts
 
-const API_URL =
+const API_BASE =
   process.env.NEXT_PUBLIC_API_URL ??
-  "https://bhudi-online-production.up.railway.app";
+  "http://127.0.0.1:8000";
+
+function getAccessToken(): string | null {
+  if (typeof window === "undefined") return null;
+  return localStorage.getItem("access_token");
+}
+
+function setAccessToken(token: string) {
+  if (typeof window === "undefined") return;
+  localStorage.setItem("access_token", token);
+}
+
+function getRefreshToken(): string | null {
+  if (typeof window === "undefined") return null;
+  return localStorage.getItem("refresh_token");
+}
+
+function setRefreshToken(token: string) {
+  if (typeof window === "undefined") return;
+  localStorage.setItem("refresh_token", token);
+}
+
+function clearTokens() {
+  if (typeof window === "undefined") return;
+
+  localStorage.removeItem("access_token");
+  localStorage.removeItem("refresh_token");
+}
 
 async function request<T>(
-  path: string,
-  options?: RequestInit
+  endpoint: string,
+  options: RequestInit = {}
 ): Promise<T> {
-  const response = await fetch(`${API_URL}${path}`, {
-    credentials: "include",
-    headers: {
-      "Content-Type": "application/json",
-      ...(options?.headers ?? {}),
-    },
-    ...options,
-  });
+
+  const headers = new Headers(options.headers);
+
+  headers.set("Content-Type", "application/json");
+
+  const token = getAccessToken();
+
+  if (token) {
+    headers.set("Authorization", `Bearer ${token}`);
+  }
+
+  const response = await fetch(
+    `${API_BASE}${endpoint}`,
+    {
+      ...options,
+      headers,
+    }
+  );
 
   if (!response.ok) {
-    throw new Error(
-      `API request failed (${response.status}) ${response.statusText}`
-    );
+
+    let message = response.statusText;
+
+    try {
+      const body = await response.json();
+      message = body.detail ?? JSON.stringify(body);
+    } catch {}
+
+    throw new Error(message);
   }
 
   return response.json();
 }
 
-export interface Device {
-  id: number;
-  name: string;
-  status: string;
-  [key: string]: any;
+export interface User {
+
+  id: string;
+
+  email: string;
+
+  first_name: string;
+
+  last_name: string;
+
+  role: string;
+
+  active: boolean;
 }
 
-export interface DeviceStatusResponse {
-  devices: Device[];
+export interface LoginResponse {
+
+  access_token: string;
+
+  refresh_token: string;
+
+  token_type: string;
+
+  user: User;
+}
+
+export interface Device {
+
+  id: string;
+
+  hostname?: string;
+
+  name?: string;
+
+  status?: string;
+
+  online?: boolean;
+
+  last_seen?: string;
 }
 
 export interface HealthResponse {
-    status: string;
-    message?: string;
+
+  status: string;
+
+  service?: string;
+
+  version?: string;
+
+  message?: string;
 }
 
-export function getHealth() {
-    return request<HealthResponse>("/health");
-}
-
-export async function getDeviceStatus(): Promise<Device[]> {
-  const response = await request<DeviceStatusResponse>("/devices/status");
-  return response.devices;
-}
-
-export function sendCommand(
-  deviceId: number,
-  command: string
-) {
-  return request("/commands", {
-    method: "POST",
-    body: JSON.stringify({
-      device_id: deviceId,
-      command,
-    }),
-  });
-}
-
-export function login(
+export async function login(
   email: string,
   password: string
-) {
-  return request("/api/auth/login", {
-    method: "POST",
-    body: JSON.stringify({
-      email,
-      password,
-    }),
-  });
+): Promise<LoginResponse> {
+
+  const result = await request<LoginResponse>(
+    "/api/v1/auth/login",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        email,
+        password,
+      }),
+    }
+  );
+
+  setAccessToken(result.access_token);
+  setRefreshToken(result.refresh_token);
+
+  return result;
 }
 
-export function logout() {
-  return request("/api/auth/logout", {
-    method: "POST",
-  });
+export async function logout() {
+
+  try {
+
+    await request(
+      "/api/v1/auth/logout",
+      {
+        method: "POST",
+      }
+    );
+
+  } finally {
+
+    clearTokens();
+
+  }
+
 }
 
-export function getCurrentUser() {
-  return request("/api/auth/me");
+export async function getCurrentUser() {
+
+  return request<User>(
+    "/api/v1/auth/me"
+  );
+
 }
 
-export function refreshToken() {
-  return request("/api/auth/refresh", {
-    method: "POST",
-  });
+export async function refreshAccessToken() {
+
+  const refreshToken = getRefreshToken();
+
+  if (!refreshToken) {
+    throw new Error("No refresh token");
+  }
+
+  const result = await request<LoginResponse>(
+    "/api/v1/auth/refresh",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        refresh_token: refreshToken,
+      }),
+    }
+  );
+
+  setAccessToken(result.access_token);
+  setRefreshToken(result.refresh_token);
+
+  return result;
+}
+
+export async function getHealth() {
+
+  return request<HealthResponse>(
+    "/health"
+  );
+
+}
+
+export async function getDevices() {
+
+  return request<Device[]>(
+    "/api/v1/devices/"
+  );
+
+}
+
+/*
+Temporary compatibility wrapper.
+
+The dashboard still calls getDeviceStatus().
+
+When we modernize the dashboard we can remove this.
+*/
+
+export async function getDeviceStatus() {
+
+  const devices = await getDevices();
+
+  return devices;
+
 }

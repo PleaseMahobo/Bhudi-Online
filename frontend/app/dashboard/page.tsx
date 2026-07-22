@@ -6,7 +6,11 @@ import { useRouter } from "next/navigation";
 import { motion } from 'framer-motion';
 import { Server, Cpu, Zap, LogOut, Wifi } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { getHealth, getDeviceStatus } from '@/lib/api';
+import {
+    getHealth,
+    getDevices
+} from "@/lib/api";
+
 import { useWebSocket } from "@/lib/websocket";
 
 export default function RMMDashboard() {
@@ -29,15 +33,12 @@ export default function RMMDashboard() {
 
     const fetchData = async () => {
       try {
-        const [health, deviceResponse] = await Promise.all([
-          getHealth(),
-          getDeviceStatus(),
-        ]);
-        // deviceResponse may be an array or an object with a `devices` prop.
-        // Cast to any to avoid strict typing issues from unknown API shapes.
-        const dr: any = deviceResponse;
-        const devices = Array.isArray(dr) ? dr : (dr?.devices ?? []);
-        setDevices(devices);
+    const [health, devices] = await Promise.all([
+      getHealth(),
+      getDevices(),
+]);
+
+  setDevices(devices);
       } catch (error) {
         console.error('Failed to fetch data:', error);
       }
