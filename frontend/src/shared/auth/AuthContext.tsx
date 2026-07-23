@@ -42,7 +42,7 @@ export function AuthProvider({
 
   async function refreshUser() {
     try {
-      const res = await fetch(`${API_URL}/api/auth/me`, {
+      const res = await fetch(`${API_URL}/api/v1/auth/me`, {
         method: "GET",
         credentials: "include",
         headers: {
@@ -104,7 +104,7 @@ export function AuthProvider({
 
   async function logout() {
     try {
-      await fetch(`${API_URL}/api/auth/logout`, {
+      await fetch(`${API_URL}/api/v1/auth/logout`, {
         method: "POST",
         credentials: "include",
       });
