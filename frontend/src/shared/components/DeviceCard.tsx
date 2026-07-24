@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import CommandPanel from "./CommandPanel";
 
 function createSocket(deviceId: string, onMessage: (data: any) => void) {
   if (typeof window === "undefined") {
@@ -57,8 +56,7 @@ export default function DeviceCard({ device }: any) {
       >
         {status}
       </span>
-
-      <CommandPanel deviceId={device.id} />
+ 
     </div>
   );
 }
