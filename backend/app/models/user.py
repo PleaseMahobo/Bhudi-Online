@@ -46,9 +46,9 @@ class User(Base):
     )
 
     role: Mapped[str] = mapped_column(
-        Text,
+        String(50),
         nullable=False,
-        server_default="technician",
+        server_default="user",
     )
 
     active: Mapped[bool] = mapped_column(
@@ -56,11 +56,32 @@ class User(Base):
         nullable=False,
         server_default="true",
     )
+    failed_login_attempts: Mapped[int] = mapped_column(
+        nullable=False,
+        server_default="0",
+    )
 
+    locked_until: Mapped[datetime | None] = mapped_column(
+        TIMESTAMP(timezone=True),
+        nullable=True,
+    )
+
+    last_login_at: Mapped[datetime | None] = mapped_column(
+        TIMESTAMP(timezone=True),
+        nullable=True,
+    )
+
+    password_changed_at: Mapped[datetime | None] = mapped_column(
+        TIMESTAMP(timezone=True),
+        nullable=True,
+    )
+    
     tenant_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("tenants.id"),
-        nullable=True,
+        ForeignKey(
+            "tenants.id",
+            ondelete="SET NULL",
+        ),
     )
 
     created_at: Mapped[datetime] = mapped_column(
@@ -110,4 +131,4 @@ class User(Base):
             f"email={self.email!r}, "
             f"role={self.role!r}"
             f")>"
-        )
+    )

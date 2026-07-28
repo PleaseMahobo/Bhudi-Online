@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
+from sqlalchemy import select, delete
 from sqlalchemy.orm import Session
 
 from app.models.refresh_token import RefreshToken
@@ -10,26 +11,43 @@ from app.models.refresh_token import RefreshToken
 
 class RefreshTokenRepository:
     """
-    Repository responsible for persistence of refresh tokens.
+    Enterprise Refresh Token Repository.
 
     Responsibilities
     ----------------
-    - Store refresh tokens
+    - Persist refresh tokens
     - Query refresh tokens
-    - Rotate refresh tokens
+    - Support rotation
     - Detect token reuse
     - Revoke sessions
     - Revoke token families
     - Cleanup expired tokens
 
-    No JWT creation or validation occurs here.
+    Authentication logic does NOT belong here.
+
+    JWT generation does NOT belong here.
+
+    Password handling does NOT belong here.
     """
 
     def __init__(
         self,
         db: Session,
-    ):
+    ) -> None:
+
         self.db = db
+
+
+    # ==========================================================
+    # Internal Helpers
+    # ==========================================================
+
+    @staticmethod
+    def _utcnow() -> datetime:
+        return datetime.now(
+            timezone.utc
+        )
+
 
     # ==========================================================
     # CREATE
@@ -39,15 +57,28 @@ class RefreshTokenRepository:
         self,
         token: RefreshToken,
     ) -> RefreshToken:
+        """
+        Persist a refresh token.
+
+        Transaction ownership remains
+        with the service layer.
+        """
 
         self.db.add(token)
+
         self.db.flush()
-        self.db.refresh(token)
 
         return token
 
+
     def save(self) -> None:
+        """
+        Flush pending repository changes.
+        """
+
         self.db.flush()
+
+
 
     # ==========================================================
     # LOOKUPS
@@ -57,41 +88,67 @@ class RefreshTokenRepository:
         self,
         token_id: UUID,
     ) -> RefreshToken | None:
+        """
+        Retrieve token by primary key.
+        """
 
-        return (
-            self.db.query(RefreshToken)
-            .filter(
+        return self.db.scalar(
+            select(RefreshToken)
+            .where(
                 RefreshToken.id == token_id
             )
-            .first()
         )
+
 
     def get_by_hash(
         self,
         token_hash: str,
     ) -> RefreshToken | None:
+        """
+        Retrieve token by SHA-256 hash.
+        """
 
-        return (
-            self.db.query(RefreshToken)
-            .filter(
+        return self.db.scalar(
+            select(RefreshToken)
+            .where(
                 RefreshToken.token_hash == token_hash
             )
-            .first()
         )
+
+
+    def get_by_token_hash(
+        self,
+        token_hash: str,
+    ) -> RefreshToken | None:
+        """
+        Compatibility alias.
+
+        Older AuthService versions
+        use this name.
+        """
+
+        return self.get_by_hash(
+            token_hash
+        )
+
 
     def get_by_jti(
         self,
         jwt_id: str,
     ) -> RefreshToken | None:
+        """
+        Retrieve token by JWT ID.
+        """
 
-        return (
-            self.db.query(RefreshToken)
-            .filter(
+        return self.db.scalar(
+            select(RefreshToken)
+            .where(
                 RefreshToken.jwt_id == jwt_id
             )
-            .first()
         )
-        
+
+
+
     # ==========================================================
     # ACTIVE TOKEN QUERIES
     # ==========================================================
@@ -101,41 +158,50 @@ class RefreshTokenRepository:
         token_hash: str,
     ) -> RefreshToken | None:
         """
-        Returns an active refresh token matching the supplied
-        SHA-256 hash.
+        Retrieve active refresh token.
+
+        Active means:
+
+        - not revoked
+        - not expired
         """
 
-        return (
-            self.db.query(RefreshToken)
-            .filter(
+        return self.db.scalar(
+            select(RefreshToken)
+            .where(
                 RefreshToken.token_hash == token_hash,
                 RefreshToken.revoked.is_(False),
-                RefreshToken.expires_at > datetime.now(timezone.utc),
+                RefreshToken.expires_at
+                > self._utcnow(),
             )
-            .first()
         )
+
 
     def get_active_tokens_for_user(
         self,
         user_id: UUID,
     ) -> list[RefreshToken]:
         """
-        Returns all currently active refresh tokens
-        belonging to a user.
+        Return active refresh tokens
+        for a user.
         """
 
-        return (
-            self.db.query(RefreshToken)
-            .filter(
-                RefreshToken.user_id == user_id,
-                RefreshToken.revoked.is_(False),
-                RefreshToken.expires_at > datetime.now(timezone.utc),
+        return list(
+            self.db.scalars(
+                select(RefreshToken)
+                .where(
+                    RefreshToken.user_id == user_id,
+                    RefreshToken.revoked.is_(False),
+                    RefreshToken.expires_at
+                    > self._utcnow(),
+                )
+                .order_by(
+                    RefreshToken.created_at.desc()
+                )
             )
-            .order_by(
-                RefreshToken.created_at.desc()
-            )
-            .all()
         )
+
+
 
     # ==========================================================
     # SESSION QUERIES
@@ -146,63 +212,87 @@ class RefreshTokenRepository:
         session_id: str,
     ) -> list[RefreshToken]:
         """
-        Returns every refresh token issued during
-        a single login session.
+        Return all tokens in session.
         """
 
-        return (
-            self.db.query(RefreshToken)
-            .filter(
-                RefreshToken.session_id == session_id
+        return list(
+            self.db.scalars(
+                select(RefreshToken)
+                .where(
+                    RefreshToken.session_id == session_id
+                )
+                .order_by(
+                    RefreshToken.generation.asc()
+                )
             )
-            .order_by(
-                RefreshToken.generation.asc()
-            )
-            .all()
         )
+
 
     def get_active_session_tokens(
         self,
         session_id: str,
     ) -> list[RefreshToken]:
         """
-        Returns only active refresh tokens
-        belonging to a session.
+        Return active tokens
+        belonging to session.
         """
 
-        return (
-            self.db.query(RefreshToken)
-            .filter(
+        return list(
+            self.db.scalars(
+                select(RefreshToken)
+                .where(
+                    RefreshToken.session_id == session_id,
+                    RefreshToken.revoked.is_(False),
+                    RefreshToken.expires_at
+                    > self._utcnow(),
+                )
+                .order_by(
+                    RefreshToken.generation.asc()
+                )
+            )
+        )
+
+
+    def get_active_session(
+        self,
+        *,
+        user_id: UUID,
+        session_id: str,
+    ) -> RefreshToken | None:
+        """
+        Validate an active user session.
+        """
+
+        return self.db.scalar(
+            select(RefreshToken)
+            .where(
+                RefreshToken.user_id == user_id,
                 RefreshToken.session_id == session_id,
                 RefreshToken.revoked.is_(False),
-                RefreshToken.expires_at > datetime.now(timezone.utc),
+                RefreshToken.expires_at
+                > self._utcnow(),
             )
             .order_by(
-                RefreshToken.generation.asc()
+                RefreshToken.generation.desc()
             )
-            .all()
         )
+
 
     def get_latest_session_token(
         self,
         session_id: str,
     ) -> RefreshToken | None:
-        """
-        Returns the newest token issued for
-        the session.
-        """
 
-        return (
-            self.db.query(RefreshToken)
-            .filter(
+        return self.db.scalar(
+            select(RefreshToken)
+            .where(
                 RefreshToken.session_id == session_id
             )
             .order_by(
                 RefreshToken.generation.desc()
             )
-            .first()
         )
-
+        
     # ==========================================================
     # TOKEN FAMILY QUERIES
     # ==========================================================
@@ -212,63 +302,71 @@ class RefreshTokenRepository:
         token_family: str,
     ) -> list[RefreshToken]:
         """
-        Returns every token belonging
+        Return all tokens belonging
         to a rotation family.
         """
 
-        return (
-            self.db.query(RefreshToken)
-            .filter(
-                RefreshToken.token_family == token_family
+        return list(
+            self.db.scalars(
+                select(RefreshToken)
+                .where(
+                    RefreshToken.token_family == token_family
+                )
+                .order_by(
+                    RefreshToken.generation.asc()
+                )
             )
-            .order_by(
-                RefreshToken.generation.asc()
-            )
-            .all()
         )
+
 
     def get_active_family_tokens(
         self,
         token_family: str,
     ) -> list[RefreshToken]:
         """
-        Returns active tokens in the family.
-        Normally only one token should remain active.
+        Return active tokens in a family.
+
+        Normally only one token should
+        be active at any time.
         """
 
-        return (
-            self.db.query(RefreshToken)
-            .filter(
-                RefreshToken.token_family == token_family,
-                RefreshToken.revoked.is_(False),
-                RefreshToken.expires_at > datetime.now(timezone.utc),
+        return list(
+            self.db.scalars(
+                select(RefreshToken)
+                .where(
+                    RefreshToken.token_family == token_family,
+                    RefreshToken.revoked.is_(False),
+                    RefreshToken.expires_at
+                    > self._utcnow(),
+                )
+                .order_by(
+                    RefreshToken.generation.desc()
+                )
             )
-            .order_by(
-                RefreshToken.generation.desc()
-            )
-            .all()
         )
+
 
     def get_latest_family_token(
         self,
         token_family: str,
     ) -> RefreshToken | None:
         """
-        Returns the highest-generation token
-        in the family.
+        Return highest generation token
+        in rotation family.
         """
 
-        return (
-            self.db.query(RefreshToken)
-            .filter(
+        return self.db.scalar(
+            select(RefreshToken)
+            .where(
                 RefreshToken.token_family == token_family
             )
             .order_by(
                 RefreshToken.generation.desc()
             )
-            .first()
         )
-        
+
+
+
     # ==========================================================
     # USAGE TRACKING
     # ==========================================================
@@ -278,12 +376,14 @@ class RefreshTokenRepository:
         token: RefreshToken,
     ) -> None:
         """
-        Updates the last-used timestamp for a token.
+        Update token usage timestamp.
         """
 
         token.mark_used()
 
         self.db.flush()
+
+
 
     # ==========================================================
     # TOKEN ROTATION
@@ -296,29 +396,52 @@ class RefreshTokenRepository:
         new_token: RefreshToken,
     ) -> RefreshToken:
         """
-        Atomically rotates a refresh token.
+        Perform refresh token rotation.
 
-        The old token is revoked, linked to its replacement,
-        and the new token is persisted.
+        Flow:
 
-        NOTE:
-        No commit occurs here. The service layer owns the
-        transaction boundary.
+        old token
+             |
+             | revoke
+             v
+        replacement token
+             |
+             | linked through replaced_by_token_id
+
+
+        Transaction ownership remains
+        with AuthService.
         """
 
-        old_token.revoke("token_rotated")
+        old_token.revoke(
+            "token_rotated"
+        )
 
-        self.db.add(new_token)
+
+        self.db.add(
+            new_token
+        )
+
 
         self.db.flush()
 
-        old_token.replaced_by_token_id = new_token.id
 
-        old_token.updated_at = datetime.now(timezone.utc)
+        if old_token.replaced_by_token_id is None:
+            old_token.replaced_by_token_id = (
+                new_token.id
+            )
+
+        old_token.updated_at = (
+            self._utcnow()
+        )
+
 
         self.db.flush()
+
 
         return new_token
+
+
 
     # ==========================================================
     # SINGLE TOKEN REVOCATION
@@ -330,17 +453,27 @@ class RefreshTokenRepository:
         reason: str | None = None,
     ) -> None:
         """
-        Revokes a single refresh token.
+        Revoke one refresh token.
         """
 
         if token.revoked:
+
             return
 
-        token.revoke(reason)
 
-        token.updated_at = datetime.now(timezone.utc)
+        token.revoke(
+            reason
+        )
+
+
+        token.updated_at = (
+            self._utcnow()
+        )
+
 
         self.db.flush()
+
+
 
     def revoke_by_hash(
         self,
@@ -348,22 +481,35 @@ class RefreshTokenRepository:
         reason: str | None = None,
     ) -> bool:
         """
-        Revokes a token by its SHA-256 hash.
+        Revoke token using hash.
 
-        Returns True if a token was found.
+        Returns:
+
+            True  -> token found
+            False -> token missing
         """
 
-        token = self.get_by_hash(token_hash)
+        token = (
+            self.get_by_hash(
+                token_hash
+            )
+        )
+
 
         if token is None:
+
             return False
+
 
         self.revoke(
             token,
             reason,
         )
 
+
         return True
+
+
 
     # ==========================================================
     # SESSION REVOCATION
@@ -371,29 +517,51 @@ class RefreshTokenRepository:
 
     def revoke_session(
         self,
+        *,
+        user_id: UUID,
         session_id: str,
         reason: str = "session_logout",
     ) -> int:
         """
-        Revokes every active token
-        belonging to a session.
-
-        Returns the number revoked.
+        Revoke all tokens belonging
+        to a specific user session.
         """
 
         revoked = 0
 
-        for token in self.get_active_session_tokens(session_id):
 
-            token.revoke(reason)
+        tokens = (
+            self.db.scalars(
+                select(RefreshToken)
+                .where(
+                    RefreshToken.user_id == user_id,
+                    RefreshToken.session_id == session_id,
+                    RefreshToken.revoked.is_(False),
+                )
+            )
+            .all()
+        )
 
-            token.updated_at = datetime.now(timezone.utc)
+
+        for token in tokens:
+
+            token.revoke(
+                reason
+            )
+
+            token.updated_at = (
+                self._utcnow()
+            )
 
             revoked += 1
 
+
         self.db.flush()
 
+
         return revoked
+
+
 
     # ==========================================================
     # TOKEN FAMILY REVOCATION
@@ -405,29 +573,50 @@ class RefreshTokenRepository:
         reason: str = "token_reuse_detected",
     ) -> int:
         """
-        Revokes every token in a rotation family.
+        Revoke all tokens in a family.
 
-        This is the primary defence against
-        stolen refresh-token replay attacks.
+        Used for:
+
+        - refresh token replay
+        - suspected theft
+        - compromise response
         """
 
         revoked = 0
 
-        for token in self.get_token_family(token_family):
+
+        tokens = (
+            self.get_token_family(
+                token_family
+            )
+        )
+
+
+        for token in tokens:
 
             if token.revoked:
+
                 continue
 
-            token.revoke(reason)
 
-            token.updated_at = datetime.now(timezone.utc)
+            token.revoke(
+                reason
+            )
+
+
+            token.updated_at = (
+                self._utcnow()
+            )
+
 
             revoked += 1
 
+
         self.db.flush()
 
-        return revoked
 
+        return revoked
+    
     # ==========================================================
     # USER REVOCATION
     # ==========================================================
@@ -438,31 +627,52 @@ class RefreshTokenRepository:
         reason: str = "logout_all",
     ) -> int:
         """
-        Revokes every active refresh token
-        owned by the user.
+        Revoke every active refresh token
+        owned by a user.
 
         Used for:
 
-        - Logout all devices
-        - Password change
-        - Administrator forced logout
-        - Account compromise
+        - logout all devices
+        - password change
+        - account compromise
+        - administrator action
         """
 
         revoked = 0
 
-        for token in self.get_active_tokens_for_user(user_id):
 
-            token.revoke(reason)
+        tokens = (
+            self.db.scalars(
+                select(RefreshToken)
+                .where(
+                    RefreshToken.user_id == user_id,
+                    RefreshToken.revoked.is_(False),
+                )
+            )
+            .all()
+        )
 
-            token.updated_at = datetime.now(timezone.utc)
+
+        for token in tokens:
+
+            token.revoke(
+                reason
+            )
+
+            token.updated_at = (
+                self._utcnow()
+            )
 
             revoked += 1
 
+
         self.db.flush()
 
+
         return revoked
-    
+
+
+
     # ==========================================================
     # TOKEN REUSE DETECTION
     # ==========================================================
@@ -472,42 +682,43 @@ class RefreshTokenRepository:
         token: RefreshToken,
     ) -> bool:
         """
-        Determines whether a presented refresh token represents
-        a refresh-token replay attack.
+        Determine whether a refresh token
+        was previously rotated.
 
-        A revoked token that has already been replaced should
-        never be presented again.
-
-        If it is, we assume compromise.
+        A rotated token being presented again
+        indicates possible token theft.
         """
 
         return (
             token.revoked
-            and token.replaced_by_token_id is not None
+            and token.replaced_by_token_id
+            is not None
         )
+
+
 
     def detect_reuse(
         self,
         token: RefreshToken,
     ) -> bool:
         """
-        Alias used by AuthService.
-
-        Returns True if refresh-token reuse
-        has been detected.
+        Compatibility wrapper used by
+        AuthService.
         """
 
-        return self.is_token_reused(token)
+        return self.is_token_reused(
+            token
+        )
+
+
 
     def revoke_family_on_reuse(
         self,
         token: RefreshToken,
     ) -> int:
         """
-        Immediately revokes every token in the family.
-
-        This follows OAuth 2.0 Security BCP guidance
-        for refresh-token replay attacks.
+        Revoke entire token family after
+        refresh token replay detection.
         """
 
         return self.revoke_token_family(
@@ -515,8 +726,10 @@ class RefreshTokenRepository:
             reason="refresh_token_reuse_detected",
         )
 
+
+
     # ==========================================================
-    # TOKEN VALIDATION HELPERS
+    # VALIDATION HELPERS
     # ==========================================================
 
     def is_active(
@@ -524,84 +737,131 @@ class RefreshTokenRepository:
         token: RefreshToken,
     ) -> bool:
         """
-        Repository-level validity check.
+        Repository-level token validity check.
         """
 
         return (
             not token.revoked
-            and token.expires_at > datetime.now(timezone.utc)
+            and token.expires_at
+            > self._utcnow()
         )
+
+
 
     def is_expired(
         self,
         token: RefreshToken,
     ) -> bool:
+        """
+        Determine token expiry state.
+        """
 
         return (
-            token.expires_at <= datetime.now(timezone.utc)
+            token.expires_at
+            <= self._utcnow()
         )
+
+
 
     def has_successor(
         self,
         token: RefreshToken,
     ) -> bool:
+        """
+        Returns True when token has
+        already been rotated.
+        """
 
         return (
             token.replaced_by_token_id
             is not None
         )
 
+
+
     # ==========================================================
     # HOUSEKEEPING
     # ==========================================================
 
-    def delete_expired(self) -> int:
+    def delete_expired(
+        self,
+    ) -> int:
         """
-        Permanently removes expired refresh tokens.
+        Permanently remove expired tokens.
 
-        Intended for scheduled background cleanup.
+        Intended for scheduled cleanup jobs.
         """
 
-        deleted = (
-            self.db.query(RefreshToken)
-            .filter(
-                RefreshToken.expires_at < datetime.now(timezone.utc)
-            )
-            .delete(
-                synchronize_session=False,
+        result = self.db.execute(
+            delete(RefreshToken)
+            .where(
+                RefreshToken.expires_at
+                < self._utcnow()
             )
         )
 
+
         self.db.flush()
 
-        return deleted
+
+        return result.rowcount or 0
+
+
 
     def delete_revoked(
         self,
         older_than: datetime,
     ) -> int:
         """
-        Deletes revoked tokens older than the supplied date.
-
-        Keeps the refresh_tokens table compact while
-        preserving recent audit history.
+        Remove revoked tokens older than
+        supplied retention period.
         """
 
-        deleted = (
-            self.db.query(RefreshToken)
-            .filter(
+        result = self.db.execute(
+            delete(RefreshToken)
+            .where(
                 RefreshToken.revoked.is_(True),
-                RefreshToken.revoked_at < older_than,
-            )
-            .delete(
-                synchronize_session=False,
+                RefreshToken.revoked_at
+                < older_than,
             )
         )
 
+
         self.db.flush()
 
-        return deleted
 
+        return result.rowcount or 0
+
+
+
+    def cleanup(
+        self,
+    ) -> dict[str, int]:
+        """
+        Repository maintenance.
+
+        Removes:
+
+        - expired tokens
+        - old revoked tokens
+        """
+
+        now = self._utcnow()
+
+
+        expired = self.delete_expired()
+
+
+        revoked = self.delete_revoked(
+            now - timedelta(days=90)
+        )
+
+
+        return {
+            "expired_deleted": expired,
+            "revoked_deleted": revoked,
+        }
+        
     # ==========================================================
     # METRICS
     # ==========================================================
@@ -610,36 +870,392 @@ class RefreshTokenRepository:
         self,
         user_id: UUID,
     ) -> int:
+        """
+        Count active refresh tokens
+        belonging to a user.
+        """
 
         return (
-            self.db.query(RefreshToken)
-            .filter(
-                RefreshToken.user_id == user_id,
-                RefreshToken.revoked.is_(False),
-                RefreshToken.expires_at > datetime.now(timezone.utc),
+            self.db.scalar(
+                select(
+                    RefreshToken
+                )
+                .where(
+                    RefreshToken.user_id == user_id,
+                    RefreshToken.revoked.is_(False),
+                    RefreshToken.expires_at
+                    > self._utcnow(),
+                )
+                .count()
             )
-            .count()
+            or 0
         )
+
+
 
     def count_active_sessions(
         self,
         user_id: UUID,
     ) -> int:
         """
-        Returns the number of active login sessions.
+        Count active login sessions.
 
-        A session is identified by its unique session_id.
+        A session is identified by
+        session_id.
+        """
+
+        sessions = (
+            self.db.execute(
+                select(
+                    RefreshToken.session_id
+                )
+                .where(
+                    RefreshToken.user_id == user_id,
+                    RefreshToken.revoked.is_(False),
+                    RefreshToken.expires_at
+                    > self._utcnow(),
+                )
+                .distinct()
+            )
+            .all()
+        )
+
+
+        return len(
+            sessions
+        )
+
+
+
+    # ==========================================================
+    # AUDIT HELPERS
+    # ==========================================================
+
+    def get_recent_tokens(
+        self,
+        user_id: UUID,
+        limit: int = 20,
+    ) -> list[RefreshToken]:
+        """
+        Return recent refresh tokens.
+
+        Used for:
+
+        - security dashboard
+        - active sessions UI
+        - incident response
+        """
+
+        return list(
+            self.db.scalars(
+                select(RefreshToken)
+                .where(
+                    RefreshToken.user_id == user_id
+                )
+                .order_by(
+                    RefreshToken.created_at.desc()
+                )
+                .limit(limit)
+            )
+        )
+
+
+
+    def get_revoked_tokens(
+        self,
+        user_id: UUID,
+    ) -> list[RefreshToken]:
+        """
+        Return revoked tokens for audit.
+        """
+
+        return list(
+            self.db.scalars(
+                select(RefreshToken)
+                .where(
+                    RefreshToken.user_id == user_id,
+                    RefreshToken.revoked.is_(True),
+                )
+                .order_by(
+                    RefreshToken.revoked_at.desc()
+                )
+            )
+        )
+
+
+
+    def get_expired_tokens(
+        self,
+        user_id: UUID,
+    ) -> list[RefreshToken]:
+        """
+        Return expired tokens.
+        """
+
+        return list(
+            self.db.scalars(
+                select(RefreshToken)
+                .where(
+                    RefreshToken.user_id == user_id,
+                    RefreshToken.expires_at
+                    <= self._utcnow(),
+                )
+                .order_by(
+                    RefreshToken.expires_at.desc()
+                )
+            )
+        )
+
+
+
+    # ==========================================================
+    # DEVICE LOOKUPS
+    # ==========================================================
+
+    def get_tokens_for_device(
+        self,
+        user_id: UUID,
+        device_name: str,
+    ) -> list[RefreshToken]:
+        """
+        Return tokens issued to
+        a specific device.
+        """
+
+        return list(
+            self.db.scalars(
+                select(RefreshToken)
+                .where(
+                    RefreshToken.user_id == user_id,
+                    RefreshToken.device_name == device_name,
+                )
+                .order_by(
+                    RefreshToken.created_at.desc()
+                )
+            )
+        )
+
+
+
+    def revoke_device(
+        self,
+        *,
+        user_id: UUID,
+        device_name: str,
+        reason: str = "device_logout",
+    ) -> int:
+        """
+        Revoke all tokens belonging
+        to a device.
+        """
+
+        revoked = 0
+
+
+        tokens = (
+            self.db.scalars(
+                select(RefreshToken)
+                .where(
+                    RefreshToken.user_id == user_id,
+                    RefreshToken.device_name == device_name,
+                    RefreshToken.revoked.is_(False),
+                )
+            )
+            .all()
+        )
+
+
+        for token in tokens:
+
+            token.revoke(
+                reason
+            )
+
+            token.updated_at = (
+                self._utcnow()
+            )
+
+            revoked += 1
+
+
+        self.db.flush()
+
+
+        return revoked
+    
+    # ==========================================================
+    # SECURITY OPERATIONS
+    # ==========================================================
+
+    def revoke_all_except_session(
+        self,
+        *,
+        user_id: UUID,
+        session_id: str,
+        reason: str = "logout_other_devices",
+    ) -> int:
+        """
+        Revoke all active sessions except
+        the supplied session.
+
+        Used by:
+
+            "Log out other devices"
+        """
+
+        revoked = 0
+
+
+        tokens = (
+            self.db.scalars(
+                select(RefreshToken)
+                .where(
+                    RefreshToken.user_id == user_id,
+                    RefreshToken.revoked.is_(False),
+                )
+            )
+            .all()
+        )
+
+
+        for token in tokens:
+
+            if token.session_id == session_id:
+                continue
+
+
+            token.revoke(
+                reason
+            )
+
+            token.updated_at = (
+                self._utcnow()
+            )
+
+            revoked += 1
+
+
+        self.db.flush()
+
+
+        return revoked
+
+
+
+    # ==========================================================
+    # EXPORT / SERIALIZATION HELPERS
+    # ==========================================================
+
+    def get_user_sessions(
+        self,
+        user_id: UUID,
+    ) -> list[dict]:
+        """
+        Returns simplified active session
+        information for security dashboards.
+        """
+
+        tokens = (
+            self.get_active_tokens_for_user(
+                user_id
+            )
+        )
+
+
+        sessions: dict[str, dict] = {}
+
+
+        for token in tokens:
+
+            if token.session_id not in sessions:
+
+                sessions[token.session_id] = {
+                    "session_id": token.session_id,
+                    "device_name": token.device_name,
+                    "ip_address": token.ip_address,
+                    "user_agent": token.user_agent,
+                    "created_at": (
+                        token.created_at.isoformat()
+                    ),
+                    "last_used_at": (
+                        token.last_used_at.isoformat()
+                        if token.last_used_at
+                        else None
+                    ),
+                    "trusted_device": (
+                        token.trusted_device
+                    ),
+                }
+
+
+        return list(
+            sessions.values()
+        )
+
+
+
+    # ==========================================================
+    # DEBUG / ADMIN HELPERS
+    # ==========================================================
+
+    def count_all(
+        self,
+    ) -> int:
+        """
+        Count all stored refresh tokens.
         """
 
         return (
-            self.db.query(
-                RefreshToken.session_id
+            self.db.scalar(
+                select(
+                    RefreshToken
+                )
+                .count()
             )
-            .filter(
-                RefreshToken.user_id == user_id,
-                RefreshToken.revoked.is_(False),
-                RefreshToken.expires_at > datetime.now(timezone.utc),
+            or 0
+        )
+
+
+
+    def purge_user_tokens(
+        self,
+        user_id: UUID,
+    ) -> int:
+        """
+        Administrative hard delete.
+
+        Intended for:
+
+        - GDPR deletion workflows
+        - tenant removal
+        - account destruction
+
+        Normal logout should use revoke.
+        """
+
+        result = self.db.execute(
+            delete(RefreshToken)
+            .where(
+                RefreshToken.user_id == user_id
             )
-            .distinct()
-            .count()
+        )
+
+
+        self.db.flush()
+
+
+        return result.rowcount or 0
+
+
+
+    # ==========================================================
+    # REPRESENTATION
+    # ==========================================================
+
+    def __repr__(self) -> str:
+
+        return (
+            "<RefreshTokenRepository("
+            f"db={self.db!r}"
+            ")>"
         )
