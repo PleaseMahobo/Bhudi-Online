@@ -25,6 +25,10 @@ from .telemetry import Telemetry
 from .tenant import Tenant
 from .threat_hunt import ThreatHunt
 from .user import User
+from .permission import Permission
+from .role import Role
+from .role_permission import RolePermission
+from .user_role import UserRole
 
 __all__ = [
     "Action",
@@ -52,4 +56,8 @@ __all__ = [
     "Tenant",
     "ThreatHunt",
     "User",
+    "UserRole",
+    "Permission",
+    "Role",
+    "RolePermission",
 ]

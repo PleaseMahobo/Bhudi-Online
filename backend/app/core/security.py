@@ -9,6 +9,7 @@ from typing import Final
 from argon2 import PasswordHasher
 from argon2.exceptions import (
     InvalidHashError,
+    VerificationError,
     VerifyMismatchError,
 )
 from passlib.context import CryptContext
@@ -67,16 +68,24 @@ legacy_context = CryptContext(
 def hash_password(
     password: str,
 ) -> PasswordHash:
-    password = normalize_password(password)
 
-    errors = validate_password(password)
+    password = normalize_password(
+        password
+    )
+
+    errors = validate_password(
+        password
+    )
 
     if errors:
+
         raise ValueError(
             "; ".join(errors)
         )
 
-    return password_hasher.hash(password)
+    return password_hasher.hash(
+        password
+    )
 
 
 # ==========================================================
@@ -89,10 +98,16 @@ def verify_password(
     stored_hash: PasswordHash,
 ) -> bool:
 
-    if not plain_password or not stored_hash:
+    if not plain_password:
         return False
 
-    if len(plain_password) > MAX_PASSWORD_LENGTH:
+    if not stored_hash:
+        return False
+
+    if (
+        len(plain_password)
+        > MAX_PASSWORD_LENGTH
+    ):
         return False
 
     plain_password = normalize_password(
@@ -100,7 +115,7 @@ def verify_password(
     )
 
     #
-    # First attempt Argon2 verification
+    # Primary Argon2 verification
     #
 
     try:
@@ -114,10 +129,14 @@ def verify_password(
 
         return False
 
-    except InvalidHashError:
+    except (
+        InvalidHashError,
+        VerificationError,
+    ):
 
         #
-        # Not Argon2
+        # Not an Argon2 hash.
+        # Continue with legacy bcrypt.
         #
 
         pass
@@ -152,14 +171,20 @@ def needs_password_rehash(
 
     try:
 
-        return password_hasher.check_needs_rehash(
-            stored_hash
+        return (
+            password_hasher.check_needs_rehash(
+                stored_hash
+            )
         )
 
-    except InvalidHashError:
+    except (
+        InvalidHashError,
+        VerificationError,
+    ):
 
         #
-        # bcrypt or unknown
+        # bcrypt hashes
+        # should always migrate.
         #
 
         return True
@@ -177,18 +202,20 @@ def verify_and_upgrade_password(
         plain_password,
         stored_hash,
     ):
+
         return (
             False,
             None,
         )
 
     if needs_password_rehash(
-        stored_hash
+        stored_hash,
     ):
+
         return (
             True,
             hash_password(
-                plain_password
+                plain_password,
             ),
         )
 
@@ -209,12 +236,18 @@ def validate_password(
 
     errors: list[str] = []
 
-    if len(password) < MIN_PASSWORD_LENGTH:
+    if (
+        len(password)
+        < MIN_PASSWORD_LENGTH
+    ):
         errors.append(
             f"Password must contain at least {MIN_PASSWORD_LENGTH} characters."
         )
 
-    if len(password) > MAX_PASSWORD_LENGTH:
+    if (
+        len(password)
+        > MAX_PASSWORD_LENGTH
+    ):
         errors.append(
             f"Password may not exceed {MAX_PASSWORD_LENGTH} characters."
         )
@@ -250,7 +283,7 @@ def validate_password(
         errors.append(
             "Password must contain a special character."
         )
-
+        
     return errors
 
 
@@ -279,16 +312,28 @@ def password_score(
         40,
     )
 
-    if any(c.isupper() for c in password):
+    if any(
+        c.isupper()
+        for c in password
+    ):
         score += 15
 
-    if any(c.islower() for c in password):
+    if any(
+        c.islower()
+        for c in password
+    ):
         score += 15
 
-    if any(c.isdigit() for c in password):
+    if any(
+        c.isdigit()
+        for c in password
+    ):
         score += 15
 
-    if any(c in string.punctuation for c in password):
+    if any(
+        c in string.punctuation
+        for c in password
+    ):
         score += 15
 
     return min(
@@ -313,18 +358,18 @@ def normalize_password(
         return ""
 
     return password.strip()
-    
+
+
 # ==========================================================
 # Refresh Token Hashing
 # ==========================================================
+
 
 def hash_refresh_token(
     refresh_token: str,
 ) -> RefreshTokenHash:
     """
-    Hash a refresh token using an application secret.
-
-    The plaintext refresh token is never stored.
+    Hash a refresh token using the application HMAC key.
     """
 
     if not refresh_token:
@@ -332,11 +377,13 @@ def hash_refresh_token(
             "Refresh token cannot be empty."
         )
 
-    secret = settings.REFRESH_TOKEN_HASH_KEY
-
     return hmac.new(
-        secret.encode("utf-8"),
-        refresh_token.encode("utf-8"),
+        settings.REFRESH_TOKEN_HASH_KEY.encode(
+            "utf-8"
+        ),
+        refresh_token.encode(
+            "utf-8"
+        ),
         hashlib.sha256,
     ).hexdigest()
 
@@ -346,10 +393,13 @@ def verify_refresh_token_hash(
     stored_hash: RefreshTokenHash,
 ) -> bool:
     """
-    Constant-time verification of a refresh token.
+    Constant-time refresh-token verification.
     """
 
-    if not refresh_token or not stored_hash:
+    if (
+        not refresh_token
+        or not stored_hash
+    ):
         return False
 
     calculated_hash = hash_refresh_token(
@@ -363,18 +413,19 @@ def verify_refresh_token_hash(
 
 
 # ==========================================================
-# Secure Comparison
+# Constant-Time Comparison
 # ==========================================================
+
 
 def secure_compare(
     first: str,
     second: str,
 ) -> bool:
-    """
-    Constant-time comparison helper.
-    """
 
-    if not first or not second:
+    if not first:
+        return False
+
+    if not second:
         return False
 
     return hmac.compare_digest(
@@ -387,23 +438,25 @@ def secure_compare(
 # Password Hash Inspection
 # ==========================================================
 
+
 def get_password_hash_algorithm(
-    password_hash: str,
+    password_hash: PasswordHash,
 ) -> str | None:
-    """
-    Identify the password hash algorithm.
-    """
 
     if not password_hash:
         return None
 
-    if password_hash.startswith("$argon2"):
+    if password_hash.startswith(
+        "$argon2"
+    ):
         return "argon2"
 
-    if (
-        password_hash.startswith("$2a$")
-        or password_hash.startswith("$2b$")
-        or password_hash.startswith("$2y$")
+    if password_hash.startswith(
+        (
+            "$2a$",
+            "$2b$",
+            "$2y$",
+        )
     ):
         return "bcrypt"
 
@@ -411,11 +464,8 @@ def get_password_hash_algorithm(
 
 
 def is_valid_password_hash(
-    password_hash: str,
+    password_hash: PasswordHash,
 ) -> bool:
-    """
-    Validate that a stored password hash is supported.
-    """
 
     return (
         get_password_hash_algorithm(
@@ -423,21 +473,21 @@ def is_valid_password_hash(
         )
         is not None
     )
-
-
 # ==========================================================
 # Secure Password Generation
 # ==========================================================
+
 
 def generate_password(
     length: int = DEFAULT_PASSWORD_LENGTH,
 ) -> str:
     """
-    Generate a password satisfying the Bhudi
-    enterprise password policy.
+    Generate a cryptographically secure password that
+    satisfies the configured password policy.
     """
 
     if length < MIN_PASSWORD_LENGTH:
+
         raise ValueError(
             f"Password length must be at least {MIN_PASSWORD_LENGTH}."
         )
@@ -456,7 +506,9 @@ def generate_password(
             for _ in range(length)
         )
 
-        if password_is_valid(password):
+        if password_is_valid(
+            password
+        ):
             return password
 
 
@@ -464,12 +516,19 @@ def generate_password(
 # Secure Token Generation
 # ==========================================================
 
+
 def generate_secure_token(
     length: int = 64,
 ) -> str:
     """
     Generate a cryptographically secure random token.
     """
+
+    if length < 16:
+
+        raise ValueError(
+            "Secure token length must be at least 16 characters."
+        )
 
     alphabet = (
         string.ascii_letters
@@ -484,12 +543,12 @@ def generate_secure_token(
 
 def generate_api_key() -> APIKey:
     """
-    Generate an API key.
+    Generate a Bhudi API key.
     """
 
     return (
         f"{API_KEY_PREFIX}_"
-        f"{secrets.token_urlsafe(32)}"
+        f"{generate_secure_token(48)}"
     )
 
 
@@ -497,8 +556,14 @@ def generate_secret(
     bytes_length: int = DEFAULT_SECRET_BYTES,
 ) -> str:
     """
-    Generate a hexadecimal secret.
+    Generate a cryptographically secure hexadecimal secret.
     """
+
+    if bytes_length < 16:
+
+        raise ValueError(
+            "Secret length must be at least 16 bytes."
+        )
 
     return secrets.token_hex(
         bytes_length
@@ -510,7 +575,7 @@ def generate_secret(
 # ==========================================================
 
 __all__ = [
-    # Types
+    # Type aliases
     "PasswordHash",
     "RefreshTokenHash",
     "APIKey",
@@ -528,16 +593,18 @@ __all__ = [
     "password_strength",
     "normalize_password",
 
-    # Password inspection
+    # Password hash inspection
     "get_password_hash_algorithm",
     "is_valid_password_hash",
 
-    # Refresh tokens
+    # Refresh token hashing
     "hash_refresh_token",
     "verify_refresh_token_hash",
 
-    # Secure utilities
+    # Security helpers
     "secure_compare",
+
+    # Secret generation
     "generate_password",
     "generate_secure_token",
     "generate_api_key",

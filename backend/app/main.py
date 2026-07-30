@@ -9,7 +9,8 @@ from app.api.v1.router import api_router
 from app.core.cors import setup_cors
 from app.core.monitor import monitor_devices
 from app.api.schema_routes import router as schema_router
-
+from app.core.database import SessionLocal
+from app.db.seeds.rbac_seed import seed_rbac
 
 # ====================== MAIN APP ======================
 app = FastAPI(
@@ -26,7 +27,10 @@ app.include_router(schema_router)
 setup_cors(app)
 
 # ====================== ROUTERS ======================
-app.include_router(api_router, prefix="/api/v1")
+app.include_router(
+    api_router, 
+    prefix="/api/v1",
+)
 
 # ====================== STARTUP EVENTS ======================
 @app.on_event("startup")

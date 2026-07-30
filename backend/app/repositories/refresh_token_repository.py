@@ -146,7 +146,31 @@ class RefreshTokenRepository:
                 RefreshToken.jwt_id == jwt_id
             )
         )
+    def revoke_family(
+        self,
+        token_family: str,
+        reason: str = "refresh token rotation",
+    ) -> int:
+        """
+        Revoke every active refresh token belonging
+        to the same token family.
+        """
 
+        tokens = (
+            self.db.query(RefreshToken)
+            .filter(
+                RefreshToken.token_family == token_family,
+                RefreshToken.revoked.is_(False),
+            )
+            .all()
+        )
+
+        for token in tokens:
+            token.revoked = True
+            token.revoked_at = datetime.now(timezone.utc)
+            token.revoked_reason = reason
+
+        return len(tokens)
 
 
     # ==========================================================

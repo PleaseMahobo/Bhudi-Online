@@ -1,26 +1,24 @@
 from __future__ import annotations
 
 from uuid import UUID
+from typing import Callable
 
+from app.services.authorization_service import AuthorizationService
 from fastapi import (
     Depends,
     HTTPException,
     Request,
     status,
 )
-
 from sqlalchemy.orm import Session
-
-from app.database.session import get_db
 
 from app.core.jwt import (
     extract_access_token_subject,
 )
-
+from app.database.session import get_db
 from app.repositories.user_repository import (
     UserRepository,
 )
-
 
 
 # ==========================================================
@@ -32,39 +30,29 @@ def authentication_error(
     detail: str = "Not authenticated",
 ) -> HTTPException:
     """
-    Standard authentication failure.
-
-    Used consistently across
-    dependency functions.
+    Standard authentication exception.
     """
 
     return HTTPException(
-
         status_code=status.HTTP_401_UNAUTHORIZED,
-
         detail=detail,
-
         headers={
             "WWW-Authenticate": "Bearer",
         },
     )
 
 
-
 def authorization_error(
     detail: str = "Insufficient permissions",
 ) -> HTTPException:
     """
-    Standard authorization failure.
+    Standard authorization exception.
     """
 
     return HTTPException(
-
         status_code=status.HTTP_403_FORBIDDEN,
-
         detail=detail,
     )
-
 
 
 # ==========================================================
@@ -76,32 +64,15 @@ def get_access_token(
     request: Request,
 ) -> str:
     """
-    Extract access JWT.
+    Extract an access token from either:
 
-    Supported clients:
-
-    1. API clients
-
-       Authorization:
-       Bearer <token>
-
-
-    2. Browser clients
-
-       HttpOnly cookie:
-
-       access_token
-
-
-    Refresh tokens are rejected later
-    during JWT validation.
+    • Authorization header
+    • HttpOnly cookie
     """
-
 
     authorization = request.headers.get(
         "Authorization"
     )
-
 
     if authorization:
 
@@ -109,33 +80,54 @@ def get_access_token(
             authorization.partition(" ")
         )
 
+        if (
+            scheme.lower() == "bearer"
+            and token.strip()
+        ):
+            return token.strip()
+
+    cookie_token = request.cookies.get(
+        "access_token"
+    )
+
+    if cookie_token:
+        return cookie_token
+
+    raise authentication_error(
+        "Authentication credentials missing"
+    )
+
+
+# ==========================================================
+# Optional Access Token
+# ==========================================================
+
+
+def get_optional_access_token(
+    request: Request,
+) -> str | None:
+
+    authorization = request.headers.get(
+        "Authorization"
+    )
+
+    if authorization:
+
+        scheme, _, token = (
+            authorization.partition(" ")
+        )
 
         if (
             scheme.lower() == "bearer"
             and token.strip()
         ):
-
             return token.strip()
 
-
-
-    cookie_token = (
-        request.cookies.get(
-            "access_token"
-        )
+    return request.cookies.get(
+        "access_token"
     )
 
 
-    if cookie_token:
-
-        return cookie_token
-
-
-
-    raise authentication_error(
-        "Authentication credentials missing"
-    )
-    
 # ==========================================================
 # Current User Dependency
 # ==========================================================
@@ -145,41 +137,13 @@ def get_current_user(
     token: str = Depends(
         get_access_token
     ),
-
     db: Session = Depends(
         get_db
     ),
 ):
     """
-    Resolve the authenticated Bhudi user.
-
-    Validation flow:
-
-        1. Extract bearer token
-        2. Validate access JWT
-        3. Extract user UUID
-        4. Load user
-        5. Verify active status
-        6. Return User object
-
-
-    Used by:
-
-        Depends(get_current_user)
+    Resolve the authenticated user.
     """
-
-
-    #
-    # Validate JWT
-    #
-    # This ensures:
-    #
-    # - signature valid
-    # - expiry valid
-    # - issuer valid
-    # - audience valid
-    # - token type == access
-    #
 
     try:
 
@@ -189,11 +153,12 @@ def get_current_user(
             )
         )
 
+        user_uuid = UUID(
+            user_id
+        )
 
     except HTTPException:
-
         raise
-
 
     except Exception:
 
@@ -201,41 +166,13 @@ def get_current_user(
             "Invalid authentication credentials"
         )
 
-
-
-    #
-    # Convert database identifier
-    #
-
-    try:
-
-        user_uuid = UUID(
-            user_id
-        )
-
-
-    except ValueError:
-
-        raise authentication_error(
-            "Invalid user identifier"
-        )
-
-
-
-    #
-    # Lookup user
-    #
-
     repository = UserRepository(
         db
     )
 
-
     user = repository.get_by_id(
         user_uuid
     )
-
-
 
     if user is None:
 
@@ -243,46 +180,17 @@ def get_current_user(
             "User account not found"
         )
 
-
-
-    #
-    # Account status enforcement
-    #
-
     if not user.active:
 
         raise authorization_error(
             "User account is disabled"
         )
 
-
-
     return user
 
 # ==========================================================
-# Optional Authentication
+# Optional User Dependency
 # ==========================================================
-
-
-def get_optional_access_token(
-    request: Request,
-) -> str | None:
-    """
-    Returns an access token if present.
-    Never raises authentication errors.
-    """
-
-    authorization = request.headers.get("Authorization")
-
-    if authorization:
-        scheme, _, token = authorization.partition(" ")
-
-        if scheme.lower() == "bearer" and token.strip():
-            return token.strip()
-
-    cookie_token = request.cookies.get("access_token")
-
-    return cookie_token
 
 
 def get_optional_user(
@@ -294,27 +202,41 @@ def get_optional_user(
     ),
 ):
     """
-    Returns the authenticated user when
-    credentials exist. Missing token returns None.
+    Return the authenticated user when credentials
+    exist. Missing or invalid credentials return None.
     """
 
     if token is None:
         return None
 
     try:
-        user_id = extract_access_token_subject(token)
-        user_uuid = UUID(user_id)
+
+        user_id = extract_access_token_subject(
+            token
+        )
+
+        user_uuid = UUID(
+            user_id
+        )
+
     except Exception:
         return None
 
-    repository = UserRepository(db)
-    user = repository.get_by_id(user_uuid)
+    repository = UserRepository(
+        db
+    )
 
-    if user is None or not user.active:
+    user = repository.get_by_id(
+        user_uuid
+    )
+
+    if user is None:
+        return None
+
+    if not user.active:
         return None
 
     return user
-
 
 
 # ==========================================================
@@ -326,56 +248,30 @@ def require_role(
     *allowed_roles: str,
 ):
     """
-    Dependency factory for role checks.
-
-    Example:
-
-        @router.get("/admin")
-        def admin_page(
-            user=Depends(
-                require_role("admin")
-            )
-        ):
-            ...
-
-
-    Supports future expansion:
-
-        admin
-
-        technician
-
-        analyst
+    Dependency factory for role-based authorization.
     """
 
-
     def role_checker(
-        user = Depends(
+        user=Depends(
             get_current_user
         ),
     ):
 
-        user_role = (
-            getattr(
-                user,
-                "role",
-                None,
-            )
+        role = getattr(
+            user,
+            "role",
+            None,
         )
 
-
-        if user_role not in allowed_roles:
+        if role not in allowed_roles:
 
             raise authorization_error(
                 "Insufficient permissions"
             )
 
-
         return user
 
-
     return role_checker
-
 
 
 # ==========================================================
@@ -384,20 +280,17 @@ def require_role(
 
 
 def require_admin(
-    user = Depends(
-        require_role("admin")
+    user=Depends(
+        require_role(
+            "admin",
+        )
     ),
 ):
     """
-    Restricts access to administrators.
-
-    Usage:
-
-        Depends(require_admin)
+    Restrict endpoint access to administrators.
     """
 
     return user
-
 
 
 # ==========================================================
@@ -406,15 +299,12 @@ def require_admin(
 
 
 def require_active_user(
-    user = Depends(
+    user=Depends(
         get_current_user
     ),
 ):
     """
     Explicit active-user dependency.
-
-    Useful when endpoint intent
-    should be obvious.
     """
 
     if not user.active:
@@ -423,11 +313,10 @@ def require_active_user(
             "Account disabled"
         )
 
-
     return user
 
 # ==========================================================
-# Tenant Authorization Helpers
+# Tenant Authorization
 # ==========================================================
 
 
@@ -435,14 +324,8 @@ def get_user_tenant_id(
     user,
 ):
     """
-    Returns the tenant identifier
-    associated with a user.
-
-    Supports future multi-tenant
-    authorization.
-
-    Current Bhudi deployments may
-    not yet enforce tenant isolation.
+    Return the tenant identifier associated
+    with the authenticated user.
     """
 
     return getattr(
@@ -452,42 +335,32 @@ def get_user_tenant_id(
     )
 
 
-
 def require_tenant_user(
-    user = Depends(
+    user=Depends(
         get_current_user
     ),
 ):
     """
-    Ensures authenticated user
-    belongs to a tenant.
-
-    Useful when enabling:
-
-    - MSP isolation
-    - customer separation
-    - tenant-scoped assets
+    Require the authenticated user to belong
+    to a tenant.
     """
 
-
-    tenant_id = get_user_tenant_id(
-        user
-    )
-
-
-    if tenant_id is None:
+    if (
+        get_user_tenant_id(
+            user
+        )
+        is None
+    ):
 
         raise authorization_error(
             "Tenant association required"
         )
 
-
     return user
 
 
-
 # ==========================================================
-# Permission Helpers
+# Permission Authorization
 # ==========================================================
 
 
@@ -496,59 +369,35 @@ def has_permission(
     permission: str,
 ) -> bool:
     """
-    Checks whether a user has
-    a specific permission.
-
-    Designed for future RBAC expansion.
-
-    Example:
-
-        devices.delete
-
-        alerts.manage
-
-        users.create
+    Determine whether the user possesses
+    the requested permission.
     """
 
     permissions = getattr(
         user,
         "permissions",
-        [],
+        None,
     )
 
-
-    if permissions is None:
-
+    if not permissions:
         return False
 
-
     return permission in permissions
-
 
 
 def require_permission(
     permission: str,
 ):
     """
-    Dependency factory for
-    fine-grained permissions.
-
-    Example:
-
-        Depends(
-            require_permission(
-                "devices.delete"
-            )
-        )
+    Dependency factory for fine-grained
+    permission checks.
     """
 
-
     def permission_checker(
-        user = Depends(
+        user=Depends(
             get_current_user
         ),
     ):
-
 
         if not has_permission(
             user,
@@ -559,12 +408,9 @@ def require_permission(
                 "Permission denied"
             )
 
-
         return user
 
-
     return permission_checker
-
 
 
 # ==========================================================
@@ -575,137 +421,86 @@ def require_permission(
 def verify_resource_owner(
     owner_id,
     user,
-):
+) -> bool:
     """
-    Ensures the current user owns
-    a resource.
-
-    Useful for:
-
-    - profiles
-    - API keys
-    - personal settings
+    Ensure the authenticated user owns
+    the requested resource.
     """
 
-
-    if str(owner_id) != str(
-        user.id
-    ):
+    if str(owner_id) != str(user.id):
 
         raise authorization_error(
             "Resource access denied"
         )
 
-
     return True
 
-
-
 # ==========================================================
-# Security Context Helper
+# Security Context
 # ==========================================================
 
 
 def get_security_context(
-    user = Depends(
+    user=Depends(
         get_current_user
     ),
 ):
     """
-    Returns a normalized security
-    context for services.
-
-    Avoids passing raw User objects
-    everywhere.
-
-    Future extension point:
-
-    {
-        user_id,
-        tenant_id,
-        role,
-        permissions
-    }
+    Return a normalized security context for
+    downstream services.
     """
 
-
     return {
-
         "user_id": user.id,
-
         "tenant_id": getattr(
             user,
             "tenant_id",
             None,
         ),
-
         "role": getattr(
             user,
             "role",
             None,
         ),
-
         "permissions": getattr(
             user,
             "permissions",
             [],
         ),
     }
-    
+
+
 # ==========================================================
-# Common Dependency Aliases
+# Dependency Aliases
 # ==========================================================
 
 
 def current_user(
-    user = Depends(
+    user=Depends(
         get_current_user
     ),
 ):
-    """
-    Alias dependency.
-
-    Allows cleaner endpoint syntax.
-
-    Example:
-
-        user: User = Depends(
-            current_user
-        )
-    """
-
     return user
-
 
 
 def current_admin(
-    user = Depends(
+    user=Depends(
         require_admin
     ),
 ):
-    """
-    Administrator alias dependency.
-    """
-
     return user
-
 
 
 def current_tenant_user(
-    user = Depends(
+    user=Depends(
         require_tenant_user
     ),
 ):
-    """
-    Tenant-scoped user alias.
-    """
-
     return user
 
 
-
 # ==========================================================
-# Authentication State Helpers
+# Authentication State
 # ==========================================================
 
 
@@ -714,14 +509,6 @@ def is_authenticated(
 ) -> bool:
     """
     Lightweight authentication check.
-
-    Does not load the database user.
-
-    Useful for:
-
-    - middleware
-    - logging
-    - request tracing
     """
 
     try:
@@ -732,76 +519,131 @@ def is_authenticated(
 
         return True
 
-
     except HTTPException:
 
         return False
-
 
 
 # ==========================================================
 # Public Module API
 # ==========================================================
 
-
 __all__ = [
-
-    #
-    # Token extraction
-    #
-
+    "authentication_error",
+    "authorization_error",
     "get_access_token",
-
-
-    #
-    # User dependencies
-    #
-
+    "get_optional_access_token",
     "get_current_user",
-
     "get_optional_user",
-
     "require_active_user",
-
-
-    #
-    # Role authorization
-    #
-
     "require_role",
-
     "require_admin",
-
-
-    #
-    # Permission authorization
-    #
-
     "require_permission",
-
     "has_permission",
-
-
-    #
-    # Tenant authorization
-    #
-
     "require_tenant_user",
-
     "get_user_tenant_id",
-
-
-    #
-    # Helpers
-    #
-
     "verify_resource_owner",
-
     "get_security_context",
-
     "current_user",
-
     "current_admin",
-
     "current_tenant_user",
+    "is_authenticated",
 ]
+
+# ==========================================================
+# RBAC Authorization Dependencies
+# ==========================================================
+
+
+def require_permission(
+    permission_name: str,
+) -> Callable:
+    """
+    FastAPI dependency factory.
+
+    Usage:
+
+        Depends(
+            require_permission(
+                "device.read"
+            )
+        )
+    """
+
+    def permission_checker(
+        current_user=Depends(get_current_user),
+        db: Session = Depends(get_db),
+    ):
+        authorization_service = AuthorizationService(
+            db
+        )
+
+        authorization_service.require_permission(
+            current_user.id,
+            permission_name,
+        )
+
+        return current_user
+
+    return permission_checker
+
+
+
+def require_role(
+    role_name: str,
+) -> Callable:
+    """
+    Require a specific role.
+
+    Usage:
+
+        Depends(
+            require_role(
+                "admin"
+            )
+        )
+    """
+
+    def role_checker(
+        current_user=Depends(get_current_user),
+        db: Session = Depends(get_db),
+    ):
+        authorization_service = AuthorizationService(
+            db
+        )
+
+        authorization_service.require_role(
+            current_user.id,
+            role_name,
+        )
+
+        return current_user
+
+    return role_checker
+
+
+
+def require_admin():
+    """
+    Require administrator privileges.
+
+    Usage:
+
+        Depends(require_admin())
+    """
+
+    def admin_checker(
+        current_user=Depends(get_current_user),
+        db: Session = Depends(get_db),
+    ):
+        authorization_service = AuthorizationService(
+            db
+        )
+
+        authorization_service.require_admin(
+            current_user.id,
+        )
+
+        return current_user
+
+    return admin_checker

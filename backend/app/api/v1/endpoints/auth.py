@@ -6,67 +6,57 @@ from fastapi import (
     HTTPException,
     Request,
     Response,
+    Body,
     status,
 )
-
 from sqlalchemy.orm import Session
 
-
+from app.core.config import settings
+from app.core.dependencies import get_current_user
 from app.database.session import get_db
-
-
-from app.core.dependencies import (
-    get_current_user,
-)
-
-
 from app.models.user import User
-
-
 from app.schemas.auth import (
-    RegisterRequest,
     LoginRequest,
+    MessageResponse,
     RefreshTokenRequest,
+    RegisterRequest,
     TokenResponse,
     UserResponse,
-    MessageResponse,
 )
-
-
-from app.services.auth_service import (
-    AuthService,
-)
-
-
+from app.services.auth_service import AuthService
 
 router = APIRouter(
     prefix="/auth",
-    tags=[
-        "Authentication"
-    ],
+    tags=["Authentication"],
 )
-
-
 
 # ==========================================================
 # Cookie Configuration
 # ==========================================================
 
-
 ACCESS_COOKIE = "access_token"
-
 REFRESH_COOKIE = "refresh_token"
 
+ACCESS_COOKIE_MAX_AGE = 60 * 15
+REFRESH_COOKIE_MAX_AGE = 60 * 60 * 24 * 30
 
-ACCESS_COOKIE_MAX_AGE = (
-    60 * 15
+COOKIE_SECURE = getattr(
+    settings,
+    "COOKIE_SECURE",
+    True,
 )
 
-
-REFRESH_COOKIE_MAX_AGE = (
-    60 * 60 * 24 * 30
+COOKIE_SAMESITE = getattr(
+    settings,
+    "COOKIE_SAMESITE",
+    "lax",
 )
 
+COOKIE_DOMAIN = getattr(
+    settings,
+    "COOKIE_DOMAIN",
+    None,
+)
 
 
 def set_auth_cookies(
@@ -75,54 +65,30 @@ def set_auth_cookies(
     refresh_token: str,
 ) -> None:
     """
-    Stores JWT tokens securely.
-
-    Access:
-        HttpOnly cookie
-
-    Refresh:
-        HttpOnly cookie
-
-    Prevents JavaScript access.
+    Store authentication tokens in secure HttpOnly cookies.
     """
 
-
     response.set_cookie(
-
         key=ACCESS_COOKIE,
-
         value=access_token,
-
         httponly=True,
-
-        secure=True,
-
-        samesite="lax",
-
+        secure=COOKIE_SECURE,
+        samesite=COOKIE_SAMESITE,
+        domain=COOKIE_DOMAIN,
         path="/",
-
         max_age=ACCESS_COOKIE_MAX_AGE,
     )
 
-
-
     response.set_cookie(
-
         key=REFRESH_COOKIE,
-
         value=refresh_token,
-
         httponly=True,
-
-        secure=True,
-
-        samesite="lax",
-
+        secure=COOKIE_SECURE,
+        samesite=COOKIE_SAMESITE,
+        domain=COOKIE_DOMAIN,
         path="/",
-
         max_age=REFRESH_COOKIE_MAX_AGE,
     )
-
 
 
 def clear_auth_cookies(
@@ -132,20 +98,21 @@ def clear_auth_cookies(
     Remove authentication cookies.
     """
 
+    response.delete_cookie(
+        key=ACCESS_COOKIE,
+        domain=COOKIE_DOMAIN,
+        path="/",
+    )
 
     response.delete_cookie(
-        ACCESS_COOKIE,
+        key=REFRESH_COOKIE,
+        domain=COOKIE_DOMAIN,
         path="/",
     )
 
 
-    response.delete_cookie(
-        REFRESH_COOKIE,
-        path="/",
-    )
-    
 # ==========================================================
-# REGISTER
+# Registration
 # ==========================================================
 
 
@@ -158,448 +125,248 @@ def register(
     request: RegisterRequest,
     db: Session = Depends(get_db),
 ):
-    """
-    Register a new Bhudi user.
+    service = AuthService(db)
 
-    Business logic is handled by
-    AuthService.
-    """
-
-    service = AuthService(
-        db
-    )
-
-
-    user = service.register(
-
+    return service.register(
         email=request.email,
-
         password=request.password,
-
         first_name=request.first_name,
-
         last_name=request.last_name,
     )
-
-
-    return user
-
-
-
+    
 # ==========================================================
-# LOGIN
+# Login
 # ==========================================================
 
 
 @router.post(
     "/login",
     response_model=TokenResponse,
+    status_code=status.HTTP_200_OK,
 )
 def login(
     request: LoginRequest,
-
     response: Response,
-
     http_request: Request,
-
     db: Session = Depends(get_db),
 ):
-    """
-    Authenticate user and issue tokens.
-
-    Captures:
-
-    - IP address
-    - User agent
-
-    for refresh-token session tracking.
-    """
-
-    service = AuthService(
-        db
-    )
-
+    service = AuthService(db)
 
     user = service.authenticate(
-
         request.email,
-
         request.password,
     )
 
-
-
-    #
-    # Capture client information
-    #
-
-    ip_address = None
-
-
-    if http_request.client:
-
-        ip_address = (
-            http_request.client.host
-        )
-
-
-
-    user_agent = (
-        http_request.headers.get(
-            "user-agent"
-        )
+    ip_address = (
+        http_request.client.host
+        if http_request.client
+        else None
     )
 
+    user_agent = http_request.headers.get(
+        "user-agent"
+    )
 
+    device_name = http_request.headers.get(
+        "x-device-name"
+    )
 
     tokens = service.login(
-
         user,
-
         ip_address=ip_address,
-
         user_agent=user_agent,
+        device_name=device_name,
     )
-
-
 
     set_auth_cookies(
-
-        response,
-
-        tokens["access_token"],
-
-        tokens["refresh_token"],
+        response=response,
+        access_token=tokens["access_token"],
+        refresh_token=tokens["refresh_token"],
     )
 
+    return TokenResponse(**tokens)
 
-
-    return tokens
 
 # ==========================================================
-# REFRESH TOKEN ROTATION
+# Refresh Token Rotation
 # ==========================================================
 
 
 @router.post(
     "/refresh",
     response_model=TokenResponse,
+    status_code=status.HTTP_200_OK,
 )
 def refresh(
     request: Request,
-
     response: Response,
-
-    body: RefreshTokenRequest | None = None,
-
+    body: RefreshTokenRequest | None = Body(default=None),
     db: Session = Depends(get_db),
 ):
-    """
-    Rotate refresh token.
+    service = AuthService(db)
 
-    Supported clients:
-
-    Browser:
-        HttpOnly refresh_token cookie
-
-
-    API clients:
-        JSON body refresh_token
-
-
-    Security:
-
-    - JWT validation
-    - Token family validation
-    - Replay detection
-    - Rotation
-    """
-
-    service = AuthService(
-        db
+    refresh_token = request.cookies.get(
+        REFRESH_COOKIE
     )
 
-
-    #
-    # 1. Try secure cookie first
-    #
-
-    refresh_token = (
-        request.cookies.get(
-            REFRESH_COOKIE
-        )
-    )
-
-
-    #
-    # 2. Fallback to API request body
-    #
-
-    if (
-        refresh_token is None
-        and body is not None
-    ):
-
-        refresh_token = (
-            body.refresh_token
-        )
-
-
+    if refresh_token is None and body is not None:
+        refresh_token = body.refresh_token
 
     if not refresh_token:
-
         raise HTTPException(
-
             status_code=status.HTTP_401_UNAUTHORIZED,
-
             detail="Refresh token missing",
-
             headers={
                 "WWW-Authenticate": "Bearer",
             },
         )
 
-
-
-    #
-    # AuthService handles:
-    #
-    # - JWT verification
-    # - database lookup
-    # - replay detection
-    # - token rotation
-    #
-
-    tokens = (
-        service.refresh_access_token(
-            refresh_token
-        )
+    tokens = service.refresh_access_token(
+        refresh_token
     )
-
-
-
-    #
-    # Replace old cookies
-    #
 
     set_auth_cookies(
-
-        response,
-
-        tokens["access_token"],
-
-        tokens["refresh_token"],
+        response=response,
+        access_token=tokens["access_token"],
+        refresh_token=tokens["refresh_token"],
     )
 
-
-
-    return tokens
+    return TokenResponse(**tokens)
 
 # ==========================================================
-# CURRENT USER
+# Current User
 # ==========================================================
 
 
 @router.get(
     "/me",
     response_model=UserResponse,
+    status_code=status.HTTP_200_OK,
 )
 def me(
     current_user: User = Depends(
-        get_current_user
+        get_current_user,
     ),
 ):
-    """
-    Return authenticated user.
-
-    Protected endpoint.
-
-    Requires:
-
-        Authorization:
-        Bearer <access_token>
-
-    or
-
-        access_token cookie
-    """
-
     return current_user
 
 
-
 # ==========================================================
-# LOGOUT
+# Logout
 # ==========================================================
 
 
 @router.post(
     "/logout",
     response_model=MessageResponse,
+    status_code=status.HTTP_200_OK,
 )
-def logout(
+async def logout(
     request: Request,
-
     response: Response,
-
     db: Session = Depends(get_db),
 ):
-    """
-    Logout current session.
+    service = AuthService(db)
 
-    Actions:
-
-    1. Revoke refresh token
-    2. Delete authentication cookies
-    """
-
-
-    service = AuthService(
-        db
+    refresh_token = request.cookies.get(
+        REFRESH_COOKIE,
     )
-
-
-    refresh_token = (
-        request.cookies.get(
-            REFRESH_COOKIE
-        )
-    )
-
-
 
     if refresh_token:
+        service.logout(refresh_token)
 
-        service.logout(
-            refresh_token
-        )
-
-
-
-    clear_auth_cookies(
-        response
-    )
-
-
+    clear_auth_cookies(response)
 
     return MessageResponse(
-        message="Logged out successfully"
+        message="Logged out successfully",
     )
-
 
 
 # ==========================================================
-# LOGOUT ALL SESSIONS
+# Logout All Sessions
 # ==========================================================
 
 
 @router.post(
     "/logout-all",
     response_model=MessageResponse,
+    status_code=status.HTTP_200_OK,
 )
 def logout_all(
     response: Response,
-
     current_user: User = Depends(
-        get_current_user
+        get_current_user,
     ),
-
     db: Session = Depends(get_db),
 ):
-    """
-    Revoke every active session
-    belonging to the user.
+    service = AuthService(db)
 
-    Used for:
-
-    - password compromise
-    - security response
-    - user request
-    """
-
-
-    service = AuthService(
-        db
+    revoked = service.logout_all(
+        current_user,
     )
 
-
-    service.logout_all(
-        current_user
-    )
-
-
-
-    clear_auth_cookies(
-        response
-    )
-
-
+    clear_auth_cookies(response)
 
     return MessageResponse(
-        message="All sessions logged out successfully"
+        message=(
+            f"Logged out from {revoked} active "
+            "session(s)."
+        ),
     )
     
 # ==========================================================
-# Cookie Security Helpers
+# Revoke Current Session
 # ==========================================================
 
 
-COOKIE_SECURE = getattr(
-    settings,
-    "COOKIE_SECURE",
-    True,
+@router.post(
+    "/sessions/{session_id}/revoke",
+    response_model=MessageResponse,
+    status_code=status.HTTP_200_OK,
 )
+def revoke_session(
+    session_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    service = AuthService(db)
 
+    revoked = service.revoke_session(
+        session_id=session_id,
+    )
 
-COOKIE_SAMESITE = getattr(
-    settings,
-    "COOKIE_SAMESITE",
-    "lax",
-)
-
-
-
-def set_auth_cookies(
-    response: Response,
-    access_token: str,
-    refresh_token: str,
-) -> None:
-    """
-    Store authentication tokens
-    in HttpOnly cookies.
-    """
-
-
-    response.set_cookie(
-
-        key=ACCESS_COOKIE,
-
-        value=access_token,
-
-        httponly=True,
-
-        secure=COOKIE_SECURE,
-
-        samesite=COOKIE_SAMESITE,
-
-        path="/",
-
-        max_age=ACCESS_COOKIE_MAX_AGE,
+    return MessageResponse(
+        message=(
+            f"Revoked {revoked} token(s) "
+            "for the specified session."
+        ),
     )
 
 
-    response.set_cookie(
+# ==========================================================
+# Active Sessions
+# ==========================================================
 
-        key=REFRESH_COOKIE,
 
-        value=refresh_token,
+@router.get(
+    "/sessions",
+    status_code=status.HTTP_200_OK,
+)
+def active_sessions(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    service = AuthService(db)
 
-        httponly=True,
-
-        secure=COOKIE_SECURE,
-
-        samesite=COOKIE_SAMESITE,
-
-        path="/",
-
-        max_age=REFRESH_COOKIE_MAX_AGE,
+    return service.get_active_sessions(
+        current_user,
     )
+
+
+# ==========================================================
+# Module Public API
+# ==========================================================
+
+__all__ = [
+    "router",
+]

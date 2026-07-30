@@ -11,9 +11,12 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.models.base import Base
 
 if TYPE_CHECKING:
+    from .permission import Permission
     from .refresh_token import RefreshToken
     from .tenant import Tenant
     from .profile import Profile
+    from .user_role import UserRole
+    from .role import Role
 
 
 class User(Base):
@@ -113,10 +116,22 @@ class User(Base):
         passive_deletes=True,
     )
     
+    user_roles: Mapped[list["UserRole"]] = relationship(
+            "UserRole",
+            back_populates="user",
+            cascade="all, delete-orphan",
+    )
+    
     profile: Mapped["Profile | None"] = relationship(
         "Profile",
         back_populates="user",
         uselist=False,
+        cascade="all, delete-orphan",
+    )
+    
+    user_roles: Mapped[list["UserRole"]] = relationship(
+        "UserRole",
+        back_populates="user",
         cascade="all, delete-orphan",
     )
 
