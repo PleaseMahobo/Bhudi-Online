@@ -121,7 +121,8 @@ def upgrade() -> None:
     op.alter_column('incidents', 'device_id',
                existing_type=sa.TEXT(),
                type_=sa.UUID(),
-               existing_nullable=True)
+               existing_nullable=True,
+               postgresql_using="device_id::uuid",)
     op.alter_column('incidents', 'title',
                existing_type=sa.TEXT(),
                nullable=False)
@@ -174,6 +175,11 @@ def upgrade() -> None:
                existing_type=sa.VARCHAR(length=50),
                type_=sa.String(length=64),
                existing_nullable=True)
+    op.execute("""
+               UPDATE refresh_tokens
+               SET login_method = 'password'
+               WHERE login_method IS NULL
+               """)
     op.alter_column('refresh_tokens', 'login_method',
                existing_type=sa.VARCHAR(length=50),
                type_=sa.String(length=32),
@@ -187,7 +193,8 @@ def upgrade() -> None:
     op.alter_column('response_actions', 'device_id',
                existing_type=sa.TEXT(),
                type_=sa.UUID(),
-               existing_nullable=True)
+               existing_nullable=True,
+               postgresql_using="device_id::uuid",)
     op.alter_column('response_actions', 'action',
                existing_type=sa.TEXT(),
                nullable=False)
@@ -219,7 +226,8 @@ def upgrade() -> None:
     op.alter_column('script_tasks', 'device_id',
                existing_type=sa.TEXT(),
                type_=sa.UUID(),
-               nullable=False)
+               nullable=False,
+               postgresql_using="device_id::uuid",)
     op.alter_column('script_tasks', 'status',
                existing_type=sa.TEXT(),
                nullable=False,
@@ -251,10 +259,27 @@ def upgrade() -> None:
                existing_server_default=sa.text('now()'))
     op.add_column('telemetry', sa.Column('device_id', sa.UUID(), nullable=False))
     op.add_column('telemetry', sa.Column('tenant_id', sa.UUID(), nullable=False))
-    op.alter_column('telemetry', 'id',
-               existing_type=sa.BIGINT(),
-               type_=sa.UUID(),
-               existing_nullable=False)
+    # Drop the old BIGSERIAL default
+    # Drop the old BIGSERIAL default
+    op.execute("""
+        ALTER TABLE telemetry
+        ALTER COLUMN id DROP DEFAULT;
+    """)
+
+    # Convert every existing row to a UUID
+    op.execute("""
+        ALTER TABLE telemetry
+        ALTER COLUMN id
+        TYPE UUID
+        USING gen_random_uuid();
+    """)
+
+    # Add the UUID default for new rows
+    op.execute("""
+        ALTER TABLE telemetry
+        ALTER COLUMN id
+        SET DEFAULT gen_random_uuid();
+    """)
     op.alter_column('telemetry', 'cpu_usage',
                existing_type=sa.DOUBLE_PRECISION(precision=53),
                type_=sa.Numeric(precision=8, scale=2),
@@ -528,10 +553,11 @@ def downgrade() -> None:
     op.alter_column('incidents', 'title',
                existing_type=sa.TEXT(),
                nullable=True)
-    op.alter_column('incidents', 'device_id',
-               existing_type=sa.UUID(),
-               type_=sa.TEXT(),
-               existing_nullable=True)
+    op.alter_column("incidents","device_id",
+               existing_type=sa.String(),
+               type_=postgresql.UUID(as_uuid=True),
+               existing_nullable=True,
+               postgresql_using="device_id::uuid",)
     op.drop_column('incidents', 'tenant_id')
     op.drop_constraint(None, 'incident_timeline', type_='foreignkey')
     op.alter_column('incident_timeline', 'created_at',
