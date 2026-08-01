@@ -4,13 +4,13 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import ForeignKey, Index, Integer, Text, func
-from sqlalchemy.dialects.postgresql import TIMESTAMP, UUID
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, Text, Uuid, func  # pyright: ignore[reportMissingImports]
+from sqlalchemy.orm import Mapped, mapped_column, relationship  # pyright: ignore[reportMissingImports]
 
 from app.models.base import Base
 
 if TYPE_CHECKING:
+    from .agent import Agent
     from .action import Action
     from .alert import Alert
     from .device_event import DeviceEvent
@@ -70,25 +70,25 @@ class Device(Base):
     )
 
     last_seen: Mapped[datetime | None] = mapped_column(
-        TIMESTAMP,
+        DateTime,
         nullable=True,
         server_default=func.now(),
     )
 
     created_at: Mapped[datetime | None] = mapped_column(
-        TIMESTAMP,
+        DateTime,
         nullable=True,
         server_default=func.now(),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        Uuid(as_uuid=True),
         primary_key=True,
         server_default=func.gen_random_uuid(),
     )
 
     tenant_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True),
+        Uuid(as_uuid=True),
         ForeignKey("tenants.id"),
         nullable=True,
     )
@@ -144,8 +144,8 @@ class Device(Base):
     )
     
     commands: Mapped[list["Command"]] = relationship(
-    back_populates="device",
-    cascade="all, delete-orphan",
+        back_populates="device",
+        cascade="all, delete-orphan",
     )
 
     events: Mapped[list["DeviceEvent"]] = relationship(
@@ -169,9 +169,9 @@ class Device(Base):
     )
     
     incidents: Mapped[list["Incident"]] = relationship(
-         "Incident",
-         back_populates="device",
-         cascade="all, delete-orphan",
+        "Incident",
+        back_populates="device",
+        cascade="all, delete-orphan",
     )
     
     response_actions: Mapped[list["ResponseAction"]] = relationship(
@@ -181,8 +181,16 @@ class Device(Base):
     )
     
     script_tasks: Mapped[list["ScriptTask"]] = relationship(
-    back_populates="device",
-    cascade="all, delete-orphan",
+        back_populates="device",
+        cascade="all, delete-orphan",
+    )
+    
+    agent: Mapped["Agent | None"] = relationship(
+        "Agent",
+        back_populates="device",
+        cascade="all, delete-orphan",
+        single_parent=True,
+        uselist=False,
     )
 
     def __repr__(self) -> str:
