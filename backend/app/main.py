@@ -11,6 +11,8 @@ from app.core.monitor import monitor_devices
 from app.api.schema_routes import router as schema_router
 from app.core.database import SessionLocal
 from app.db.seeds.rbac_seed import seed_rbac
+from app.workers.command_dispatcher import dispatcher
+from app.workers.executor_worker import executor_worker
 
 # ====================== MAIN APP ======================
 app = FastAPI(
@@ -38,10 +40,14 @@ async def startup_event():
     """Start background tasks"""
     print("🚀 Bhudi RMM API starting...")
     asyncio.create_task(monitor_devices())
+    dispatcher.start()
+    executor_worker.start()
 
 @app.on_event("shutdown")
 async def shutdown_event():
     print("🛑 Bhudi RMM API shutting down...")
+    dispatcher.stop()
+    executor_worker.stop()
 
 # ====================== HEALTH CHECK ======================
 @app.get("/health", tags=["Health"])
@@ -63,50 +69,9 @@ async def root():
 
 print("✅ Bhudi RMM API initialized successfully")
 
-# ====================== WebSocket Device Heartbeat ======================
+# ====================== WebSocket Heartbeat ======================
 from fastapi import WebSocket, WebSocketDisconnect
-from typing import List
-import asyncio
-
-class ConnectionManager:
-    def __init__(self):
-        self.active_connections: List[WebSocket] = []
-
-    async def connect(self, websocket: WebSocket):
-        await websocket.accept()
-        self.active_connections.append(websocket)
-
-    def disconnect(self, websocket: WebSocket):
-        self.active_connections.remove(websocket)
-
-    async def broadcast(self, message: dict):
-        for connection in self.active_connections[:]:
-            try:
-                await connection.send_json(message)
-            except:
-                self.disconnect(connection)
-
-manager = ConnectionManager()
-
-@app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
-    await manager.connect(websocket)
-    try:
-        while True:
-            data = await websocket.receive_text()
-            await manager.broadcast({
-                "type": "live_update",
-                "timestamp": asyncio.get_event_loop().time(),
-                "message": data
-            })
-    except WebSocketDisconnect:
-        manager.disconnect(websocket)
-
-        # ====================== WebSocket Heartbeat ======================
-from fastapi import WebSocket, WebSocketDisconnect
-from typing import List, Dict
-import asyncio
-import json
+from typing import Dict, List
 
 class ConnectionManager:
     def __init__(self):
@@ -118,13 +83,14 @@ class ConnectionManager:
         self.active_connections.append(websocket)
 
     def disconnect(self, websocket: WebSocket):
-        self.active_connections.remove(websocket)
+        if websocket in self.active_connections:
+            self.active_connections.remove(websocket)
 
     async def broadcast(self, message: dict):
         for connection in self.active_connections[:]:
             try:
                 await connection.send_json(message)
-            except:
+            except Exception:
                 self.disconnect(connection)
 
     async def handle_heartbeat(self, device_id: str, data: dict):
@@ -149,8 +115,7 @@ async def websocket_endpoint(websocket: WebSocket):
     try:
         while True:
             data = await websocket.receive_json()
-            if data.get("type") == "heartbeat":
-                await manager.handle_heartbeat(data.get("device_id"), data)
-            await asyncio.sleep(10)  # Send periodic updates
+            if data.get("type") == "heartbeat" and data.get("device_id"):
+                await manager.handle_heartbeat(data["device_id"], data)
     except WebSocketDisconnect:
         manager.disconnect(websocket)
