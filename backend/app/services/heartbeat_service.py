@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from app.core.database import SessionLocal
 from app.models.device import Device
 
@@ -19,12 +19,12 @@ class HeartbeatService:
                     ip_address=ip,
                     hostname=hostname,
                     status="online",
-                    last_seen=datetime.utcnow()
+                    last_seen=datetime.now(timezone.utc)
                 )
                 db.add(device)
 
             else:
-                device.last_seen = datetime.utcnow()
+                device.last_seen = datetime.now(timezone.utc)
                 device.status = "online"
 
                 if ip:

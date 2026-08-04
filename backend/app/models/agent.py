@@ -11,6 +11,9 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.models.base import Base
 
 if TYPE_CHECKING:
+    from .agent_command import AgentCommand
+    from .command import Command
+    from .device import Device
     from .tenant import Tenant
 
 
@@ -245,15 +248,29 @@ class Agent(Base):
     #
 
     tenant: Mapped["Tenant | None"] = relationship(
-    "Tenant",
-    back_populates="agents",
-)
+        "Tenant",
+        back_populates="agents",
+    )
 
-device = relationship(
-    "Device",
-    back_populates="agent",
-    uselist=False,
-)
+    commands: Mapped[list["Command"]] = relationship(
+        "Command",
+        back_populates="agent",
+        cascade="all, delete-orphan",
+    )
+
+    queued_commands: Mapped[list["AgentCommand"]] = relationship(
+        "AgentCommand",
+        back_populates="agent",
+        cascade="all, delete-orphan",
+    )
+
+    device: Mapped["Device | None"] = relationship(
+        "Device",
+        back_populates="agent",
+        uselist=False,
+        cascade="all, delete-orphan",
+        single_parent=True,
+    )
 
 #
 # Agent Identity

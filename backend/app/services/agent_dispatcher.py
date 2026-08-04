@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -37,6 +38,8 @@ class AgentDispatcher:
         payload: dict[str, Any] | None = None,
         requested_by: uuid.UUID | None = None,
         priority: int = 5,
+        timeout_seconds: int | None = None,
+        requires_reboot: bool = False,
     ) -> AgentCommand:
 
         agent = self.agent_repo.get(agent_id)
@@ -48,21 +51,25 @@ class AgentDispatcher:
             raise ValueError("Agent disabled.")
 
         command = AgentCommand(
+            id=uuid.uuid4(),
             agent_id=agent.id,
             command_type=command_type,
             payload=payload or {},
             priority=priority,
-            requested_by=requested_by,
+            issued_by=requested_by,
+            timeout_seconds=timeout_seconds or agent.command_timeout,
+            requires_reboot=requires_reboot,
         )
-
-        return self.command_repo.create(command)
+        command = self.command_repo.create(command)
+        self.db.commit()
+        self.db.refresh(command)
+        return command
 
     def get_pending_commands(
         self,
         agent_id: uuid.UUID,
     ) -> list[AgentCommand]:
-
-        return self.command_repo.pending_for_agent(agent_id)
+        return self.command_repo.get_pending_commands(agent_id)
 
     def mark_sent(
         self,
@@ -74,7 +81,7 @@ class AgentDispatcher:
         if command is None:
             raise ValueError("Command not found.")
 
-        command.mark_sent()
+        self.command_repo.mark_dispatched(command_id)
 
         self.db.commit()
         self.db.refresh(command)
@@ -92,7 +99,21 @@ class AgentDispatcher:
         if command is None:
             raise ValueError("Command not found.")
 
-        command.mark_completed(result)
+        if command.started_at is None:
+            self.command_repo.mark_running(command_id)
+
+        exit_code = int((result or {}).get("exit_code", 0))
+        stdout = (result or {}).get("stdout", "")
+        stderr = (result or {}).get("stderr", "")
+        command_result = result or {}
+
+        self.command_repo.complete(
+            command_id,
+            exit_code,
+            stdout,
+            stderr,
+            command_result,
+        )
 
         self.db.commit()
         self.db.refresh(command)
@@ -110,7 +131,11 @@ class AgentDispatcher:
         if command is None:
             raise ValueError("Command not found.")
 
-        command.mark_failed(error)
+        self.command_repo.fail(
+            command_id,
+            error,
+            {"error": error, "failed_at": datetime.now(timezone.utc).isoformat()},
+        )
 
         self.db.commit()
         self.db.refresh(command)

@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from uuid import uuid4
 
 class Command:
@@ -10,5 +10,5 @@ class Command:
         self.payload = payload or {}
 
         self.status = "queued"
-        self.created_at = datetime.utcnow()
+        self.created_at = datetime.now(timezone.utc)
         self.result = None

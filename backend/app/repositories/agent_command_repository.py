@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import and_, select, update
 from sqlalchemy.orm import Session
@@ -102,7 +102,25 @@ class AgentCommandRepository:
             .where(AgentCommand.id == command_id)
             .values(
                 status=CommandStatus.RUNNING.value,
-                started_at=datetime.utcnow(),
+                started_at=datetime.now(timezone.utc),
+            )
+        )
+
+    def fail(
+        self,
+        command_id: uuid.UUID,
+        error: str,
+        result: dict | None = None,
+    ) -> None:
+
+        self.db.execute(
+            update(AgentCommand)
+            .where(AgentCommand.id == command_id)
+            .values(
+                status=CommandStatus.FAILED.value,
+                completed_at=datetime.now(timezone.utc),
+                stderr=error,
+                result=result,
             )
         )
 
@@ -130,7 +148,7 @@ class AgentCommandRepository:
             .where(AgentCommand.id == command_id)
             .values(
                 status=status,
-                completed_at=datetime.utcnow(),
+                completed_at=datetime.now(timezone.utc),
                 stdout=stdout,
                 stderr=stderr,
                 exit_code=exit_code,
@@ -172,7 +190,7 @@ class AgentCommandRepository:
             .where(
                 and_(
                     AgentCommand.expires_at.is_not(None),
-                    AgentCommand.expires_at < datetime.utcnow(),
+                    AgentCommand.expires_at < datetime.now(timezone.utc),
                     AgentCommand.status.in_(
                         [
                             CommandStatus.PENDING.value,

@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from datetime import datetime
+from datetime import datetime, timezone
 from app.websocket.event_stream import EventStream
 
 router = APIRouter()
@@ -13,7 +13,7 @@ async def heartbeat(payload: dict):
     agent_id = payload["agent_id"]
 
     AGENT_STATE[agent_id] = {
-        "last_seen": datetime.utcnow(),
+        "last_seen": datetime.now(timezone.utc),
         "status": payload.get("status", "online"),
         "cpu": payload.get("cpu"),
         "ram": payload.get("ram"),

@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from app.core.database import SessionLocal
 from app.models.device import Device
 
@@ -11,7 +11,7 @@ def run_offline_detection():
     db = SessionLocal()
 
     try:
-        cutoff = datetime.utcnow() - timedelta(seconds=OFFLINE_THRESHOLD_SECONDS)
+        cutoff = datetime.now(timezone.utc) - timedelta(seconds=OFFLINE_THRESHOLD_SECONDS)
 
         stale_devices = db.query(Device).filter(
             Device.last_seen < cutoff,

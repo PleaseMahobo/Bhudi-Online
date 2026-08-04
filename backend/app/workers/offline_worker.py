@@ -1,5 +1,5 @@
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from app.core.database import SessionLocal
 from app.models.device import Device
 
@@ -10,7 +10,7 @@ async def offline_worker():
         db = SessionLocal()
         devices = db.query(Device).all()
 
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         for d in devices:
             if d.last_seen and (now - d.last_seen).seconds > OFFLINE_THRESHOLD:

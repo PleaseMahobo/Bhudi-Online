@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -181,7 +181,7 @@ class AgentRepository(BaseRepository[Agent]):
         username: str | None,
     ) -> Agent:
 
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         agent.last_heartbeat = now
         agent.last_checkin = now
@@ -228,7 +228,7 @@ class AgentRepository(BaseRepository[Agent]):
         agent.revoked = True
         agent.status = "revoked"
         agent.revocation_reason = reason
-        agent.revoked_at = datetime.utcnow()
+        agent.revoked_at = datetime.now(timezone.utc)
 
         self.session.add(agent)
         self.session.commit()

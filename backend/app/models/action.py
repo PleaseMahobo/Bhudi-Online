@@ -4,8 +4,10 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import ForeignKey, Index, Text, func
-from sqlalchemy.dialects.postgresql import JSONB, TIMESTAMP, UUID
+from sqlalchemy import ForeignKey, Index, Text
+from sqlalchemy import JSON
+from sqlalchemy.sql import func
+from sqlalchemy.types import DateTime, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
@@ -26,13 +28,13 @@ class Action(Base):
     )
 
     id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        String(36),
         primary_key=True,
-        server_default=func.gen_random_uuid(),
+        default=lambda: str(uuid.uuid4()),
     )
 
     device_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True),
+        String(36),
         ForeignKey(
             "devices.id",
             ondelete="CASCADE",
@@ -41,7 +43,7 @@ class Action(Base):
     )
 
     tenant_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True),
+        String(36),
         ForeignKey(
             "tenants.id",
             ondelete="CASCADE",
@@ -55,7 +57,7 @@ class Action(Base):
     )
 
     payload: Mapped[dict[str, Any] | None] = mapped_column(
-        JSONB,
+        JSON,
         nullable=True,
     )
 
@@ -71,13 +73,13 @@ class Action(Base):
     )
 
     created_at: Mapped[datetime] = mapped_column(
-        TIMESTAMP,
+        DateTime,
         nullable=False,
         server_default=func.now(),
     )
 
     completed_at: Mapped[datetime | None] = mapped_column(
-        TIMESTAMP,
+        DateTime,
         nullable=True,
     )
 

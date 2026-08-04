@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
 
@@ -51,7 +51,7 @@ def update_device_status(
         return None
 
     device.status = status
-    device.last_seen = datetime.utcnow()
+    device.last_seen = datetime.now(timezone.utc)
 
     db.commit()
     db.refresh(device)

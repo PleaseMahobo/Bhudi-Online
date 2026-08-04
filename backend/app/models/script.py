@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Text, text
-from sqlalchemy.dialects.postgresql import TIMESTAMP, UUID
+from sqlalchemy import Text
+from sqlalchemy.sql import func
+from sqlalchemy.types import DateTime, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
@@ -18,9 +19,9 @@ class Script(Base):
     __tablename__ = "scripts"
 
     id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        String(36),
         primary_key=True,
-        server_default=text("gen_random_uuid()"),
+        default=lambda: str(uuid.uuid4()),
     )
 
     name: Mapped[str] = mapped_column(
@@ -44,15 +45,15 @@ class Script(Base):
     )
 
     created_at: Mapped[datetime] = mapped_column(
-        TIMESTAMP(timezone=True),
-        server_default=text("now()"),
+        DateTime(timezone=True),
+        server_default=func.now(),
         nullable=False,
     )
 
     updated_at: Mapped[datetime] = mapped_column(
-        TIMESTAMP(timezone=True),
-        server_default=text("now()"),
-        onupdate=datetime.utcnow,
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=lambda: datetime.now(timezone.utc),
         nullable=False,
     )
 

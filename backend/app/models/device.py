@@ -143,10 +143,11 @@ class Device(Base):
         back_populates="device",
     )
     
-    commands: Mapped[list["Command"]] = relationship(
-        back_populates="device",
-        cascade="all, delete-orphan",
-    )
+    @property
+    def commands(self) -> list["Command"]:
+        if self.agent is None:
+            return []
+        return self.agent.commands
 
     events: Mapped[list["DeviceEvent"]] = relationship(
         back_populates="device",

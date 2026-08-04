@@ -1,6 +1,6 @@
 from sqlalchemy.orm import Session
 from app.models.device import Device
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 def update_device(
@@ -19,7 +19,7 @@ def update_device(
             hostname=hostname,
             ip=ip,
             status="online",
-            last_seen=datetime.utcnow()
+            last_seen=datetime.now(timezone.utc)
         )
 
         db.add(device)
@@ -28,7 +28,7 @@ def update_device(
         device.hostname = hostname
         device.ip = ip
         device.status = "online"
-        device.last_seen = datetime.utcnow()
+        device.last_seen = datetime.now(timezone.utc)
 
     db.commit()
     db.refresh(device)

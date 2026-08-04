@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
 
@@ -88,7 +88,7 @@ class CommandService:
             timeout=timeout,
             created_by=created_by,
             status=CommandStatus.PENDING.value,
-            expires_at=datetime.utcnow()
+            expires_at=datetime.now(timezone.utc)
             + timedelta(minutes=expires_minutes),
         )
 

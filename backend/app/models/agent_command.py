@@ -5,7 +5,8 @@ from datetime import datetime
 from enum import Enum
 
 from sqlalchemy import Boolean, ForeignKey, Integer, Text, func
-from sqlalchemy.dialects.postgresql import JSONB, TIMESTAMP, UUID
+from sqlalchemy import JSON
+from sqlalchemy.dialects.postgresql import TIMESTAMP, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
@@ -57,7 +58,7 @@ class AgentCommand(Base):
     )
 
     payload: Mapped[dict] = mapped_column(
-        JSONB,
+        JSON,
         nullable=False,
         server_default="{}",
     )
@@ -104,7 +105,7 @@ class AgentCommand(Base):
     )
 
     result: Mapped[dict | None] = mapped_column(
-        JSONB,
+        JSON,
         nullable=True,
     )
 
@@ -152,7 +153,7 @@ class AgentCommand(Base):
         nullable=True,
     )
 
-    agent = relationship("Agent", back_populates="commands")
+    agent = relationship("Agent", back_populates="queued_commands")
     user = relationship("User")
 
     def __repr__(self) -> str:

@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from app.core.database import SessionLocal
 from app.models.command import Command
 
@@ -38,7 +38,7 @@ class CommandService:
             if cmd:
                 cmd.result = result
                 cmd.status = status
-                cmd.executed_at = datetime.utcnow()
+                cmd.executed_at = datetime.now(timezone.utc)
 
                 db.commit()
 

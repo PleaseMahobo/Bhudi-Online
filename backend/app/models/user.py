@@ -4,8 +4,8 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, ForeignKey, String, Text, func
-from sqlalchemy.dialects.postgresql import TIMESTAMP, UUID
+from sqlalchemy import JSON, Boolean, ForeignKey, String, Text, func
+from sqlalchemy.dialects.postgresql import TIMESTAMP
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
@@ -23,9 +23,9 @@ class User(Base):
     __tablename__ = "users"
 
     id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        String(36),
         primary_key=True,
-        server_default=func.gen_random_uuid(),
+        default=lambda: str(uuid.uuid4()),
     )
 
     email: Mapped[str] = mapped_column(
@@ -78,13 +78,42 @@ class User(Base):
         TIMESTAMP(timezone=True),
         nullable=True,
     )
-    
+
+    password_history: Mapped[list[str] | None] = mapped_column(
+        JSON,
+        nullable=True,
+        default=list,
+    )
+
+    totp_secret: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+
+    mfa_enabled: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        server_default="false",
+    )
+
+    passkeys: Mapped[list[str] | None] = mapped_column(
+        JSON,
+        nullable=True,
+        default=list,
+    )
+
+    sso_provider: Mapped[str | None] = mapped_column(
+        String(64),
+        nullable=True,
+    )
+
     tenant_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True),
+        String(36),
         ForeignKey(
             "tenants.id",
             ondelete="SET NULL",
         ),
+        nullable=True,
     )
 
     created_at: Mapped[datetime] = mapped_column(

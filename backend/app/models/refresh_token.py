@@ -13,7 +13,6 @@ from sqlalchemy import (
     Integer,
     String,
 )
-from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
@@ -78,14 +77,14 @@ class RefreshToken(Base):
     # =====================================================
 
     id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        String(36),
         primary_key=True,
-        default=uuid.uuid4,
+        default=lambda: str(uuid.uuid4()),
     )
 
 
     user_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        String(36),
         ForeignKey(
             "users.id",
             ondelete="CASCADE",
@@ -193,7 +192,7 @@ class RefreshToken(Base):
 
 
     replaced_by_token_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True),
+        String(36),
         ForeignKey(
             "refresh_tokens.id",
             ondelete="SET NULL",

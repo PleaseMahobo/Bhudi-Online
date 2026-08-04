@@ -74,8 +74,11 @@ def seed_permissions(
         )
 
         if not permission:
+            resource, action = permission_name.split(".", 1) if "." in permission_name else (permission_name, "read")
             permission = Permission(
                 name=permission_name,
+                resource=resource,
+                action=action,
                 description=(
                     f"Allows {permission_name}"
                 ),

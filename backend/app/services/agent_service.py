@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
@@ -105,7 +105,7 @@ class AgentService:
 
         agent.registration_state = "approved"
 
-        agent.approved_at = datetime.utcnow()
+        agent.approved_at = datetime.now(timezone.utc)
 
         agent.approved_by = approver
 
@@ -231,7 +231,7 @@ class AgentService:
 
         agent.agent_version = installed_version
 
-        agent.last_update = datetime.utcnow()
+        agent.last_update = datetime.now(timezone.utc)
 
         agent.update_available = False
 

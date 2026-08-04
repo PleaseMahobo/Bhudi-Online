@@ -1,5 +1,5 @@
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 # simple in-memory heartbeat tracker (replace with DB later)
 device_last_seen = {}
@@ -8,11 +8,11 @@ device_last_seen = {}
 def update_heartbeat(device_id: str):
     if not device_id or device_id == "string":
         return
-    device_last_seen[device_id] = datetime.utcnow()
+    device_last_seen[device_id] = datetime.now(timezone.utc)
 
 
 def get_offline_devices(timeout_seconds: int = 60):
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     offline = []
 
     for device_id, last_seen in device_last_seen.items():

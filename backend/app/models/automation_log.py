@@ -3,8 +3,9 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Text, TIMESTAMP, text
-from sqlalchemy.dialects.postgresql import UUID as PG_UUID
+from sqlalchemy import Text
+from sqlalchemy.sql import func
+from sqlalchemy.types import DateTime, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base
@@ -14,13 +15,13 @@ class AutomationLog(Base):
     __tablename__ = "automation_log"
 
     id: Mapped[uuid.UUID] = mapped_column(
-        PG_UUID(as_uuid=True),
+        String(36),
         primary_key=True,
-        server_default=text("gen_random_uuid()"),
+        default=lambda: str(uuid.uuid4()),
     )
 
     incident_id: Mapped[uuid.UUID | None] = mapped_column(
-        PG_UUID(as_uuid=True),
+        String(36),
         nullable=True,
     )
 
@@ -29,6 +30,6 @@ class AutomationLog(Base):
     result: Mapped[str | None] = mapped_column(Text)
 
     created_at: Mapped[datetime | None] = mapped_column(
-        TIMESTAMP,
-        server_default=text("now()"),
+        DateTime,
+        server_default=func.now(),
     )

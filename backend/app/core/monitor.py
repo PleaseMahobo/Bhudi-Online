@@ -1,10 +1,10 @@
 import asyncio
 from app.state.device_state import devices, mark_offline
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 async def monitor_devices():
     while True:
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         for device_id, device in list(devices.items()):
             if (now - device["last_seen"]).seconds > 30:

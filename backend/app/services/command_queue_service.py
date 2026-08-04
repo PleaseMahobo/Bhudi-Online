@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
 
@@ -108,7 +108,7 @@ class CommandQueueService:
 
         timed_out = []
 
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         for command in self.db.query(Command).filter(
 
@@ -174,7 +174,7 @@ class CommandQueueService:
         older_than_days: int = 90,
     ):
 
-        cutoff = datetime.utcnow() - timedelta(
+        cutoff = datetime.now(timezone.utc) - timedelta(
             days=older_than_days
         )
 

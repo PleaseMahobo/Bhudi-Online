@@ -1,7 +1,7 @@
 # backend/app/core/repository.py
 
 from app.core.supabase_client import supabase
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 class DeviceRepository:
@@ -13,7 +13,7 @@ class DeviceRepository:
         return supabase.table("devices").upsert({
             "device_id": device_id,
             "status": status,
-            "last_seen": datetime.utcnow().isoformat()
+            "last_seen": datetime.now(timezone.utc).isoformat()
         }).execute()
 
     def list_devices(self):

@@ -23,10 +23,14 @@ def get_commands(
     return [
         {
             "id": str(command.id),
+            "command_id": str(command.id),
             "command_type": command.command_type,
             "payload": command.payload,
             "priority": command.priority,
-            "created_at": command.created_at,
+            "timeout_seconds": command.timeout_seconds,
+            "requires_reboot": command.requires_reboot,
+            "status": command.status,
+            "queued_at": command.queued_at,
         }
         for command in commands
     ]

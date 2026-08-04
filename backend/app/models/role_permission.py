@@ -3,8 +3,7 @@ from __future__ import annotations
 import uuid
 from typing import TYPE_CHECKING
 
-from sqlalchemy import ForeignKey
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import ForeignKey, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
@@ -22,13 +21,13 @@ class RolePermission(Base):
     __tablename__ = "role_permissions"
 
     role_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        String(36),
         ForeignKey("roles.id", ondelete="CASCADE"),
         primary_key=True,
     )
 
     permission_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        String(36),
         ForeignKey("permissions.id", ondelete="CASCADE"),
         primary_key=True,
     )

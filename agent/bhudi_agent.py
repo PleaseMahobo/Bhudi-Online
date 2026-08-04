@@ -25,6 +25,13 @@ import time
 from pathlib import Path
 
 try:
+    from .executor import execute_command_record
+    from .streaming_session import streaming_session_coordinator
+except ImportError:
+    from executor import execute_command_record
+    from streaming_session import streaming_session_coordinator
+
+try:
     import psutil
 except ImportError:
     psutil = None
@@ -137,6 +144,53 @@ def poll_commands(ident: dict) -> list:
     return r.json().get("commands") or []
 
 
+def poll_enterprise_commands(ident: dict) -> list:
+    agent_id = enterprise_agent_id(ident)
+    r = requests.get(
+        api(f"/agent/{agent_id}/commands"),
+        timeout=15,
+    )
+    if r.status_code == 404:
+        return []
+    r.raise_for_status()
+    return r.json()
+
+
+def mark_enterprise_command_sent(ident: dict, command_id: str) -> None:
+    agent_id = enterprise_agent_id(ident)
+    r = requests.post(
+        api(f"/agent/{agent_id}/commands/{command_id}/sent"),
+        timeout=15,
+    )
+    r.raise_for_status()
+
+
+def post_enterprise_result(ident: dict, command_id: str, result: dict) -> None:
+    agent_id = enterprise_agent_id(ident)
+    endpoint = "completed" if int(result.get("exit_code", 1)) == 0 else "failed"
+    payload = result if endpoint == "completed" else {"message": result.get("stderr") or result.get("stdout") or "remote command failed"}
+    r = requests.post(
+        api(f"/agent/{agent_id}/commands/{command_id}/{endpoint}"),
+        json=payload,
+        timeout=15,
+    )
+    r.raise_for_status()
+
+
+def enterprise_agent_id(ident: dict) -> str:
+    return str(os.getenv("BHUDI_ENTERPRISE_AGENT_ID") or ident["agent_id"])
+
+
+def is_interactive_remote_session(command: dict) -> bool:
+    command_type = str(command.get("command_type") or "")
+    payload = command.get("payload") or {}
+    if command_type == "remote.desktop.start":
+        return True
+    if command_type == "remote.terminal.start" and payload.get("interactive", True):
+        return True
+    return False
+
+
 def execute(command: str, shell: bool = True) -> dict:
     try:
         completed = subprocess.run(
@@ -170,6 +224,23 @@ def post_result(ident: dict, command_id: str, result: dict) -> None:
 def run_once(ident: dict) -> None:
     hb = send_heartbeat(ident)
     print(f"[heartbeat] ok pending={hb.get('pending_commands', 0)}")
+    enterprise_commands = poll_enterprise_commands(ident)
+    for command in enterprise_commands:
+        command_id = command.get("command_id") or command.get("id")
+        if not command_id:
+            continue
+        print(f"[enterprise-command] {command_id}: {command.get('command_type')}")
+        mark_enterprise_command_sent(ident, str(command_id))
+        if is_interactive_remote_session(command):
+            result = streaming_session_coordinator.start(
+                server_url=server_url(),
+                agent_id=enterprise_agent_id(ident),
+                command=command,
+            )
+        else:
+            result = execute_command_record(command)
+        post_enterprise_result(ident, str(command_id), result)
+        print(f"[enterprise-result] exit={result['exit_code']}")
     for cmd in poll_commands(ident):
         print(f"[command] {cmd['command_id']}: {cmd['command']}")
         result = execute(cmd["command"], shell=cmd.get("shell", True))

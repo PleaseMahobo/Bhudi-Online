@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -138,7 +138,7 @@ class CommandRepository:
     ) -> Command:
 
         command.status = CommandStatus.RUNNING
-        command.started_at = datetime.utcnow()
+        command.started_at = datetime.now(timezone.utc)
 
         self.db.commit()
         self.db.refresh(command)
@@ -159,7 +159,7 @@ class CommandRepository:
         command.stderr = stderr
         command.exit_code = exit_code
 
-        command.completed_at = datetime.utcnow()
+        command.completed_at = datetime.now(timezone.utc)
 
         command.status = (
             CommandStatus.SUCCESS
@@ -179,7 +179,7 @@ class CommandRepository:
 
         command.status = CommandStatus.CANCELLED
 
-        command.completed_at = datetime.utcnow()
+        command.completed_at = datetime.now(timezone.utc)
 
         self.db.commit()
         self.db.refresh(command)
@@ -193,7 +193,7 @@ class CommandRepository:
 
         command.status = CommandStatus.TIMED_OUT
 
-        command.completed_at = datetime.utcnow()
+        command.completed_at = datetime.now(timezone.utc)
 
         self.db.commit()
         self.db.refresh(command)

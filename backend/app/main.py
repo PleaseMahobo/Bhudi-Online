@@ -7,6 +7,8 @@ from typing import Dict, List
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 
 from app.api.v1.router import api_router
+
+app.include_router(api_router, prefix="/api/v1")
 from app.core.bootstrap import initialize_database
 from app.core.cors import setup_cors
 

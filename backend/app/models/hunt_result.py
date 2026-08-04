@@ -5,7 +5,8 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import Boolean, ForeignKey, Text, text
-from sqlalchemy.dialects.postgresql import JSONB, TIMESTAMP, UUID
+from sqlalchemy import JSON
+from sqlalchemy.dialects.postgresql import TIMESTAMP, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
@@ -41,7 +42,7 @@ class HuntResult(Base):
     )
 
     evidence: Mapped[dict[str, Any] | None] = mapped_column(
-        JSONB,
+        JSON,
         nullable=True,
     )
 

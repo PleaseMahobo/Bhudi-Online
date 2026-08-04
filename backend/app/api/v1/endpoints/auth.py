@@ -24,6 +24,10 @@ from app.schemas.auth import (
     UserResponse,
 )
 from app.services.auth_service import AuthService
+from app.services.mfa_service import MfaService
+from app.services.passkey_service import PasskeyService
+from app.services.sso_service import SsoService
+from app.services.secrets_service import SecretsService
 
 router = APIRouter(
     prefix="/auth",
@@ -361,6 +365,165 @@ def active_sessions(
     return service.get_active_sessions(
         current_user,
     )
+
+
+# ==========================================================
+# MFA
+# ==========================================================
+
+
+@router.post(
+    "/mfa/setup",
+    status_code=status.HTTP_200_OK,
+)
+def setup_mfa(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    service = MfaService(db)
+    secret, otpauth_uri = service.generate_secret(current_user)
+    return {
+        "enabled": service.is_enabled(current_user),
+        "secret": secret,
+        "otpauth_uri": otpauth_uri,
+    }
+
+
+@router.post(
+    "/mfa/verify",
+    status_code=status.HTTP_200_OK,
+)
+def verify_mfa(
+    payload: dict[str, str],
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    service = MfaService(db)
+    code = payload.get("code", "")
+    enabled = service.enable_totp(current_user, code)
+    return {
+        "enabled": enabled and service.is_enabled(current_user),
+    }
+
+
+# ==========================================================
+# Passkeys
+# ==========================================================
+
+
+@router.post(
+    "/passkeys/register",
+    status_code=status.HTTP_200_OK,
+)
+def register_passkey(
+    payload: dict[str, object],
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    service = PasskeyService(db)
+    credential_id = str(payload.get("credential_id", ""))
+    credential_data = payload.get("credential_data", {})
+    registered = service.complete_registration(current_user, credential_id, credential_data if isinstance(credential_data, dict) else {})
+    return {
+        "registered": registered,
+        "credential_id": credential_id,
+    }
+
+
+# ==========================================================
+# SSO Providers
+# ==========================================================
+
+
+@router.post(
+    "/sso/providers",
+    status_code=status.HTTP_200_OK,
+)
+def create_sso_provider(
+    payload: dict[str, object],
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    service = SsoService(db)
+    provider = service.create_provider(
+        str(payload.get("name", "")),
+        str(payload.get("provider_type", "")),
+        payload.get("config", {}) if isinstance(payload.get("config", {}), dict) else {},
+    )
+    return {
+        "name": provider.name,
+        "provider_type": provider.provider_type,
+        "enabled": provider.enabled,
+        "config": provider.config,
+    }
+
+
+@router.get(
+    "/sso/providers",
+    status_code=status.HTTP_200_OK,
+)
+def list_sso_providers(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    service = SsoService(db)
+    return {
+        "providers": [
+            {
+                "name": provider.name,
+                "provider_type": provider.provider_type,
+                "enabled": provider.enabled,
+                "config": provider.config,
+            }
+            for provider in service.get_enabled_providers()
+        ]
+    }
+
+
+# ==========================================================
+# Secrets
+# ==========================================================
+
+
+@router.post(
+    "/secrets",
+    status_code=status.HTTP_200_OK,
+)
+def store_secret(
+    payload: dict[str, object],
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    service = SecretsService(db)
+    entry = service.store_secret(
+        str(payload.get("name", "")),
+        str(payload.get("value", "")),
+        category=str(payload.get("category", "")) or None,
+    )
+    return {
+        "name": entry.name,
+        "value": entry.value,
+        "category": entry.category,
+    }
+
+
+@router.get(
+    "/secrets/{name}",
+    status_code=status.HTTP_200_OK,
+)
+def get_secret(
+    name: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    service = SecretsService(db)
+    value = service.get_secret(name)
+    if value is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Secret not found")
+    return {
+        "name": name,
+        "value": value,
+    }
 
 
 # ==========================================================

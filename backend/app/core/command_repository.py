@@ -1,7 +1,7 @@
 # backend/app/core/command_repository.py
 
 from app.core.supabase_client import supabase
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 class CommandRepository:
@@ -24,5 +24,5 @@ class CommandRepository:
         return supabase.table("commands").update({
             "status": "completed",
             "result": result,
-            "executed_at": datetime.utcnow().isoformat()
+            "executed_at": datetime.now(timezone.utc).isoformat()
         }).eq("id", command_id).execute()

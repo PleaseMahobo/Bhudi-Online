@@ -1,7 +1,7 @@
 from sqlalchemy.orm import Session
 from app.core.database import SessionLocal
 from app.models.device import Device
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import time
 
 
@@ -12,7 +12,7 @@ def run_offline_detector():
     while True:
         db: Session = SessionLocal()
 
-        cutoff = datetime.utcnow() - timedelta(seconds=OFFLINE_THRESHOLD_SECONDS)
+        cutoff = datetime.now(timezone.utc) - timedelta(seconds=OFFLINE_THRESHOLD_SECONDS)
 
         devices = db.query(Device).all()
 

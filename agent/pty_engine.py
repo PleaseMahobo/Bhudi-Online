@@ -2,11 +2,16 @@ import subprocess
 import threading
 import queue
 import sys
+import os
+from typing import Mapping
 
 
 class PTYSession:
-    def __init__(self, session_id):
+    def __init__(self, session_id, shell_command: str | None = None, cwd: str | None = None, environment: Mapping[str, str] | None = None):
         self.session_id = session_id
+        self.shell_command = shell_command
+        self.cwd = cwd
+        self.environment = dict(environment or {})
         self.process = None
         self.output_queue = queue.Queue()
         self.alive = False
@@ -15,15 +20,21 @@ class PTYSession:
         self.alive = True
 
         # Windows-safe shell selection
-        shell = "powershell.exe" if sys.platform == "win32" else "/bin/bash"
+        shell = self.shell_command or ("powershell.exe" if sys.platform == "win32" else "/bin/bash")
+        env = None
+        if self.environment:
+            env = {**os.environ, **self.environment}
 
         self.process = subprocess.Popen(
             shell,
+            shell=True,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
-            bufsize=1
+            bufsize=1,
+            cwd=self.cwd,
+            env=env,
         )
 
         threading.Thread(target=self._read_output, daemon=True).start()
@@ -37,6 +48,11 @@ class PTYSession:
     def send(self, command: str):
         if self.process and self.process.stdin:
             self.process.stdin.write(command + "\n")
+            self.process.stdin.flush()
+
+    def write(self, data: str):
+        if self.process and self.process.stdin:
+            self.process.stdin.write(data)
             self.process.stdin.flush()
 
     def read_all(self):

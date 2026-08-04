@@ -5,7 +5,8 @@ from datetime import datetime
 from typing import Any
 
 from sqlalchemy import ForeignKey, Text, text
-from sqlalchemy.dialects.postgresql import JSONB, TIMESTAMP, UUID
+from sqlalchemy import JSON
+from sqlalchemy.dialects.postgresql import TIMESTAMP, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base
@@ -52,7 +53,7 @@ class IncidentTimeline(Base):
     )
 
     raw_data: Mapped[dict[str, Any] | None] = mapped_column(
-        JSONB,
+        JSON,
         nullable=True,
     )
 

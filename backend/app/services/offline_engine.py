@@ -1,5 +1,5 @@
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from app.services.device_registry import DeviceRegistry
 
 
@@ -10,7 +10,7 @@ class OfflineDetectionEngine:
 
     async def run(self):
         while True:
-            now = datetime.utcnow()
+            now = datetime.now(timezone.utc)
 
             for device_id, device in self.registry.devices.items():
                 last_seen = device["last_seen"]

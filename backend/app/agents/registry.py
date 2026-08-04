@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 AGENT_REGISTRY = {}
 
@@ -8,7 +8,7 @@ class AgentRegistry:
     def update(agent_id: str, data: dict):
         AGENT_REGISTRY[agent_id] = {
             **data,
-            "last_seen": datetime.utcnow()
+            "last_seen": datetime.now(timezone.utc)
         }
 
     @staticmethod

@@ -4,6 +4,8 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from ipaddress import ip_address as ipaddress_ip
+
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
@@ -19,6 +21,7 @@ from app.core.security import (
     hash_refresh_token,
     validate_password,
     verify_and_upgrade_password,
+    verify_password,
 )
 from app.models.refresh_token import RefreshToken
 from app.models.user import User
@@ -78,11 +81,13 @@ class AuthService:
 
         self._validate_password(password)
 
+        password_hash = hash_password(password)
         user = User(
             email=email,
-            password_hash=hash_password(password),
+            password_hash=password_hash,
             first_name=first_name,
             last_name=last_name,
+            password_history=[password_hash],
         )
 
         self.users.create(user)
@@ -124,6 +129,7 @@ class AuthService:
         if not password_valid:
 
             self._record_failed_login(user)
+            self.users.increment_failed_login_attempts(user)
             self.db.commit()
 
             raise HTTPException(
@@ -135,6 +141,7 @@ class AuthService:
             user.password_hash = upgraded_hash
 
         self._update_successful_login(user)
+        self.users.reset_failed_login_attempts(user)
 
         self.db.commit()
 
@@ -155,6 +162,14 @@ class AuthService:
 
         session_id = uuid.uuid4()
         token_family = uuid.uuid4()
+        risk_score = self._assess_login_risk(
+            ip_address=ip_address,
+            user_agent=user_agent,
+            device_name=device_name,
+            previous_login_at=user.last_login_at,
+            current_login_at=datetime.now(timezone.utc),
+            password_history=getattr(user, "password_history", None) or [],
+        )
 
         access_token = create_access_token(
             subject=str(user.id),
@@ -182,6 +197,7 @@ class AuthService:
             ip_address=ip_address,
             user_agent=user_agent,
             device_name=device_name,
+            trusted_device=bool(device_name and device_name.lower() in {"trusted-device", "known-device", "laptop"}),
         )
 
         self.refresh_tokens.create(refresh_record)
@@ -212,6 +228,10 @@ class AuthService:
     def refresh_access_token(
         self,
         refresh_token: str,
+        *,
+        ip_address: str | None = None,
+        user_agent: str | None = None,
+        device_name: str | None = None,
     ) -> dict[str, Any]:
 
         verify_refresh_token(refresh_token)
@@ -237,6 +257,24 @@ class AuthService:
             self.refresh_tokens.revoke_family(
                 current_token.token_family,
                 reason="refresh_token_replay",
+            )
+
+            self.db.commit()
+
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Refresh token replay detected",
+            )
+
+        if self._is_session_anomalous(
+            current_token,
+            ip_address=ip_address,
+            user_agent=user_agent,
+            device_name=device_name,
+        ):
+            self.refresh_tokens.revoke_family(
+                current_token.token_family,
+                reason="session_context_mismatch",
             )
 
             self.db.commit()
@@ -441,10 +479,19 @@ class AuthService:
             new_password,
         )
 
-        user.password_hash = hash_password(
-            new_password,
-        )
+        if self._is_password_reused(user, new_password):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Password has already been used recently",
+            )
 
+        new_hash = hash_password(new_password)
+        history = list(getattr(user, "password_history", []) or [])
+        history.insert(0, new_hash)
+        history = history[:5]
+
+        user.password_hash = new_hash
+        user.password_history = history
         user.password_changed_at = datetime.now(
             timezone.utc,
         )
@@ -584,6 +631,82 @@ class AuthService:
                     minutes=lockout_minutes,
                 )
             )
+
+    @staticmethod
+    def _is_password_reused(user: User, new_password: str) -> bool:
+        history = getattr(user, "password_history", None) or []
+        normalized_candidate = new_password.strip().lower()
+
+        for candidate in history:
+            if candidate is None:
+                continue
+            if isinstance(candidate, str) and candidate.strip().lower() == normalized_candidate:
+                return True
+            if verify_password(new_password, candidate):
+                return True
+        return False
+
+    @staticmethod
+    def _is_session_anomalous(
+        token: RefreshToken,
+        *,
+        ip_address: str | None = None,
+        user_agent: str | None = None,
+        device_name: str | None = None,
+    ) -> bool:
+        if not token:
+            return False
+
+        if ip_address and token.ip_address and ip_address != token.ip_address:
+            return True
+
+        if user_agent and token.user_agent and user_agent != token.user_agent:
+            return True
+
+        if device_name and token.device_name and device_name != token.device_name:
+            return True
+
+        return False
+
+    @staticmethod
+    def _assess_login_risk(
+        *,
+        ip_address: str | None = None,
+        user_agent: str | None = None,
+        device_name: str | None = None,
+        previous_login_at: datetime | None = None,
+        current_login_at: datetime | None = None,
+        password_history: list[str] | None = None,
+    ) -> int:
+        score = 0
+
+        if ip_address:
+            try:
+                parsed = ipaddress_ip(ip_address)
+                if parsed.is_private:
+                    score += 10
+                else:
+                    score += 20
+            except ValueError:
+                score += 15
+
+        if user_agent and "bot" in user_agent.lower():
+            score += 30
+
+        if device_name:
+            score += 5
+
+        if previous_login_at and current_login_at:
+            delta_hours = max(0, int((current_login_at - previous_login_at).total_seconds() // 3600))
+            if delta_hours < 2:
+                score += 25
+            elif delta_hours > 24:
+                score -= 10
+
+        if password_history:
+            score += min(20, len(password_history) * 5)
+
+        return max(0, min(100, score))
 
     # =====================================================
     # Service Metadata

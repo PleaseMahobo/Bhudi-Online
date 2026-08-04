@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from uuid import UUID
 
 from fastapi import (
@@ -132,7 +132,7 @@ def heartbeat(
 
     return AgentHeartbeatResponse(
         status="ok",
-        server_time=datetime.utcnow(),
+        server_time=datetime.now(timezone.utc),
         poll_interval=agent.poll_interval,
         heartbeat_interval=agent.heartbeat_interval,
         update_available=agent.update_available,
