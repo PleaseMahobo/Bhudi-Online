@@ -168,7 +168,9 @@ class AuthService:
             device_name=device_name,
             previous_login_at=user.last_login_at,
             current_login_at=datetime.now(timezone.utc),
-            password_history=getattr(user, "password_history", None) or [],
+            # Read directly from instance state to avoid lazy-loading optional
+            # columns on deployments where schema migrations are incomplete.
+            password_history=(user.__dict__.get("password_history") or []),
         )
 
         access_token = create_access_token(

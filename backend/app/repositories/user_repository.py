@@ -4,7 +4,7 @@ from datetime import datetime
 from uuid import UUID
 
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, load_only
 
 from app.models.user import User
 from app.repositories.base_repository import BaseRepository
@@ -60,14 +60,35 @@ class UserRepository(BaseRepository[User]):
     # LOOKUPS
     # ==========================================================
 
+    @staticmethod
+    def _core_user_columns():
+        # Keep lookups compatible with older deployed schemas by avoiding
+        # enterprise columns that may not exist yet.
+        return (
+            User.id,
+            User.email,
+            User.password_hash,
+            User.first_name,
+            User.last_name,
+            User.role,
+            User.active,
+            User.failed_login_attempts,
+            User.locked_until,
+            User.last_login_at,
+            User.password_changed_at,
+            User.created_at,
+            User.updated_at,
+        )
+
     def get_by_id(
         self,
         user_id: UUID,
     ) -> User | None:
 
-        return self.session.get(
-            User,
-            user_id,
+        return self.session.scalar(
+            select(User)
+            .options(load_only(*self._core_user_columns()))
+            .where(User.id == user_id)
         )
 
 
@@ -77,7 +98,9 @@ class UserRepository(BaseRepository[User]):
     ) -> User | None:
 
         return self.session.scalar(
-            select(User).where(
+            select(User)
+            .options(load_only(*self._core_user_columns()))
+            .where(
                 User.id == user_id,
                 User.active.is_(True),
             )
@@ -90,7 +113,9 @@ class UserRepository(BaseRepository[User]):
     ) -> User | None:
 
         return self.session.scalar(
-            select(User).where(
+            select(User)
+            .options(load_only(*self._core_user_columns()))
+            .where(
                 func.lower(User.email)
                 == email.lower().strip()
             )
@@ -114,7 +139,9 @@ class UserRepository(BaseRepository[User]):
     ) -> User | None:
 
         return self.session.scalar(
-            select(User).where(
+            select(User)
+            .options(load_only(*self._core_user_columns()))
+            .where(
                 func.lower(User.email)
                 == email.lower().strip(),
                 User.active.is_(True),
