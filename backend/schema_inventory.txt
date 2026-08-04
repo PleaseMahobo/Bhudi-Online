@@ -1,0 +1,584 @@
+
+================================================================================
+ACTIONS
+================================================================================
+
+COLUMNS
+{'name': 'id', 'type': UUID(), 'nullable': False, 'default': 'gen_random_uuid()', 'autoincrement': False, 'comment': None}
+{'name': 'device_id', 'type': UUID(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'tenant_id', 'type': UUID(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'type', 'type': TEXT(), 'nullable': False, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'payload', 'type': JSONB(astext_type=Text()), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'status', 'type': TEXT(), 'nullable': True, 'default': "'pending'::text", 'autoincrement': False, 'comment': None}
+{'name': 'result', 'type': TEXT(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'created_at', 'type': TIMESTAMP(), 'nullable': True, 'default': 'now()', 'autoincrement': False, 'comment': None}
+{'name': 'completed_at', 'type': TIMESTAMP(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+
+PRIMARY KEY
+{'constrained_columns': ['id'], 'name': 'actions_pkey', 'comment': None, 'dialect_options': {'postgresql_include': []}}
+
+FOREIGN KEYS
+{'name': 'actions_device_id_fkey', 'constrained_columns': ['device_id'], 'referred_schema': None, 'referred_table': 'devices', 'referred_columns': ['id'], 'options': {}, 'comment': None}
+
+INDEXES
+
+UNIQUE
+
+================================================================================
+AGENTS
+================================================================================
+
+COLUMNS
+{'name': 'id', 'type': UUID(), 'nullable': False, 'default': 'gen_random_uuid()', 'autoincrement': False, 'comment': None}
+{'name': 'hostname', 'type': TEXT(), 'nullable': False, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'ip_address', 'type': TEXT(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'status', 'type': TEXT(), 'nullable': True, 'default': "'offline'::text", 'autoincrement': False, 'comment': None}
+{'name': 'last_seen', 'type': TIMESTAMP(), 'nullable': True, 'default': 'now()', 'autoincrement': False, 'comment': None}
+{'name': 'tenant_id', 'type': UUID(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+
+PRIMARY KEY
+{'constrained_columns': ['id'], 'name': 'agents_pkey', 'comment': None, 'dialect_options': {'postgresql_include': []}}
+
+FOREIGN KEYS
+{'name': 'agents_tenant_id_fkey', 'constrained_columns': ['tenant_id'], 'referred_schema': None, 'referred_table': 'tenants', 'referred_columns': ['id'], 'options': {}, 'comment': None}
+
+INDEXES
+
+UNIQUE
+
+================================================================================
+ALEMBIC_VERSION
+================================================================================
+
+COLUMNS
+{'name': 'version_num', 'type': VARCHAR(length=32), 'nullable': False, 'default': None, 'autoincrement': False, 'comment': None}
+
+PRIMARY KEY
+{'constrained_columns': ['version_num'], 'name': 'alembic_version_pkc', 'comment': None, 'dialect_options': {'postgresql_include': []}}
+
+FOREIGN KEYS
+
+INDEXES
+
+UNIQUE
+
+================================================================================
+ALERTS
+================================================================================
+
+COLUMNS
+{'name': 'id', 'type': UUID(), 'nullable': False, 'default': 'gen_random_uuid()', 'autoincrement': False, 'comment': None}
+{'name': 'device_id', 'type': UUID(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'tenant_id', 'type': UUID(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'type', 'type': TEXT(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'severity', 'type': TEXT(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'message', 'type': TEXT(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'resolved', 'type': BOOLEAN(), 'nullable': True, 'default': 'false', 'autoincrement': False, 'comment': None}
+{'name': 'created_at', 'type': TIMESTAMP(), 'nullable': True, 'default': 'now()', 'autoincrement': False, 'comment': None}
+{'name': 'threat_score', 'type': INTEGER(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'mitre_id', 'type': TEXT(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'mitre_name', 'type': TEXT(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'incident_id', 'type': UUID(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+
+PRIMARY KEY
+{'constrained_columns': ['id'], 'name': 'alerts_pkey', 'comment': None, 'dialect_options': {'postgresql_include': []}}
+
+FOREIGN KEYS
+{'name': 'alerts_device_id_fkey', 'constrained_columns': ['device_id'], 'referred_schema': None, 'referred_table': 'devices', 'referred_columns': ['id'], 'options': {}, 'comment': None}
+{'name': 'alerts_tenant_id_fkey', 'constrained_columns': ['tenant_id'], 'referred_schema': None, 'referred_table': 'tenants', 'referred_columns': ['id'], 'options': {}, 'comment': None}
+
+INDEXES
+
+UNIQUE
+
+================================================================================
+AUDIT_TRAIL
+================================================================================
+
+COLUMNS
+{'name': 'id', 'type': UUID(), 'nullable': False, 'default': 'gen_random_uuid()', 'autoincrement': False, 'comment': None}
+{'name': 'tenant_id', 'type': UUID(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'user_id', 'type': UUID(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'action', 'type': TEXT(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'resource', 'type': TEXT(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'details', 'type': JSONB(astext_type=Text()), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'created_at', 'type': TIMESTAMP(), 'nullable': True, 'default': 'now()', 'autoincrement': False, 'comment': None}
+
+PRIMARY KEY
+{'constrained_columns': ['id'], 'name': 'audit_trail_pkey', 'comment': None, 'dialect_options': {'postgresql_include': []}}
+
+FOREIGN KEYS
+
+INDEXES
+
+UNIQUE
+
+================================================================================
+AUTOMATION_LOG
+================================================================================
+
+COLUMNS
+{'name': 'id', 'type': UUID(), 'nullable': False, 'default': 'gen_random_uuid()', 'autoincrement': False, 'comment': None}
+{'name': 'incident_id', 'type': UUID(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'action', 'type': TEXT(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'result', 'type': TEXT(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'created_at', 'type': TIMESTAMP(), 'nullable': True, 'default': 'now()', 'autoincrement': False, 'comment': None}
+
+PRIMARY KEY
+{'constrained_columns': ['id'], 'name': 'automation_log_pkey', 'comment': None, 'dialect_options': {'postgresql_include': []}}
+
+FOREIGN KEYS
+
+INDEXES
+
+UNIQUE
+
+================================================================================
+COMMANDS
+================================================================================
+
+COLUMNS
+{'name': 'id', 'type': UUID(), 'nullable': False, 'default': 'gen_random_uuid()', 'autoincrement': False, 'comment': None}
+{'name': 'device_id', 'type': UUID(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'command', 'type': TEXT(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'args', 'type': JSONB(astext_type=Text()), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'status', 'type': TEXT(), 'nullable': True, 'default': "'pending'::text", 'autoincrement': False, 'comment': None}
+{'name': 'output', 'type': TEXT(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'created_at', 'type': TIMESTAMP(), 'nullable': True, 'default': 'now()', 'autoincrement': False, 'comment': None}
+{'name': 'executed_at', 'type': TIMESTAMP(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+
+PRIMARY KEY
+{'constrained_columns': ['id'], 'name': 'commands_pkey', 'comment': None, 'dialect_options': {'postgresql_include': []}}
+
+FOREIGN KEYS
+
+INDEXES
+
+UNIQUE
+
+================================================================================
+COMPLIANCE_REPORTS
+================================================================================
+
+COLUMNS
+{'name': 'id', 'type': UUID(), 'nullable': False, 'default': 'gen_random_uuid()', 'autoincrement': False, 'comment': None}
+{'name': 'tenant_id', 'type': UUID(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'framework', 'type': TEXT(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'generated_by', 'type': TEXT(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'report_data', 'type': JSONB(astext_type=Text()), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'created_at', 'type': TIMESTAMP(), 'nullable': True, 'default': 'now()', 'autoincrement': False, 'comment': None}
+
+PRIMARY KEY
+{'constrained_columns': ['id'], 'name': 'compliance_reports_pkey', 'comment': None, 'dialect_options': {'postgresql_include': []}}
+
+FOREIGN KEYS
+
+INDEXES
+
+UNIQUE
+
+================================================================================
+DEVICE_EVENTS
+================================================================================
+
+COLUMNS
+{'name': 'id', 'type': BIGINT(), 'nullable': False, 'default': "nextval('device_events_id_seq'::regclass)", 'autoincrement': True, 'comment': None}
+{'name': 'device_id', 'type': UUID(), 'nullable': False, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'tenant_id', 'type': UUID(), 'nullable': False, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'event_type', 'type': TEXT(), 'nullable': False, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'cpu_usage', 'type': REAL(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'ram_usage', 'type': REAL(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'disk_usage', 'type': REAL(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'network_in', 'type': REAL(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'network_out', 'type': REAL(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'status', 'type': TEXT(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'created_at', 'type': TIMESTAMP(), 'nullable': True, 'default': 'now()', 'autoincrement': False, 'comment': None}
+
+PRIMARY KEY
+{'constrained_columns': ['id'], 'name': 'device_events_pkey', 'comment': None, 'dialect_options': {'postgresql_include': []}}
+
+FOREIGN KEYS
+{'name': 'device_events_device_id_fkey', 'constrained_columns': ['device_id'], 'referred_schema': None, 'referred_table': 'devices', 'referred_columns': ['id'], 'options': {'ondelete': 'CASCADE'}, 'comment': None}
+{'name': 'device_events_tenant_id_fkey', 'constrained_columns': ['tenant_id'], 'referred_schema': None, 'referred_table': 'tenants', 'referred_columns': ['id'], 'options': {'ondelete': 'CASCADE'}, 'comment': None}
+
+INDEXES
+{'name': 'idx_events_device', 'unique': False, 'column_names': ['device_id'], 'include_columns': [], 'dialect_options': {'postgresql_include': []}}
+{'name': 'idx_events_tenant', 'unique': False, 'column_names': ['tenant_id'], 'include_columns': [], 'dialect_options': {'postgresql_include': []}}
+{'name': 'idx_events_time', 'unique': False, 'column_names': ['created_at'], 'column_sorting': {'created_at': ('desc',)}, 'include_columns': [], 'dialect_options': {'postgresql_include': []}}
+{'name': 'idx_events_type', 'unique': False, 'column_names': ['event_type'], 'include_columns': [], 'dialect_options': {'postgresql_include': []}}
+
+UNIQUE
+
+================================================================================
+DEVICE_HEARTBEATS
+================================================================================
+
+COLUMNS
+{'name': 'id', 'type': UUID(), 'nullable': False, 'default': 'gen_random_uuid()', 'autoincrement': False, 'comment': None}
+{'name': 'device_id', 'type': UUID(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'status', 'type': TEXT(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'cpu', 'type': NUMERIC(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'ram', 'type': NUMERIC(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'disk', 'type': NUMERIC(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'ip', 'type': TEXT(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'timestamp', 'type': TIMESTAMP(), 'nullable': True, 'default': 'now()', 'autoincrement': False, 'comment': None}
+
+PRIMARY KEY
+{'constrained_columns': ['id'], 'name': 'device_heartbeats_pkey', 'comment': None, 'dialect_options': {'postgresql_include': []}}
+
+FOREIGN KEYS
+{'name': 'device_heartbeats_device_id_fkey', 'constrained_columns': ['device_id'], 'referred_schema': None, 'referred_table': 'devices', 'referred_columns': ['id'], 'options': {}, 'comment': None}
+
+INDEXES
+
+UNIQUE
+
+================================================================================
+DEVICE_METRICS
+================================================================================
+
+COLUMNS
+{'name': 'id', 'type': UUID(), 'nullable': False, 'default': 'gen_random_uuid()', 'autoincrement': False, 'comment': None}
+{'name': 'device_id', 'type': UUID(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'cpu_usage', 'type': NUMERIC(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'ram_usage', 'type': NUMERIC(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'disk_usage', 'type': NUMERIC(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'recorded_at', 'type': TIMESTAMP(), 'nullable': True, 'default': 'now()', 'autoincrement': False, 'comment': None}
+{'name': 'tenant_id', 'type': UUID(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+
+PRIMARY KEY
+{'constrained_columns': ['id'], 'name': 'device_metrics_pkey', 'comment': None, 'dialect_options': {'postgresql_include': []}}
+
+FOREIGN KEYS
+{'name': 'device_metrics_device_id_fkey', 'constrained_columns': ['device_id'], 'referred_schema': None, 'referred_table': 'devices', 'referred_columns': ['id'], 'options': {}, 'comment': None}
+
+INDEXES
+
+UNIQUE
+
+================================================================================
+DEVICES
+================================================================================
+
+COLUMNS
+{'name': 'hostname', 'type': TEXT(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'ip', 'type': TEXT(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'status', 'type': TEXT(), 'nullable': True, 'default': "'offline'::text", 'autoincrement': False, 'comment': None}
+{'name': 'cpu', 'type': INTEGER(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'ram', 'type': INTEGER(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'disk', 'type': INTEGER(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'agent_version', 'type': TEXT(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'last_seen', 'type': TIMESTAMP(), 'nullable': True, 'default': 'now()', 'autoincrement': False, 'comment': None}
+{'name': 'created_at', 'type': TIMESTAMP(), 'nullable': True, 'default': 'now()', 'autoincrement': False, 'comment': None}
+{'name': 'id', 'type': UUID(), 'nullable': False, 'default': 'gen_random_uuid()', 'autoincrement': False, 'comment': None}
+{'name': 'tenant_id', 'type': UUID(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'agent_token', 'type': TEXT(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'consecutive_misses', 'type': INTEGER(), 'nullable': True, 'default': '0', 'autoincrement': False, 'comment': None}
+{'name': 'health_score', 'type': INTEGER(), 'nullable': True, 'default': '100', 'autoincrement': False, 'comment': None}
+{'name': 'missed_heartbeats', 'type': INTEGER(), 'nullable': True, 'default': '0', 'autoincrement': False, 'comment': None}
+{'name': 'ip_address', 'type': TEXT(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'os', 'type': TEXT(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'version', 'type': TEXT(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+
+PRIMARY KEY
+{'constrained_columns': ['id'], 'name': 'devices_pkey', 'comment': None, 'dialect_options': {'postgresql_include': []}}
+
+FOREIGN KEYS
+{'name': 'devices_tenant_id_fkey', 'constrained_columns': ['tenant_id'], 'referred_schema': None, 'referred_table': 'tenants', 'referred_columns': ['id'], 'options': {}, 'comment': None}
+
+INDEXES
+{'name': 'idx_devices_health', 'unique': False, 'column_names': ['health_score'], 'include_columns': [], 'dialect_options': {'postgresql_include': []}}
+{'name': 'idx_devices_last_seen', 'unique': False, 'column_names': ['last_seen'], 'include_columns': [], 'dialect_options': {'postgresql_include': []}}
+{'name': 'idx_devices_status', 'unique': False, 'column_names': ['status'], 'include_columns': [], 'dialect_options': {'postgresql_include': []}}
+{'name': 'idx_devices_tenant', 'unique': False, 'column_names': ['tenant_id'], 'include_columns': [], 'dialect_options': {'postgresql_include': []}}
+
+UNIQUE
+
+================================================================================
+EVENTS
+================================================================================
+
+COLUMNS
+{'name': 'id', 'type': UUID(), 'nullable': False, 'default': 'gen_random_uuid()', 'autoincrement': False, 'comment': None}
+{'name': 'device_id', 'type': TEXT(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'event_type', 'type': TEXT(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'severity', 'type': TEXT(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'source', 'type': TEXT(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'message', 'type': TEXT(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'raw_data', 'type': JSONB(astext_type=Text()), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'created_at', 'type': TIMESTAMP(), 'nullable': True, 'default': 'now()', 'autoincrement': False, 'comment': None}
+
+PRIMARY KEY
+{'constrained_columns': ['id'], 'name': 'events_pkey', 'comment': None, 'dialect_options': {'postgresql_include': []}}
+
+FOREIGN KEYS
+
+INDEXES
+
+UNIQUE
+
+================================================================================
+FILE_TASKS
+================================================================================
+
+COLUMNS
+{'name': 'id', 'type': UUID(), 'nullable': False, 'default': 'gen_random_uuid()', 'autoincrement': False, 'comment': None}
+{'name': 'device_id', 'type': TEXT(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'file_url', 'type': TEXT(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'destination', 'type': TEXT(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'status', 'type': TEXT(), 'nullable': True, 'default': "'pending'::text", 'autoincrement': False, 'comment': None}
+
+PRIMARY KEY
+{'constrained_columns': ['id'], 'name': 'file_tasks_pkey', 'comment': None, 'dialect_options': {'postgresql_include': []}}
+
+FOREIGN KEYS
+
+INDEXES
+
+UNIQUE
+
+================================================================================
+HUNT_RESULTS
+================================================================================
+
+COLUMNS
+{'name': 'id', 'type': UUID(), 'nullable': False, 'default': 'gen_random_uuid()', 'autoincrement': False, 'comment': None}
+{'name': 'hunt_id', 'type': UUID(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'device_id', 'type': TEXT(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'matched', 'type': BOOLEAN(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'evidence', 'type': JSONB(astext_type=Text()), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'created_at', 'type': TIMESTAMP(), 'nullable': True, 'default': 'now()', 'autoincrement': False, 'comment': None}
+
+PRIMARY KEY
+{'constrained_columns': ['id'], 'name': 'hunt_results_pkey', 'comment': None, 'dialect_options': {'postgresql_include': []}}
+
+FOREIGN KEYS
+
+INDEXES
+
+UNIQUE
+
+================================================================================
+INCIDENT_TIMELINE
+================================================================================
+
+COLUMNS
+{'name': 'id', 'type': UUID(), 'nullable': False, 'default': 'gen_random_uuid()', 'autoincrement': False, 'comment': None}
+{'name': 'incident_id', 'type': UUID(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'device_id', 'type': TEXT(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'event_type', 'type': TEXT(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'source', 'type': TEXT(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'message', 'type': TEXT(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'severity', 'type': TEXT(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'raw_data', 'type': JSONB(astext_type=Text()), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'created_at', 'type': TIMESTAMP(), 'nullable': True, 'default': 'now()', 'autoincrement': False, 'comment': None}
+
+PRIMARY KEY
+{'constrained_columns': ['id'], 'name': 'incident_timeline_pkey', 'comment': None, 'dialect_options': {'postgresql_include': []}}
+
+FOREIGN KEYS
+
+INDEXES
+
+UNIQUE
+
+================================================================================
+INCIDENTS
+================================================================================
+
+COLUMNS
+{'name': 'id', 'type': UUID(), 'nullable': False, 'default': 'gen_random_uuid()', 'autoincrement': False, 'comment': None}
+{'name': 'device_id', 'type': TEXT(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'title', 'type': TEXT(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'severity', 'type': TEXT(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'threat_score', 'type': INTEGER(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'status', 'type': TEXT(), 'nullable': True, 'default': "'open'::text", 'autoincrement': False, 'comment': None}
+{'name': 'summary', 'type': TEXT(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'created_at', 'type': TIMESTAMP(), 'nullable': True, 'default': 'now()', 'autoincrement': False, 'comment': None}
+{'name': 'updated_at', 'type': TIMESTAMP(), 'nullable': True, 'default': 'now()', 'autoincrement': False, 'comment': None}
+
+PRIMARY KEY
+{'constrained_columns': ['id'], 'name': 'incidents_pkey', 'comment': None, 'dialect_options': {'postgresql_include': []}}
+
+FOREIGN KEYS
+
+INDEXES
+
+UNIQUE
+
+================================================================================
+PROFILES
+================================================================================
+
+COLUMNS
+{'name': 'id', 'type': UUID(), 'nullable': False, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'tenant_id', 'type': UUID(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'email', 'type': TEXT(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'role', 'type': TEXT(), 'nullable': True, 'default': "'technician'::text", 'autoincrement': False, 'comment': None}
+{'name': 'created_at', 'type': TIMESTAMP(), 'nullable': True, 'default': 'now()', 'autoincrement': False, 'comment': None}
+
+PRIMARY KEY
+{'constrained_columns': ['id'], 'name': 'profiles_pkey', 'comment': None, 'dialect_options': {'postgresql_include': []}}
+
+FOREIGN KEYS
+{'name': 'profiles_id_fkey', 'constrained_columns': ['id'], 'referred_schema': 'auth', 'referred_table': 'users', 'referred_columns': ['id'], 'options': {}, 'comment': None}
+{'name': 'profiles_tenant_id_fkey', 'constrained_columns': ['tenant_id'], 'referred_schema': None, 'referred_table': 'tenants', 'referred_columns': ['id'], 'options': {}, 'comment': None}
+
+INDEXES
+
+UNIQUE
+
+================================================================================
+RESPONSE_ACTIONS
+================================================================================
+
+COLUMNS
+{'name': 'id', 'type': UUID(), 'nullable': False, 'default': 'gen_random_uuid()', 'autoincrement': False, 'comment': None}
+{'name': 'incident_id', 'type': UUID(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'device_id', 'type': TEXT(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'action', 'type': TEXT(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'status', 'type': TEXT(), 'nullable': True, 'default': "'pending'::text", 'autoincrement': False, 'comment': None}
+{'name': 'initiated_by', 'type': TEXT(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'output', 'type': TEXT(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'created_at', 'type': TIMESTAMP(), 'nullable': True, 'default': 'now()', 'autoincrement': False, 'comment': None}
+{'name': 'completed_at', 'type': TIMESTAMP(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+
+PRIMARY KEY
+{'constrained_columns': ['id'], 'name': 'response_actions_pkey', 'comment': None, 'dialect_options': {'postgresql_include': []}}
+
+FOREIGN KEYS
+
+INDEXES
+
+UNIQUE
+
+================================================================================
+SCRIPT_TASKS
+================================================================================
+
+COLUMNS
+{'name': 'id', 'type': UUID(), 'nullable': False, 'default': 'gen_random_uuid()', 'autoincrement': False, 'comment': None}
+{'name': 'script_id', 'type': UUID(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'device_id', 'type': TEXT(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'status', 'type': TEXT(), 'nullable': True, 'default': "'pending'::text", 'autoincrement': False, 'comment': None}
+{'name': 'output', 'type': TEXT(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'created_at', 'type': TIMESTAMP(), 'nullable': True, 'default': 'now()', 'autoincrement': False, 'comment': None}
+{'name': 'executed_at', 'type': TIMESTAMP(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+
+PRIMARY KEY
+{'constrained_columns': ['id'], 'name': 'script_tasks_pkey', 'comment': None, 'dialect_options': {'postgresql_include': []}}
+
+FOREIGN KEYS
+
+INDEXES
+
+UNIQUE
+
+================================================================================
+SCRIPTS
+================================================================================
+
+COLUMNS
+{'name': 'id', 'type': UUID(), 'nullable': False, 'default': 'gen_random_uuid()', 'autoincrement': False, 'comment': None}
+{'name': 'name', 'type': TEXT(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'content', 'type': TEXT(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'shell', 'type': TEXT(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'created_at', 'type': TIMESTAMP(), 'nullable': True, 'default': 'now()', 'autoincrement': False, 'comment': None}
+
+PRIMARY KEY
+{'constrained_columns': ['id'], 'name': 'scripts_pkey', 'comment': None, 'dialect_options': {'postgresql_include': []}}
+
+FOREIGN KEYS
+
+INDEXES
+
+UNIQUE
+
+================================================================================
+TELEMETRY
+================================================================================
+
+COLUMNS
+{'name': 'id', 'type': BIGINT(), 'nullable': False, 'default': "nextval('telemetry_id_seq'::regclass)", 'autoincrement': True, 'comment': None}
+{'name': 'agent_id', 'type': TEXT(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'cpu_usage', 'type': DOUBLE_PRECISION(precision=53), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'memory_usage', 'type': DOUBLE_PRECISION(precision=53), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'disk_usage', 'type': DOUBLE_PRECISION(precision=53), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'uptime', 'type': BIGINT(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'created_at', 'type': TIMESTAMP(), 'nullable': True, 'default': 'now()', 'autoincrement': False, 'comment': None}
+
+PRIMARY KEY
+{'constrained_columns': ['id'], 'name': 'telemetry_pkey', 'comment': None, 'dialect_options': {'postgresql_include': []}}
+
+FOREIGN KEYS
+
+INDEXES
+
+UNIQUE
+
+================================================================================
+TENANTS
+================================================================================
+
+COLUMNS
+{'name': 'id', 'type': UUID(), 'nullable': False, 'default': 'gen_random_uuid()', 'autoincrement': False, 'comment': None}
+{'name': 'name', 'type': TEXT(), 'nullable': False, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'created_at', 'type': TIMESTAMP(), 'nullable': True, 'default': 'now()', 'autoincrement': False, 'comment': None}
+
+PRIMARY KEY
+{'constrained_columns': ['id'], 'name': 'tenants_pkey', 'comment': None, 'dialect_options': {'postgresql_include': []}}
+
+FOREIGN KEYS
+
+INDEXES
+
+UNIQUE
+
+================================================================================
+THREAT_HUNTS
+================================================================================
+
+COLUMNS
+{'name': 'id', 'type': UUID(), 'nullable': False, 'default': 'gen_random_uuid()', 'autoincrement': False, 'comment': None}
+{'name': 'name', 'type': TEXT(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'hunt_type', 'type': TEXT(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'indicator', 'type': TEXT(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'status', 'type': TEXT(), 'nullable': True, 'default': "'pending'::text", 'autoincrement': False, 'comment': None}
+{'name': 'created_by', 'type': TEXT(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'created_at', 'type': TIMESTAMP(), 'nullable': True, 'default': 'now()', 'autoincrement': False, 'comment': None}
+
+PRIMARY KEY
+{'constrained_columns': ['id'], 'name': 'threat_hunts_pkey', 'comment': None, 'dialect_options': {'postgresql_include': []}}
+
+FOREIGN KEYS
+
+INDEXES
+
+UNIQUE
+
+================================================================================
+USERS
+================================================================================
+
+COLUMNS
+{'name': 'id', 'type': UUID(), 'nullable': False, 'default': 'gen_random_uuid()', 'autoincrement': False, 'comment': None}
+{'name': 'email', 'type': TEXT(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'role', 'type': TEXT(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'tenant_id', 'type': UUID(), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'created_at', 'type': TIMESTAMP(), 'nullable': True, 'default': 'now()', 'autoincrement': False, 'comment': None}
+{'name': 'password_hash', 'type': VARCHAR(length=255), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'first_name', 'type': VARCHAR(length=100), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'last_name', 'type': VARCHAR(length=100), 'nullable': True, 'default': None, 'autoincrement': False, 'comment': None}
+{'name': 'active', 'type': BOOLEAN(), 'nullable': False, 'default': 'true', 'autoincrement': False, 'comment': None}
+{'name': 'updated_at', 'type': TIMESTAMP(), 'nullable': True, 'default': 'now()', 'autoincrement': False, 'comment': None}
+
+PRIMARY KEY
+{'constrained_columns': ['id'], 'name': 'users_pkey', 'comment': None, 'dialect_options': {'postgresql_include': []}}
+
+FOREIGN KEYS
+
+INDEXES
+{'name': 'users_email_key', 'unique': True, 'column_names': ['email'], 'duplicates_constraint': 'users_email_key', 'include_columns': [], 'dialect_options': {'postgresql_include': []}}
+
+UNIQUE
+{'column_names': ['email'], 'name': 'users_email_key', 'comment': None, 'dialect_options': {'postgresql_include': [], 'postgresql_nulls_not_distinct': False}}
