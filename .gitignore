@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.sqlite3
+*.db
+.venv/
+.venvsource/
+
+# Node
+node_modules/
+.next/
+
+# IDE
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
