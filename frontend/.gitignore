@@ -1,0 +1,9 @@
+node_modules/
+.next/
+build/
+dist/
+*.log
+.env
+.DS_Store
+temp-frontend/
+frontend1/

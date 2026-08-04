@@ -3,22 +3,89 @@ from __future__ import annotations
 import os
 from typing import Any
 
+from sqlalchemy import MetaData
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.database.session import SessionLocal, engine
+from app.models.audit_trail import AuditTrail
 from app.models.base import Base
+from app.models.device_management import (
+    ConfigurationProfile,
+    DeviceGroup,
+    DevicePolicy,
+    DeviceTag,
+    DynamicDeviceGroup,
+    ManagedDevice,
+    MaintenanceWindow,
+    PatchRing,
+    PatchRollout,
+)
+from app.models.monitoring import MonitoringAlert, MonitoringCheck
+from app.models.action import Action
+from app.models.agent import Agent
+from app.models.agent_command import AgentCommand
+from app.models.automation_log import AutomationLog
+from app.models.device import Device
+from app.models.incident import Incident
+from app.models.response_action import ResponseAction
+from app.models.script import Script
+from app.models.script_task import ScriptTask
+from app.models.permission import Permission
+from app.models.refresh_token import RefreshToken
+from app.models.role import Role
+from app.models.role_permission import RolePermission
+from app.models.secret_entry import SecretEntry
+from app.models.tenant import Tenant
 from app.models.user import User
 from app.models.user_role import UserRole
-from app.models.role import Role
 from app.db.seeds.rbac_seed import seed_rbac
 from app.core.security import hash_password
+
+
+def _bootstrap_metadata_for_engine() -> MetaData:
+    if engine.dialect.name == "sqlite":
+        metadata = MetaData()
+        for model in [
+            Tenant,
+            User,
+            Role,
+            Permission,
+            RolePermission,
+            UserRole,
+            RefreshToken,
+            AuditTrail,
+            SecretEntry,
+            ManagedDevice,
+            DeviceGroup,
+            DynamicDeviceGroup,
+            DeviceTag,
+            DevicePolicy,
+            ConfigurationProfile,
+            MaintenanceWindow,
+            PatchRing,
+            PatchRollout,
+            MonitoringCheck,
+            MonitoringAlert,
+            Device,
+            Agent,
+            AgentCommand,
+            Incident,
+            Action,
+            AutomationLog,
+            ResponseAction,
+            Script,
+            ScriptTask,
+        ]:
+            model.__table__.to_metadata(metadata)
+        return metadata
+    return Base.metadata
 
 
 def initialize_database() -> dict[str, Any]:
     """Create tables and seed RBAC/auth data when the database is reachable."""
     try:
-        Base.metadata.create_all(bind=engine)
+        _bootstrap_metadata_for_engine().create_all(bind=engine)
     except SQLAlchemyError as exc:
         return {"status": "skipped", "reason": f"database unavailable: {exc}"}
 
