@@ -24,10 +24,6 @@ from app.schemas.auth import (
     UserResponse,
 )
 from app.services.auth_service import AuthService
-from app.services.mfa_service import MfaService
-from app.services.passkey_service import PasskeyService
-from app.services.sso_service import SsoService
-from app.services.secrets_service import SecretsService
 
 router = APIRouter(
     prefix="/auth",
@@ -380,6 +376,14 @@ def setup_mfa(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    try:
+        from app.services.mfa_service import MfaService
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"MFA service unavailable: {exc}",
+        ) from exc
+
     service = MfaService(db)
     secret, otpauth_uri = service.generate_secret(current_user)
     return {
@@ -398,6 +402,14 @@ def verify_mfa(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    try:
+        from app.services.mfa_service import MfaService
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"MFA service unavailable: {exc}",
+        ) from exc
+
     service = MfaService(db)
     code = payload.get("code", "")
     enabled = service.enable_totp(current_user, code)
@@ -420,6 +432,8 @@ def register_passkey(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    from app.services.passkey_service import PasskeyService
+
     service = PasskeyService(db)
     credential_id = str(payload.get("credential_id", ""))
     credential_data = payload.get("credential_data", {})
@@ -444,6 +458,8 @@ def create_sso_provider(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    from app.services.sso_service import SsoService
+
     service = SsoService(db)
     provider = service.create_provider(
         str(payload.get("name", "")),
@@ -466,6 +482,8 @@ def list_sso_providers(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    from app.services.sso_service import SsoService
+
     service = SsoService(db)
     return {
         "providers": [
@@ -494,6 +512,8 @@ def store_secret(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    from app.services.secrets_service import SecretsService
+
     service = SecretsService(db)
     entry = service.store_secret(
         str(payload.get("name", "")),
@@ -516,6 +536,8 @@ def get_secret(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    from app.services.secrets_service import SecretsService
+
     service = SecretsService(db)
     value = service.get_secret(name)
     if value is None:
