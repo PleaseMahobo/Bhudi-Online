@@ -33,3 +33,4 @@ _safe_include("app.api.v1.endpoints.patch_management", tags=["patch-management"]
 _safe_include("app.api.v1.endpoints.monitoring", tags=["monitoring"])
 _safe_include("app.api.v1.endpoints.automation", tags=["automation"])
 _safe_include("app.api.v1.endpoints.remote_access", tags=["remote-access"])
+_safe_include("app.api.v1.endpoints.alert_engine", tags=["Alert Engine"])
