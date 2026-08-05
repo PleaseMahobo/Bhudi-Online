@@ -66,6 +66,11 @@ async function request<T>(
     throw new Error(message);
   }
 
+  // 204 No Content
+  if (response.status === 204) {
+    return undefined as T;
+  }
+
   return response.json();
 }
 
@@ -146,6 +151,56 @@ export interface HealthResponse {
 
   message?: string;
 }
+
+// =========================================================
+// Alert Engine Types
+// =========================================================
+
+export interface EscalationLevel {
+  repeat_count: number;
+  severity: string;
+  notify: string[];
+}
+
+export interface EscalationPolicy {
+  id: string;
+  name: string;
+  description?: string | null;
+  levels: EscalationLevel[];
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AlertRule {
+  id: string;
+  name: string;
+  description?: string | null;
+  provider?: string | null;
+  check_type?: string | null;
+  target?: string | null;
+  metric_name?: string | null;
+  warning_threshold?: number | null;
+  critical_threshold?: number | null;
+  anomaly_enabled: boolean;
+  anomaly_tolerance?: number | null;
+  state_change_enabled: boolean;
+  ai_suppression_enabled: boolean;
+  maintenance_window_name?: string | null;
+  escalation_policy_id?: string | null;
+  enabled: boolean;
+  priority: number;
+  tags?: Record<string, any> | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type AlertRuleCreate = Omit<AlertRule, "id" | "created_at" | "updated_at">;
+export type EscalationPolicyCreate = Omit<EscalationPolicy, "id" | "created_at" | "updated_at">;
+
+// =========================================================
+// Auth
+// =========================================================
 
 export async function login(
   email: string,
@@ -248,4 +303,58 @@ When we modernize the dashboard we can remove this.
 export async function getDeviceStatus() {
   return getDevices();
 
+}
+
+// =========================================================
+// Alert Engine API
+// =========================================================
+
+export async function listEscalationPolicies(enabledOnly = false) {
+  const q = enabledOnly ? "?enabled_only=true" : "";
+  return request<EscalationPolicy[]>(`/api/v1/alert-engine/escalation-policies${q}`);
+}
+
+export async function createEscalationPolicy(data: EscalationPolicyCreate) {
+  return request<EscalationPolicy>(`/api/v1/alert-engine/escalation-policies`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function updateEscalationPolicy(id: string, data: Partial<EscalationPolicyCreate>) {
+  return request<EscalationPolicy>(`/api/v1/alert-engine/escalation-policies/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function deleteEscalationPolicy(id: string) {
+  return request<void>(`/api/v1/alert-engine/escalation-policies/${id}`, {
+    method: "DELETE",
+  });
+}
+
+export async function listAlertRules(enabledOnly = false) {
+  const q = enabledOnly ? "?enabled_only=true" : "";
+  return request<AlertRule[]>(`/api/v1/alert-engine/rules${q}`);
+}
+
+export async function createAlertRule(data: AlertRuleCreate) {
+  return request<AlertRule>(`/api/v1/alert-engine/rules`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function updateAlertRule(id: string, data: Partial<AlertRuleCreate>) {
+  return request<AlertRule>(`/api/v1/alert-engine/rules/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function deleteAlertRule(id: string) {
+  return request<void>(`/api/v1/alert-engine/rules/${id}`, {
+    method: "DELETE",
+  });
 }
