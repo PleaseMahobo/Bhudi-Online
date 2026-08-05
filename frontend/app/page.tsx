@@ -4,7 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { useAuth } from "@/shared/auth/AuthContext";
 import { useRouter } from "next/navigation";
 import { motion } from 'framer-motion';
-import { Activity, Server, AlertTriangle, Cpu, Zap } from 'lucide-react';
+import { Activity, Server, AlertTriangle, Cpu, Zap, Copy, Check } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { getHealth, getDeviceStatus } from '@/lib/api';
 
@@ -14,9 +14,12 @@ export default function RMMDashboard() {
   const [health, setHealth] = useState<any>(null);
   const [devices, setDevices] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [copied, setCopied] = useState(false);
 
   const [cpuData, setCpuData] = useState<any[]>([]);
   const [memoryData, setMemoryData] = useState<any[]>([]);
+
+  const agentStartCommand = "$env:BHUDI_SERVER_URL='https://bhudi-online-production.up.railway.app'; Set-Location .\\agent; pip install -r requirements.txt; python main.py";
 
   useEffect(() => {
     if (!loading && !user) {
@@ -34,8 +37,7 @@ export default function RMMDashboard() {
           getDeviceStatus()
         ]);
         setHealth(h);
-        // getDeviceStatus may return an array of devices or an object with a `devices` field
-        setDevices(Array.isArray(d) ? d : (d && (d as any).devices) ? (d as any).devices : []);
+        setDevices(Array.isArray(d) ? d : []);
       } catch (err) {
         console.error(err);
       } finally {
@@ -58,6 +60,17 @@ export default function RMMDashboard() {
   if (loading) {
     return <div className="min-h-screen bg-[#0a0f1c] flex items-center justify-center text-white">Loading secure dashboard...</div>;
   }
+
+  const copyAgentStartCommand = async () => {
+    try {
+      await navigator.clipboard.writeText(agentStartCommand);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1800);
+    } catch (error) {
+      console.error("Failed to copy command:", error);
+      setCopied(false);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-[#0a0f1c] text-white flex">
@@ -103,6 +116,29 @@ export default function RMMDashboard() {
               </motion.div>
             ))}
           </div>
+
+          {devices.length === 0 && !isLoading && (
+            <div className="bg-zinc-900 border border-zinc-700 rounded-3xl p-8 mb-10">
+              <h2 className="text-2xl font-semibold">No agents enrolled yet</h2>
+              <p className="text-zinc-400 mt-2">
+                Start one production agent and this dashboard will populate automatically after heartbeat updates.
+              </p>
+
+              <div className="bg-zinc-950 border border-zinc-700 rounded-xl p-4 mt-4">
+                <p className="text-xs text-zinc-500 mb-2">PowerShell quick start</p>
+                <pre className="text-xs text-sky-300 whitespace-pre-wrap break-all">{agentStartCommand}</pre>
+              </div>
+
+              <button
+                type="button"
+                onClick={copyAgentStartCommand}
+                className="mt-4 inline-flex items-center gap-2 bg-sky-600 hover:bg-sky-500 text-white text-sm px-4 py-2 rounded-xl transition"
+              >
+                {copied ? <Check size={16} /> : <Copy size={16} />}
+                {copied ? "Copied" : "Copy Start Command"}
+              </button>
+            </div>
+          )}
 
           {/* Charts and other sections as before */}
         </div>
