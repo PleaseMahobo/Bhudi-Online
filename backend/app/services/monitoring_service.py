@@ -9,11 +9,13 @@ from sqlalchemy.orm import Session
 
 from app.models.device_management import MaintenanceWindow
 from app.models.monitoring import MonitoringAlert, MonitoringCheck
+from app.services.alert_rule_service import AlertRuleService
 
 
 class MonitoringService:
     def __init__(self, db: Session):
         self.db = db
+        self.rule_service = AlertRuleService(db)
 
     def record_check(
         self,
@@ -81,18 +83,75 @@ class MonitoringService:
         maintenance_window_name: str | None = None,
         escalation_policy: dict[str, Any] | None = None,
         correlation_key: str | None = None,
+        use_rules: bool = True,
     ) -> tuple[MonitoringCheck, list[MonitoringAlert]]:
-        fingerprint = self._fingerprint(provider=provider, check_type=check_type, target=target, metric_name=metric_name)
+        """
+        Evaluate a monitoring check.
+
+        When use_rules=True (default), matching AlertRule records are loaded
+        from the database and used as the source of truth for thresholds,
+        anomaly settings, suppression and escalation.
+        Explicit parameters still override rule values when provided.
+        """
+        # Load matching production rules
+        matched_rules = []
+        if use_rules:
+            matched_rules = self.rule_service.find_matching_rules(
+                provider=provider,
+                check_type=check_type,
+                target=target,
+                metric_name=metric_name,
+            )
+
+        # Apply highest-priority rule (rules are already ordered by priority ASC)
+        active_rule = matched_rules[0] if matched_rules else None
+
+        # Resolve effective configuration (explicit params win over rule)
+        effective_warning = warning_threshold
+        effective_critical = critical_threshold
+        effective_anomaly_tolerance = anomaly_tolerance
+        effective_ai_suppression = ai_suppression_enabled
+        effective_maintenance = maintenance_window_name
+        effective_escalation = escalation_policy
+        state_change_enabled = True
+        anomaly_enabled = anomaly_tolerance is not None
+
+        if active_rule is not None:
+            if effective_warning is None:
+                effective_warning = active_rule.warning_threshold
+            if effective_critical is None:
+                effective_critical = active_rule.critical_threshold
+            if effective_anomaly_tolerance is None and active_rule.anomaly_enabled:
+                effective_anomaly_tolerance = active_rule.anomaly_tolerance
+            anomaly_enabled = active_rule.anomaly_enabled or anomaly_enabled
+            state_change_enabled = active_rule.state_change_enabled
+            effective_ai_suppression = active_rule.ai_suppression_enabled if not ai_suppression_enabled else True
+            if effective_maintenance is None:
+                effective_maintenance = active_rule.maintenance_window_name
+
+            # Load linked escalation policy if present
+            if effective_escalation is None and active_rule.escalation_policy_id:
+                policy = self.rule_service.get_escalation_policy(active_rule.escalation_policy_id)
+                if policy and policy.enabled:
+                    effective_escalation = {"levels": policy.levels}
+
+        fingerprint = self._fingerprint(
+            provider=provider,
+            check_type=check_type,
+            target=target,
+            metric_name=metric_name,
+        )
         correlation = correlation_key or f"{provider}:{target or check_type}"
         previous_check = self._previous_check(fingerprint)
         baseline_value = self._baseline_value(fingerprint, metric_value, anomaly_baseline)
-        anomaly_score = self._anomaly_score(metric_value, baseline_value, anomaly_tolerance)
+        anomaly_score = self._anomaly_score(metric_value, baseline_value, effective_anomaly_tolerance)
 
         computed_status = status
         alert_specs: list[dict[str, Any]] = []
 
+        # Threshold evaluation
         if metric_value is not None:
-            if critical_threshold is not None and metric_value >= critical_threshold:
+            if effective_critical is not None and metric_value >= effective_critical:
                 computed_status = "critical"
                 alert_specs.append(
                     {
@@ -102,12 +161,14 @@ class MonitoringService:
                         "context": {
                             "metric_name": metric_name,
                             "metric_value": metric_value,
-                            "critical_threshold": critical_threshold,
-                            "warning_threshold": warning_threshold,
+                            "critical_threshold": effective_critical,
+                            "warning_threshold": effective_warning,
+                            "rule_id": str(active_rule.id) if active_rule else None,
+                            "rule_name": active_rule.name if active_rule else None,
                         },
                     }
                 )
-            elif warning_threshold is not None and metric_value >= warning_threshold:
+            elif effective_warning is not None and metric_value >= effective_warning:
                 computed_status = "warning"
                 alert_specs.append(
                     {
@@ -117,12 +178,20 @@ class MonitoringService:
                         "context": {
                             "metric_name": metric_name,
                             "metric_value": metric_value,
-                            "warning_threshold": warning_threshold,
+                            "warning_threshold": effective_warning,
+                            "rule_id": str(active_rule.id) if active_rule else None,
+                            "rule_name": active_rule.name if active_rule else None,
                         },
                     }
                 )
 
-            if anomaly_score is not None and anomaly_tolerance is not None and anomaly_score >= anomaly_tolerance:
+            # Anomaly evaluation
+            if (
+                anomaly_enabled
+                and anomaly_score is not None
+                and effective_anomaly_tolerance is not None
+                and anomaly_score >= effective_anomaly_tolerance
+            ):
                 computed_status = "warning" if computed_status == "healthy" else computed_status
                 alert_specs.append(
                     {
@@ -134,31 +203,52 @@ class MonitoringService:
                             "metric_name": metric_name,
                             "metric_value": metric_value,
                             "baseline_value": baseline_value,
-                            "anomaly_tolerance": anomaly_tolerance,
+                            "anomaly_tolerance": effective_anomaly_tolerance,
+                            "rule_id": str(active_rule.id) if active_rule else None,
+                            "rule_name": active_rule.name if active_rule else None,
                         },
                     }
                 )
 
-        if state_value is not None and previous_check is not None and previous_check.state_value and previous_check.state_value != state_value:
+        # State change evaluation
+        if (
+            state_change_enabled
+            and state_value is not None
+            and previous_check is not None
+            and previous_check.state_value
+            and previous_check.state_value != state_value
+        ):
             computed_status = "warning" if computed_status == "healthy" else computed_status
             alert_specs.append(
                 {
                     "alert_type": "state_change",
                     "severity": "warning",
-                    "message": f"{provider} {check_type} changed state from {previous_check.state_value} to {state_value}",
+                    "message": (
+                        f"{provider} {check_type} changed state from "
+                        f"{previous_check.state_value} to {state_value}"
+                    ),
                     "state_transition": f"{previous_check.state_value}->{state_value}",
-                    "context": {"previous_state": previous_check.state_value, "current_state": state_value},
+                    "context": {
+                        "previous_state": previous_check.state_value,
+                        "current_state": state_value,
+                        "rule_id": str(active_rule.id) if active_rule else None,
+                        "rule_name": active_rule.name if active_rule else None,
+                    },
                 }
             )
 
         check_details = dict(details or {})
-        check_details.update({
-            "warning_threshold": warning_threshold,
-            "critical_threshold": critical_threshold,
-            "maintenance_window_name": maintenance_window_name,
-            "escalation_policy": escalation_policy or {},
-            "ai_suppression_enabled": ai_suppression_enabled,
-        })
+        check_details.update(
+            {
+                "warning_threshold": effective_warning,
+                "critical_threshold": effective_critical,
+                "maintenance_window_name": effective_maintenance,
+                "escalation_policy": effective_escalation or {},
+                "ai_suppression_enabled": effective_ai_suppression,
+                "matched_rule_id": str(active_rule.id) if active_rule else None,
+                "matched_rule_name": active_rule.name if active_rule else None,
+            }
+        )
 
         check = self.record_check(
             provider=provider,
@@ -190,9 +280,9 @@ class MonitoringService:
                     state_transition=spec.get("state_transition"),
                     correlation_key=correlation,
                     fingerprint=fingerprint,
-                    ai_suppression_enabled=ai_suppression_enabled,
-                    maintenance_window_name=maintenance_window_name,
-                    escalation_policy=escalation_policy,
+                    ai_suppression_enabled=effective_ai_suppression,
+                    maintenance_window_name=effective_maintenance,
+                    escalation_policy=effective_escalation,
                 )
             )
         return check, alerts
@@ -220,7 +310,11 @@ class MonitoringService:
             maintenance_window_name=maintenance_window_name,
         )
         correlated_count = self._correlated_count(correlation_key)
-        escalation = self._escalation_decision(correlation_key=correlation_key, policy=escalation_policy, severity=severity)
+        escalation = self._escalation_decision(
+            correlation_key=correlation_key,
+            policy=escalation_policy,
+            severity=severity,
+        )
         alert = MonitoringAlert(
             check_id=check.id,
             provider=check.provider,
@@ -232,11 +326,19 @@ class MonitoringService:
             correlated_count=correlated_count,
             suppressed=suppression_reason is not None,
             suppression_reason=suppression_reason,
-            maintenance_window=maintenance_window_name if suppression_reason == "maintenance_window_active" else None,
+            maintenance_window=(
+                maintenance_window_name
+                if suppression_reason == "maintenance_window_active"
+                else None
+            ),
             escalation_level=escalation["level"],
             anomaly_score=anomaly_score,
             state_transition=state_transition,
-            context={**(context or {}), "correlated_count": correlated_count, "escalation_policy": escalation_policy or {}},
+            context={
+                **(context or {}),
+                "correlated_count": correlated_count,
+                "escalation_policy": escalation_policy or {},
+            },
         )
         self.db.add(alert)
         self.db.commit()
@@ -258,8 +360,12 @@ class MonitoringService:
         self.db.refresh(alert)
         return alert
 
-    def _fingerprint(self, *, provider: str, check_type: str, target: str | None, metric_name: str | None) -> str:
-        return "::".join(part for part in [provider, check_type, target or "global", metric_name or "status"])
+    def _fingerprint(
+        self, *, provider: str, check_type: str, target: str | None, metric_name: str | None
+    ) -> str:
+        return "::".join(
+            part for part in [provider, check_type, target or "global", metric_name or "status"]
+        )
 
     def _previous_check(self, fingerprint: str) -> MonitoringCheck | None:
         return (
@@ -269,14 +375,22 @@ class MonitoringService:
             .first()
         )
 
-    def _baseline_value(self, fingerprint: str, metric_value: float | None, configured_baseline: float | None) -> float | None:
+    def _baseline_value(
+        self,
+        fingerprint: str,
+        metric_value: float | None,
+        configured_baseline: float | None,
+    ) -> float | None:
         if configured_baseline is not None:
             return configured_baseline
         if metric_value is None:
             return None
         history = (
             self.db.query(MonitoringCheck.metric_value)
-            .filter(MonitoringCheck.fingerprint == fingerprint, MonitoringCheck.metric_value.is_not(None))
+            .filter(
+                MonitoringCheck.fingerprint == fingerprint,
+                MonitoringCheck.metric_value.is_not(None),
+            )
             .order_by(MonitoringCheck.created_at.desc())
             .limit(5)
             .all()
@@ -286,12 +400,24 @@ class MonitoringService:
             return metric_value
         return float(mean(values))
 
-    def _anomaly_score(self, metric_value: float | None, baseline_value: float | None, anomaly_tolerance: float | None) -> float | None:
+    def _anomaly_score(
+        self,
+        metric_value: float | None,
+        baseline_value: float | None,
+        anomaly_tolerance: float | None,
+    ) -> float | None:
         if metric_value is None or baseline_value is None or anomaly_tolerance is None:
             return None
         return abs(metric_value - baseline_value)
 
-    def _suppression_reason(self, *, fingerprint: str | None, severity: str, ai_suppression_enabled: bool, maintenance_window_name: str | None) -> str | None:
+    def _suppression_reason(
+        self,
+        *,
+        fingerprint: str | None,
+        severity: str,
+        ai_suppression_enabled: bool,
+        maintenance_window_name: str | None,
+    ) -> str | None:
         if self._maintenance_window_active(maintenance_window_name):
             return "maintenance_window_active"
         if ai_suppression_enabled and fingerprint:
@@ -331,17 +457,28 @@ class MonitoringService:
             return 1
         count = (
             self.db.query(MonitoringAlert)
-            .filter(MonitoringAlert.correlation_key == correlation_key, MonitoringAlert.resolved.is_(False))
+            .filter(
+                MonitoringAlert.correlation_key == correlation_key,
+                MonitoringAlert.resolved.is_(False),
+            )
             .count()
         )
         return count + 1
 
-    def _escalation_decision(self, *, correlation_key: str | None, policy: dict[str, Any] | None, severity: str) -> dict[str, Any]:
+    def _escalation_decision(
+        self,
+        *,
+        correlation_key: str | None,
+        policy: dict[str, Any] | None,
+        severity: str,
+    ) -> dict[str, Any]:
         policy_levels = (policy or {}).get("levels") or []
         occurrence_count = self._correlated_count(correlation_key)
         applied_level = 0
         applied_severity = severity
-        for index, level in enumerate(sorted(policy_levels, key=lambda item: int(item.get("repeat_count", 1)))):
+        for index, level in enumerate(
+            sorted(policy_levels, key=lambda item: int(item.get("repeat_count", 1)))
+        ):
             if occurrence_count >= int(level.get("repeat_count", 1)):
                 applied_level = index + 1
                 applied_severity = str(level.get("severity") or applied_severity)
