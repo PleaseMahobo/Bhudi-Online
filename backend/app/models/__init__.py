@@ -3,6 +3,7 @@ from .base import Base
 from .action import Action
 from .agent import Agent
 from .alert import Alert
+from .alert_rule import AlertRule
 from .audit_trail import AuditTrail
 from .automation_log import AutomationLog  # type: ignore[import]
 from .command import Command
@@ -11,6 +12,7 @@ from .device import Device
 from .device_event import DeviceEvent
 from .device_heartbeat import DeviceHeartbeat
 from .device_metric import DeviceMetric
+from .escalation_policy import EscalationPolicy
 from .event import Event
 from .file_task import FileTask
 from .hunt_result import HuntResult
@@ -34,6 +36,7 @@ __all__ = [
     "Action",
     "Agent",
     "Alert",
+    "AlertRule",
     "AuditTrail",
     "AutomationLog",
     "Command",
@@ -42,6 +45,7 @@ __all__ = [
     "DeviceEvent",
     "DeviceHeartbeat",
     "DeviceMetric",
+    "EscalationPolicy",
     "Event",
     "FileTask",
     "HuntResult",
