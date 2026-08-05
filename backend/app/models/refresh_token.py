@@ -12,6 +12,7 @@ from sqlalchemy import (
     Index,
     Integer,
     String,
+    Uuid,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -77,14 +78,14 @@ class RefreshToken(Base):
     # =====================================================
 
     id: Mapped[uuid.UUID] = mapped_column(
-        String(36),
+        Uuid(as_uuid=True),
         primary_key=True,
-        default=lambda: str(uuid.uuid4()),
+        default=uuid.uuid4,
     )
 
 
     user_id: Mapped[uuid.UUID] = mapped_column(
-        String(36),
+        Uuid(as_uuid=True),
         ForeignKey(
             "users.id",
             ondelete="CASCADE",
@@ -192,7 +193,7 @@ class RefreshToken(Base):
 
 
     replaced_by_token_id: Mapped[uuid.UUID | None] = mapped_column(
-        String(36),
+        Uuid(as_uuid=True),
         ForeignKey(
             "refresh_tokens.id",
             ondelete="SET NULL",
