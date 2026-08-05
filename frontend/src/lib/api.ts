@@ -99,6 +99,8 @@ export interface Device {
 
   id: string;
 
+  device_id?: string;
+
   hostname?: string;
 
   name?: string;
@@ -108,6 +110,30 @@ export interface Device {
   online?: boolean;
 
   last_seen?: string;
+}
+
+function normalizeDevice(raw: any): Device {
+  return {
+    id: String(raw?.id ?? raw?.device_id ?? ""),
+    device_id: raw?.device_id,
+    hostname: raw?.hostname,
+    name: raw?.name,
+    status: raw?.status,
+    online: raw?.online,
+    last_seen: raw?.last_seen,
+  };
+}
+
+function normalizeDevicesPayload(payload: any): Device[] {
+  if (Array.isArray(payload)) {
+    return payload.map(normalizeDevice);
+  }
+
+  if (payload && Array.isArray(payload.devices)) {
+    return payload.devices.map(normalizeDevice);
+  }
+
+  return [];
 }
 
 export interface HealthResponse {
@@ -203,10 +229,11 @@ export async function getHealth() {
 }
 
 export async function getDevices() {
-
-  return request<Device[]>(
+  const payload = await request<any>(
     "/api/v1/devices/"
   );
+
+  return normalizeDevicesPayload(payload);
 
 }
 
@@ -219,9 +246,6 @@ When we modernize the dashboard we can remove this.
 */
 
 export async function getDeviceStatus() {
-
-  const devices = await getDevices();
-
-  return devices;
+  return getDevices();
 
 }
