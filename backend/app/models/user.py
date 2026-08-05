@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import JSON, Boolean, ForeignKey, String, Text, func
+from sqlalchemy import JSON, Boolean, ForeignKey, String, Text, Uuid, func
 from sqlalchemy.dialects.postgresql import TIMESTAMP
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -23,9 +23,9 @@ class User(Base):
     __tablename__ = "users"
 
     id: Mapped[uuid.UUID] = mapped_column(
-        String(36),
+        Uuid(as_uuid=True),
         primary_key=True,
-        default=lambda: str(uuid.uuid4()),
+        default=uuid.uuid4,
     )
 
     email: Mapped[str] = mapped_column(
@@ -108,7 +108,7 @@ class User(Base):
     )
 
     tenant_id: Mapped[uuid.UUID | None] = mapped_column(
-        String(36),
+        Uuid(as_uuid=True),
         ForeignKey(
             "tenants.id",
             ondelete="SET NULL",
