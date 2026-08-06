@@ -22,6 +22,12 @@ from .device import Device
 from .device_event import DeviceEvent
 from .device_heartbeat import DeviceHeartbeat
 from .device_metric import DeviceMetric
+from .endpoint_security import (
+    EndpointSecurityAgent,
+    EndpointSecurityScore,
+    SecurityFinding,
+    SecurityProvider,
+)
 from .escalation_policy import EscalationPolicy
 from .event import Event
 from .file_task import FileTask
@@ -68,6 +74,8 @@ __all__ = [
     "DeviceEvent",
     "DeviceHeartbeat",
     "DeviceMetric",
+    "EndpointSecurityAgent",
+    "EndpointSecurityScore",
     "EscalationPolicy",
     "Event",
     "FileTask",
@@ -82,6 +90,8 @@ __all__ = [
     "ResponseAction",
     "Script",
     "ScriptTask",
+    "SecurityFinding",
+    "SecurityProvider",
     "ServiceTicket",
     "SoftwareInventoryItem",
     "SoftwarePackage",
