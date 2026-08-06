@@ -21,7 +21,10 @@ from app.schemas.endpoint_security import (
     SecurityProviderResponse,
     SecurityProviderUpdate,
 )
-from app.services.endpoint_security_service import EndpointSecurityService
+from app.services.endpoint_security_service import (
+    PROVIDER_CATALOG,
+    EndpointSecurityService,
+)
 
 router = APIRouter(prefix="/endpoint-security", tags=["Endpoint Security"])
 
@@ -46,7 +49,7 @@ def _finding_response(row) -> SecurityFindingResponse:
 @router.get("/catalog")
 def list_catalog():
     """Supported security products for Phase 12."""
-    return EndpointSecurityService(None).list_catalog()  # type: ignore[arg-type]
+    return PROVIDER_CATALOG
 
 
 @router.post(
@@ -114,7 +117,6 @@ def create_agent(payload: EndpointSecurityAgentCreate, db: Session = Depends(get
         row = EndpointSecurityService(db).create_agent(payload)
     except ValueError as e:
         raise HTTPException(400, str(e))
-    # reload with provider
     agents = EndpointSecurityService(db).list_agents()
     row = next((a for a in agents if a.id == row.id), row)
     return _agent_response(row)
@@ -255,7 +257,6 @@ def list_scores(
 def get_device_score(device_id: UUID, db: Session = Depends(get_db)):
     row = EndpointSecurityService(db).get_device_score(device_id)
     if not row:
-        # compute on demand
         row = EndpointSecurityService(db).compute_device_score(device_id)
     return row
 
