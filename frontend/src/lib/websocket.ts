@@ -1,17 +1,19 @@
 import { useEffect, useRef, useState } from "react";
 
-const WS_URL =
+const WS_BASE =
   (
     process.env.NEXT_PUBLIC_API_URL ??
     "https://bhudi-online-production.up.railway.app"
-  )
-    .replace(/^http/, "ws") + "/ws";
+  ).replace(/^http/, "ws");
 
 export function createSocket(
   deviceId: string | number,
   onMessage: (data: any) => void
 ) {
-  const socket = new WebSocket(`${WS_URL}?device=${deviceId}`);
+  const url = deviceId
+    ? `${WS_BASE}/ws/${deviceId}`
+    : `${WS_BASE}/ws`;
+  const socket = new WebSocket(url);
 
   socket.onmessage = (event) => {
     try {
@@ -26,21 +28,41 @@ export function createSocket(
 
 export function useWebSocket(deviceId?: string | number) {
   const socketRef = useRef<WebSocket | null>(null);
+  const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [messages, setMessages] = useState<any[]>([]);
   const [isConnected, setConnected] = useState(false);
 
   useEffect(() => {
-    const socket = createSocket(deviceId ?? "", (message) => {
-      setMessages((prev) => [message, ...prev].slice(0, 50));
-    });
+    let cancelled = false;
 
-    socketRef.current = socket;
+    const connect = () => {
+      if (cancelled) return;
 
-    socket.onopen = () => setConnected(true);
-    socket.onclose = () => setConnected(false);
+      const socket = createSocket(deviceId ?? "", (message) => {
+        setMessages((prev) => [message, ...prev].slice(0, 50));
+      });
 
-    return () => socket.close();
+      socketRef.current = socket;
+
+      socket.onopen = () => setConnected(true);
+      socket.onclose = () => {
+        setConnected(false);
+        socketRef.current = null;
+        if (!cancelled) {
+          reconnectTimer.current = setTimeout(connect, 3000);
+        }
+      };
+      socket.onerror = () => socket.close();
+    };
+
+    connect();
+
+    return () => {
+      cancelled = true;
+      if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
+      socketRef.current?.close();
+    };
   }, [deviceId]);
 
   const sendMessage = (message: unknown) => {
