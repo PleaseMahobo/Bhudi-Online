@@ -199,6 +199,236 @@ export type AlertRuleCreate = Omit<AlertRule, "id" | "created_at" | "updated_at"
 export type EscalationPolicyCreate = Omit<EscalationPolicy, "id" | "created_at" | "updated_at">;
 
 // =========================================================
+// Asset Management Types
+// =========================================================
+
+export type AssetStatus =
+  | "ordered"
+  | "in_stock"
+  | "deployed"
+  | "in_repair"
+  | "retired"
+  | "disposed"
+  | string;
+
+export interface Asset {
+  id: string;
+  name: string;
+  asset_tag?: string | null;
+  serial_number?: string | null;
+  asset_type?: string | null;
+  manufacturer?: string | null;
+  model?: string | null;
+  status: AssetStatus;
+  location?: string | null;
+  assigned_to?: string | null;
+  device_id?: string | null;
+  vendor_id?: string | null;
+  purchase_cost?: number | null;
+  purchase_date?: string | null;
+  warranty_end?: string | null;
+  warranty_active?: boolean | null;
+  qr_code?: string | null;
+  notes?: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export type AssetCreate = {
+  name: string;
+  asset_tag?: string | null;
+  serial_number?: string | null;
+  asset_type?: string | null;
+  manufacturer?: string | null;
+  model?: string | null;
+  status?: AssetStatus;
+  location?: string | null;
+  assigned_to?: string | null;
+  device_id?: string | null;
+  vendor_id?: string | null;
+  purchase_cost?: number | null;
+  purchase_date?: string | null;
+  warranty_end?: string | null;
+  notes?: string | null;
+};
+
+export interface Vendor {
+  id: string;
+  name: string;
+  contact_email?: string | null;
+  contact_phone?: string | null;
+  website?: string | null;
+  active: boolean;
+  notes?: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export type VendorCreate = {
+  name: string;
+  contact_email?: string | null;
+  contact_phone?: string | null;
+  website?: string | null;
+  active?: boolean;
+  notes?: string | null;
+};
+
+export interface License {
+  id: string;
+  name: string;
+  vendor_id?: string | null;
+  license_key?: string | null;
+  seats_total: number;
+  seats_used: number;
+  seats_available?: number;
+  expires_at?: string | null;
+  active: boolean;
+  notes?: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export type LicenseCreate = {
+  name: string;
+  vendor_id?: string | null;
+  license_key?: string | null;
+  seats_total?: number;
+  seats_used?: number;
+  expires_at?: string | null;
+  active?: boolean;
+  notes?: string | null;
+};
+
+export interface Contract {
+  id: string;
+  name: string;
+  vendor_id?: string | null;
+  contract_type?: string | null;
+  status: string;
+  start_date?: string | null;
+  end_date?: string | null;
+  value?: number | null;
+  notes?: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export type ContractCreate = {
+  name: string;
+  vendor_id?: string | null;
+  contract_type?: string | null;
+  status?: string;
+  start_date?: string | null;
+  end_date?: string | null;
+  value?: number | null;
+  notes?: string | null;
+};
+
+export interface SoftwareItem {
+  id: string;
+  name: string;
+  version?: string | null;
+  publisher?: string | null;
+  asset_id?: string | null;
+  device_id?: string | null;
+  install_date?: string | null;
+  created_at?: string;
+}
+
+export interface DepreciationInfo {
+  asset_id: string;
+  method: string;
+  purchase_cost: number;
+  residual_value: number;
+  useful_life_months: number;
+  months_elapsed: number;
+  book_value: number;
+  accumulated_depreciation: number;
+}
+
+export interface WarrantyInfo {
+  asset_id: string;
+  serial_number?: string | null;
+  warranty_end?: string | null;
+  warranty_active: boolean;
+  days_remaining?: number | null;
+  source?: string | null;
+}
+
+export interface LifecycleEvent {
+  id: string;
+  asset_id: string;
+  from_status?: string | null;
+  to_status: string;
+  reason?: string | null;
+  changed_by?: string | null;
+  created_at: string;
+}
+
+// =========================================================
+// ITSM Types
+// =========================================================
+
+export type TicketType = "incident" | "service_request" | "problem" | "change" | string;
+export type TicketStatus =
+  | "new"
+  | "open"
+  | "in_progress"
+  | "on_hold"
+  | "resolved"
+  | "closed"
+  | string;
+
+export interface TicketAssetLink {
+  id: string;
+  ticket_id: string;
+  asset_id: string;
+  role?: string | null;
+  linked_at: string;
+  notes?: string | null;
+  asset_name?: string | null;
+  asset_tag?: string | null;
+  asset_status?: string | null;
+}
+
+export interface ServiceTicket {
+  id: string;
+  number: string;
+  title: string;
+  description?: string | null;
+  ticket_type: TicketType;
+  status: TicketStatus;
+  priority: string;
+  device_id?: string | null;
+  requester?: string | null;
+  assignee?: string | null;
+  asset_links?: TicketAssetLink[];
+  created_at: string;
+  updated_at: string;
+  resolved_at?: string | null;
+}
+
+export type ServiceTicketCreate = {
+  title: string;
+  description?: string | null;
+  ticket_type?: TicketType;
+  status?: TicketStatus;
+  priority?: string;
+  device_id?: string | null;
+  requester?: string | null;
+  assignee?: string | null;
+  asset_ids?: string[];
+};
+
+export interface WorkNote {
+  id: string;
+  ticket_id: string;
+  body: string;
+  author?: string | null;
+  created_at: string;
+}
+
+// =========================================================
 // Auth
 // =========================================================
 
@@ -357,4 +587,249 @@ export async function deleteAlertRule(id: string) {
   return request<void>(`/api/v1/alert-engine/rules/${id}`, {
     method: "DELETE",
   });
+}
+
+// =========================================================
+// Asset Management API
+// =========================================================
+
+export async function listAssets(params?: {
+  status?: string;
+  device_id?: string;
+  tenant_id?: string;
+}) {
+  const qs = new URLSearchParams();
+  if (params?.status) qs.set("status", params.status);
+  if (params?.device_id) qs.set("device_id", params.device_id);
+  if (params?.tenant_id) qs.set("tenant_id", params.tenant_id);
+  const q = qs.toString() ? `?${qs}` : "";
+  return request<Asset[]>(`/api/v1/assets${q}`);
+}
+
+export async function createAsset(data: AssetCreate) {
+  return request<Asset>(`/api/v1/assets`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function updateAsset(id: string, data: Partial<AssetCreate>) {
+  return request<Asset>(`/api/v1/assets/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function deleteAsset(id: string) {
+  return request<void>(`/api/v1/assets/${id}`, { method: "DELETE" });
+}
+
+export async function changeAssetStatus(
+  id: string,
+  status: string,
+  reason?: string
+) {
+  return request<Asset>(`/api/v1/assets/${id}/status`, {
+    method: "POST",
+    body: JSON.stringify({ status, reason: reason || null }),
+  });
+}
+
+export async function getAssetByQr(qrCode: string) {
+  return request<Asset>(`/api/v1/assets/by-qr/${encodeURIComponent(qrCode)}`);
+}
+
+export async function ensureAssetQr(id: string) {
+  return request<{ asset_id: string; qr_code: string }>(`/api/v1/assets/${id}/qr`, {
+    method: "POST",
+  });
+}
+
+export async function getAssetWarranty(id: string) {
+  return request<WarrantyInfo>(`/api/v1/assets/${id}/warranty`);
+}
+
+export async function getAssetDepreciation(id: string) {
+  return request<DepreciationInfo>(`/api/v1/assets/${id}/depreciation`);
+}
+
+export async function listAssetLifecycle(id: string) {
+  return request<LifecycleEvent[]>(`/api/v1/assets/${id}/lifecycle`);
+}
+
+export async function listVendors(activeOnly = false) {
+  const q = activeOnly ? "?active_only=true" : "";
+  return request<Vendor[]>(`/api/v1/assets/vendors${q}`);
+}
+
+export async function createVendor(data: VendorCreate) {
+  return request<Vendor>(`/api/v1/assets/vendors`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function updateVendor(id: string, data: Partial<VendorCreate>) {
+  return request<Vendor>(`/api/v1/assets/vendors/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function deleteVendor(id: string) {
+  return request<void>(`/api/v1/assets/vendors/${id}`, { method: "DELETE" });
+}
+
+export async function listLicenses(activeOnly = false) {
+  const q = activeOnly ? "?active_only=true" : "";
+  return request<License[]>(`/api/v1/assets/licenses${q}`);
+}
+
+export async function createLicense(data: LicenseCreate) {
+  return request<License>(`/api/v1/assets/licenses`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function updateLicense(id: string, data: Partial<LicenseCreate>) {
+  return request<License>(`/api/v1/assets/licenses/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function deleteLicense(id: string) {
+  return request<void>(`/api/v1/assets/licenses/${id}`, { method: "DELETE" });
+}
+
+export async function listContracts(status?: string) {
+  const q = status ? `?status=${encodeURIComponent(status)}` : "";
+  return request<Contract[]>(`/api/v1/assets/contracts${q}`);
+}
+
+export async function createContract(data: ContractCreate) {
+  return request<Contract>(`/api/v1/assets/contracts`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function updateContract(id: string, data: Partial<ContractCreate>) {
+  return request<Contract>(`/api/v1/assets/contracts/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function deleteContract(id: string) {
+  return request<void>(`/api/v1/assets/contracts/${id}`, { method: "DELETE" });
+}
+
+export async function listSoftware(params?: { asset_id?: string; device_id?: string }) {
+  const qs = new URLSearchParams();
+  if (params?.asset_id) qs.set("asset_id", params.asset_id);
+  if (params?.device_id) qs.set("device_id", params.device_id);
+  const q = qs.toString() ? `?${qs}` : "";
+  return request<SoftwareItem[]>(`/api/v1/assets/software${q}`);
+}
+
+// =========================================================
+// ITSM API
+// =========================================================
+
+export async function listTickets(params?: {
+  status?: string;
+  ticket_type?: string;
+  asset_id?: string;
+  device_id?: string;
+  priority?: string;
+}) {
+  const qs = new URLSearchParams();
+  if (params?.status) qs.set("status", params.status);
+  if (params?.ticket_type) qs.set("ticket_type", params.ticket_type);
+  if (params?.asset_id) qs.set("asset_id", params.asset_id);
+  if (params?.device_id) qs.set("device_id", params.device_id);
+  if (params?.priority) qs.set("priority", params.priority);
+  const q = qs.toString() ? `?${qs}` : "";
+  return request<ServiceTicket[]>(`/api/v1/itsm/tickets${q}`);
+}
+
+export async function createTicket(data: ServiceTicketCreate) {
+  return request<ServiceTicket>(`/api/v1/itsm/tickets`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function updateTicket(id: string, data: Partial<ServiceTicketCreate>) {
+  return request<ServiceTicket>(`/api/v1/itsm/tickets/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function setTicketStatus(id: string, status: string, note?: string) {
+  return request<ServiceTicket>(`/api/v1/itsm/tickets/${id}/status`, {
+    method: "POST",
+    body: JSON.stringify({ status, note: note || null }),
+  });
+}
+
+export async function deleteTicket(id: string) {
+  return request<void>(`/api/v1/itsm/tickets/${id}`, { method: "DELETE" });
+}
+
+export async function linkTicketAsset(
+  ticketId: string,
+  assetId: string,
+  role?: string,
+  notes?: string
+) {
+  return request<TicketAssetLink>(`/api/v1/itsm/tickets/${ticketId}/assets`, {
+    method: "POST",
+    body: JSON.stringify({
+      asset_id: assetId,
+      role: role || "related",
+      notes: notes || null,
+    }),
+  });
+}
+
+export async function unlinkTicketAsset(ticketId: string, assetId: string) {
+  return request<void>(`/api/v1/itsm/tickets/${ticketId}/assets/${assetId}`, {
+    method: "DELETE",
+  });
+}
+
+export async function listTicketsForAsset(assetId: string) {
+  return request<ServiceTicket[]>(`/api/v1/itsm/assets/${assetId}/tickets`);
+}
+
+export async function createTicketForAsset(
+  assetId: string,
+  data: Omit<ServiceTicketCreate, "asset_ids">
+) {
+  return request<ServiceTicket>(`/api/v1/itsm/assets/${assetId}/tickets`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function listWorkNotes(ticketId: string) {
+  return request<WorkNote[]>(`/api/v1/itsm/tickets/${ticketId}/notes`);
+}
+
+export async function addWorkNote(ticketId: string, body: string, author?: string) {
+  return request<WorkNote>(`/api/v1/itsm/tickets/${ticketId}/notes`, {
+    method: "POST",
+    body: JSON.stringify({ body, author: author || null }),
+  });
+}
+
+export async function runWarrantyExpiryJob(withinDays = 30) {
+  return request<ServiceTicket[]>(
+    `/api/v1/itsm/jobs/warranty-expiry?within_days=${withinDays}`,
+    { method: "POST" }
+  );
 }
