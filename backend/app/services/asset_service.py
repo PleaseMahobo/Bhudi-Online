@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import secrets
-from datetime import date, datetime, timezone
+from datetime import date
 from decimal import Decimal, ROUND_HALF_UP
 from uuid import UUID
 
@@ -67,6 +67,24 @@ class AssetService:
         self.db.add(event)
         return event
 
+    def _notify_itsm_status(
+        self,
+        asset: Asset,
+        from_status: str,
+        to_status: str,
+        actor: str | None = None,
+    ) -> None:
+        """Best-effort ITSM integration — never blocks asset updates."""
+        try:
+            from app.services.itsm_service import ITSMService
+
+            ITSMService(self.db).open_ticket_on_asset_status(
+                asset, from_status, to_status, actor=actor
+            )
+        except Exception:
+            # Tables may not be migrated yet, or ticket creation may fail
+            pass
+
     @staticmethod
     def compute_book_value(asset: Asset, as_of: date | None = None) -> Decimal | None:
         if asset.purchase_cost is None or asset.purchase_date is None:
@@ -87,7 +105,6 @@ class AssetService:
         months = max(0, min(months, life))
 
         if asset.depreciation_method == "declining_balance":
-            # Double-declining balance simplified per-month rate
             rate = Decimal("2") / Decimal(life)
             value = cost
             for _ in range(months):
@@ -97,7 +114,6 @@ class AssetService:
                     break
             return value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
-        # straight_line (default)
         depreciable = cost - salvage
         monthly = depreciable / Decimal(life)
         book = cost - (monthly * Decimal(months))
@@ -121,7 +137,6 @@ class AssetService:
 
     def create_vendor(self, payload: VendorCreate) -> Vendor:
         data = payload.model_dump(by_alias=False)
-        # map optional metadata field
         if "metadata" in data:
             data["metadata_json"] = data.pop("metadata")
         vendor = Vendor(**{k: v for k, v in data.items() if hasattr(Vendor, k)})
@@ -162,7 +177,6 @@ class AssetService:
     def create_asset(self, payload: AssetCreate, actor: str | None = None) -> Asset:
         asset = Asset(**payload.model_dump())
         self.refresh_book_value(asset)
-        # Auto QR code identity
         asset.qr_code = f"AST-{secrets.token_hex(6).upper()}"
         asset.qr_payload = f"bhudi://asset/{asset.qr_code}"
         self.db.add(asset)
@@ -219,6 +233,8 @@ class AssetService:
                 to_status=asset.status,
                 actor=actor,
             )
+            self.db.flush()
+            self._notify_itsm_status(asset, old_status, asset.status, actor=actor)
         self.db.commit()
         self.db.refresh(asset)
         return asset
@@ -243,6 +259,8 @@ class AssetService:
             actor=payload.actor,
             detail=payload.detail,
         )
+        self.db.flush()
+        self._notify_itsm_status(asset, old, asset.status, actor=payload.actor)
         self.db.commit()
         self.db.refresh(asset)
         return asset
@@ -469,7 +487,9 @@ class AssetService:
     def create_purchase(self, payload: PurchaseCreate) -> Purchase:
         data = payload.model_dump()
         if data.get("total_cost") is None and data.get("unit_cost") is not None:
-            data["total_cost"] = Decimal(data["unit_cost"]) * Decimal(data.get("quantity") or 1)
+            data["total_cost"] = Decimal(data["unit_cost"]) * Decimal(
+                data.get("quantity") or 1
+            )
         p = Purchase(**data)
         self.db.add(p)
         self.db.commit()
@@ -477,7 +497,11 @@ class AssetService:
         return p
 
     def list_purchases(self) -> list[Purchase]:
-        return self.db.query(Purchase).order_by(Purchase.purchase_date.desc().nullslast()).all()
+        return (
+            self.db.query(Purchase)
+            .order_by(Purchase.purchase_date.desc().nullslast())
+            .all()
+        )
 
     def get_purchase(self, purchase_id: UUID) -> Purchase | None:
         return self.db.get(Purchase, purchase_id)
