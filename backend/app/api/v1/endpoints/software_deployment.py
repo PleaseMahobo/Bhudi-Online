@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.database.session import get_db
@@ -164,8 +164,27 @@ def rollback_job(
 
 
 # =========================================================
-# Agent reporting + instruction payload
+# Agent: pending poll + report + payload
 # =========================================================
+
+@router.get("/agent/pending")
+def agent_pending(
+    hostname: str | None = Query(None),
+    device_id: UUID | None = Query(None),
+    agent_id: UUID | None = Query(None),
+    db: Session = Depends(get_db),
+):
+    """
+    Agent polls this endpoint each loop.
+    Returns list of full deployment payloads for this host.
+    """
+    if not hostname and not device_id and not agent_id:
+        raise HTTPException(400, "hostname, device_id, or agent_id required")
+    items = SoftwareDeploymentService(db).pending_for_agent(
+        hostname=hostname, device_id=device_id, agent_id=agent_id
+    )
+    return {"deployments": items}
+
 
 @router.post(
     "/jobs/{job_id}/targets/{target_id}/report",
