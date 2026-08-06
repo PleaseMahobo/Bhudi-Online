@@ -28,6 +28,8 @@ export interface AlertSocketEvent {
   channel?: string;
   alert?: LiveAlert;
   message?: string;
+  count?: number;
+  events?: AlertSocketEvent[];
 }
 
 function buildWsUrl(): string {
@@ -35,6 +37,27 @@ function buildWsUrl(): string {
     process.env.NEXT_PUBLIC_API_URL ??
     'https://bhudi-online-production.up.railway.app';
   return base.replace(/^http/, 'ws') + '/ws/alerts';
+}
+
+function applyEvent(
+  data: AlertSocketEvent,
+  setAlerts: React.Dispatch<React.SetStateAction<LiveAlert[]>>
+) {
+  if (data.type === 'alert.created' && data.alert) {
+    setAlerts((prev) => {
+      // De-dupe by id if the same alert arrives twice
+      if (prev.some((a) => a.id === data.alert!.id)) return prev;
+      return [data.alert!, ...prev].slice(0, 100);
+    });
+  }
+
+  if (data.type === 'alert.resolved' && data.alert) {
+    setAlerts((prev) =>
+      prev.map((a) =>
+        a.id === data.alert!.id ? { ...a, resolved: true } : a
+      )
+    );
+  }
 }
 
 export function useAlertWebSocket(enabled = true) {
@@ -49,17 +72,18 @@ export function useAlertWebSocket(enabled = true) {
       const data: AlertSocketEvent = JSON.parse(raw.data);
       setLastEvent(data);
 
-      if (data.type === 'alert.created' && data.alert) {
-        setAlerts((prev) => [data.alert!, ...prev].slice(0, 100));
+      // Batched envelope from the server
+      if (data.type === 'batch' && Array.isArray(data.events)) {
+        // Process oldest → newest so list order stays correct
+        const ordered = [...data.events].reverse();
+        for (const event of ordered) {
+          applyEvent(event, setAlerts);
+        }
+        return;
       }
 
-      if (data.type === 'alert.resolved' && data.alert) {
-        setAlerts((prev) =>
-          prev.map((a) =>
-            a.id === data.alert!.id ? { ...a, resolved: true } : a
-          )
-        );
-      }
+      // Single event (immediate send or batch of size 1)
+      applyEvent(data, setAlerts);
     } catch {
       // ignore malformed payloads
     }
@@ -68,7 +92,6 @@ export function useAlertWebSocket(enabled = true) {
   const connect = useCallback(() => {
     if (!enabled || typeof window === 'undefined') return;
 
-    // Avoid duplicate sockets
     if (
       socketRef.current &&
       (socketRef.current.readyState === WebSocket.OPEN ||
@@ -89,7 +112,6 @@ export function useAlertWebSocket(enabled = true) {
     ws.onclose = () => {
       setConnected(false);
       socketRef.current = null;
-      // Auto-reconnect after 3s
       reconnectTimer.current = setTimeout(connect, 3000);
     };
 
