@@ -34,6 +34,12 @@ from .refresh_token import RefreshToken
 from .response_action import ResponseAction
 from .script import Script
 from .script_task import ScriptTask
+from .software_deployment import (
+    DeploymentEvent,
+    DeploymentJob,
+    DeploymentTarget,
+    SoftwarePackage,
+)
 from .telemetry import Telemetry
 from .tenant import Tenant
 from .threat_hunt import ThreatHunt
@@ -55,6 +61,9 @@ __all__ = [
     "Command",
     "ComplianceReport",
     "Contract",
+    "DeploymentEvent",
+    "DeploymentJob",
+    "DeploymentTarget",
     "Device",
     "DeviceEvent",
     "DeviceHeartbeat",
@@ -75,6 +84,7 @@ __all__ = [
     "ScriptTask",
     "ServiceTicket",
     "SoftwareInventoryItem",
+    "SoftwarePackage",
     "Telemetry",
     "Tenant",
     "ThreatHunt",
