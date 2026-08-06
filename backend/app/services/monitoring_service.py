@@ -7,6 +7,7 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
+from app.core.ws_manager import manager as ws_manager
 from app.models.device_management import MaintenanceWindow
 from app.models.monitoring import MonitoringAlert, MonitoringCheck
 from app.services.alert_rule_service import AlertRuleService
@@ -85,15 +86,6 @@ class MonitoringService:
         correlation_key: str | None = None,
         use_rules: bool = True,
     ) -> tuple[MonitoringCheck, list[MonitoringAlert]]:
-        """
-        Evaluate a monitoring check.
-
-        When use_rules=True (default), matching AlertRule records are loaded
-        from the database and used as the source of truth for thresholds,
-        anomaly settings, suppression and escalation.
-        Explicit parameters still override rule values when provided.
-        """
-        # Load matching production rules
         matched_rules = []
         if use_rules:
             matched_rules = self.rule_service.find_matching_rules(
@@ -103,10 +95,8 @@ class MonitoringService:
                 metric_name=metric_name,
             )
 
-        # Apply highest-priority rule (rules are already ordered by priority ASC)
         active_rule = matched_rules[0] if matched_rules else None
 
-        # Resolve effective configuration (explicit params win over rule)
         effective_warning = warning_threshold
         effective_critical = critical_threshold
         effective_anomaly_tolerance = anomaly_tolerance
@@ -125,11 +115,12 @@ class MonitoringService:
                 effective_anomaly_tolerance = active_rule.anomaly_tolerance
             anomaly_enabled = active_rule.anomaly_enabled or anomaly_enabled
             state_change_enabled = active_rule.state_change_enabled
-            effective_ai_suppression = active_rule.ai_suppression_enabled if not ai_suppression_enabled else True
+            effective_ai_suppression = (
+                active_rule.ai_suppression_enabled if not ai_suppression_enabled else True
+            )
             if effective_maintenance is None:
                 effective_maintenance = active_rule.maintenance_window_name
 
-            # Load linked escalation policy if present
             if effective_escalation is None and active_rule.escalation_policy_id:
                 policy = self.rule_service.get_escalation_policy(active_rule.escalation_policy_id)
                 if policy and policy.enabled:
@@ -149,7 +140,6 @@ class MonitoringService:
         computed_status = status
         alert_specs: list[dict[str, Any]] = []
 
-        # Threshold evaluation
         if metric_value is not None:
             if effective_critical is not None and metric_value >= effective_critical:
                 computed_status = "critical"
@@ -185,7 +175,6 @@ class MonitoringService:
                     }
                 )
 
-            # Anomaly evaluation
             if (
                 anomaly_enabled
                 and anomaly_score is not None
@@ -210,7 +199,6 @@ class MonitoringService:
                     }
                 )
 
-        # State change evaluation
         if (
             state_change_enabled
             and state_value is not None
@@ -343,6 +331,10 @@ class MonitoringService:
         self.db.add(alert)
         self.db.commit()
         self.db.refresh(alert)
+
+        # Real-time push to all alert-channel subscribers
+        self._broadcast_alert_event("alert.created", alert)
+
         return alert
 
     def list_checks(self) -> list[MonitoringCheck]:
@@ -358,7 +350,41 @@ class MonitoringService:
         alert.resolved = True
         self.db.commit()
         self.db.refresh(alert)
+
+        self._broadcast_alert_event("alert.resolved", alert)
+
         return alert
+
+    def _broadcast_alert_event(self, event: str, alert: MonitoringAlert) -> None:
+        payload = {
+            "type": event,
+            "channel": "alerts",
+            "alert": {
+                "id": str(alert.id),
+                "check_id": str(alert.check_id) if alert.check_id else None,
+                "provider": alert.provider,
+                "alert_type": alert.alert_type,
+                "severity": alert.severity,
+                "message": alert.message,
+                "fingerprint": alert.fingerprint,
+                "correlation_key": alert.correlation_key,
+                "correlated_count": alert.correlated_count,
+                "suppressed": alert.suppressed,
+                "suppression_reason": alert.suppression_reason,
+                "maintenance_window": alert.maintenance_window,
+                "escalation_level": alert.escalation_level,
+                "anomaly_score": alert.anomaly_score,
+                "state_transition": alert.state_transition,
+                "context": alert.context,
+                "resolved": alert.resolved,
+                "created_at": alert.created_at.isoformat() if alert.created_at else None,
+            },
+        }
+        try:
+            ws_manager.broadcast_sync(payload, channel="alerts")
+        except Exception:
+            # Never break alert persistence because of WS failure
+            pass
 
     def _fingerprint(
         self, *, provider: str, check_type: str, target: str | None, metric_name: str | None
