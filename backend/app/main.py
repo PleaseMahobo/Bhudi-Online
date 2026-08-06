@@ -2,13 +2,14 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import asyncio
-from typing import Dict, List
+from typing import Dict
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 
 from app.api.v1.router import api_router
 from app.core.bootstrap import initialize_database
 from app.core.cors import setup_cors
+from app.core.ws_manager import manager
 
 app = FastAPI(
     title="Bhudi RMM API",
@@ -81,65 +82,90 @@ async def root():
     return {"message": "Bhudi RMM API is running", "docs": "/docs", "health": "/health"}
 
 
-class ConnectionManager:
-    def __init__(self):
-        self.active_connections: List[WebSocket] = []
-        self.device_heartbeats: Dict[str, dict] = {}
+# Device heartbeat state (kept for backward compatibility)
+device_heartbeats: Dict[str, dict] = {}
 
-    async def connect(self, websocket: WebSocket):
-        await websocket.accept()
-        self.active_connections.append(websocket)
 
-    def disconnect(self, websocket: WebSocket):
-        if websocket in self.active_connections:
-            self.active_connections.remove(websocket)
-
-    async def broadcast(self, message: dict):
-        for connection in self.active_connections[:]:
-            try:
-                await connection.send_json(message)
-            except Exception:
-                self.disconnect(connection)
-
-    async def handle_heartbeat(self, device_id: str, data: dict):
-        self.device_heartbeats[device_id] = {
+async def handle_heartbeat(device_id: str, data: dict):
+    device_heartbeats[device_id] = {
+        "status": "online",
+        "timestamp": data.get("timestamp"),
+        **data,
+    }
+    await manager.broadcast(
+        {
+            "type": "heartbeat",
+            "device_id": device_id,
             "status": "online",
-            "timestamp": data.get("timestamp"),
-            **data,
-        }
-        await self.broadcast(
-            {"type": "heartbeat", "device_id": device_id, "status": "online", "data": self.device_heartbeats[device_id]}
-        )
-
-
-manager = ConnectionManager()
+            "data": device_heartbeats[device_id],
+        },
+        channel="heartbeats",
+    )
+    # Also broadcast on general for legacy clients
+    await manager.broadcast(
+        {
+            "type": "heartbeat",
+            "device_id": device_id,
+            "status": "online",
+            "data": device_heartbeats[device_id],
+        },
+        channel="general",
+    )
 
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
-    await manager.connect(websocket)
+    await manager.connect(websocket, channel="general")
     try:
         while True:
             data = await websocket.receive_json()
             if data.get("type") == "heartbeat" and data.get("device_id"):
-                await manager.handle_heartbeat(data["device_id"], data)
+                await handle_heartbeat(data["device_id"], data)
+            elif data.get("type") == "subscribe":
+                # Client can request channel switch via message
+                channel = data.get("channel", "general")
+                await manager.disconnect(websocket)
+                await manager.connect(websocket, channel=channel)
+                await websocket.send_json({"type": "subscribed", "channel": channel})
     except WebSocketDisconnect:
-        manager.disconnect(websocket)
+        await manager.disconnect(websocket)
+
+
+@app.websocket("/ws/alerts")
+async def alerts_websocket(websocket: WebSocket):
+    """Dedicated real-time channel for Alert Engine events."""
+    await manager.connect(websocket, channel="alerts")
+    try:
+        await websocket.send_json({
+            "type": "connected",
+            "channel": "alerts",
+            "message": "Subscribed to live alerts",
+        })
+        while True:
+            # Keep connection alive; ignore client messages or handle ping
+            data = await websocket.receive_json()
+            if data.get("type") == "ping":
+                await websocket.send_json({"type": "pong"})
+    except WebSocketDisconnect:
+        await manager.disconnect(websocket)
 
 
 @app.websocket("/ws/{device_id}")
 async def device_ws(websocket: WebSocket, device_id: str):
-    await manager.connect(websocket)
+    await manager.connect(websocket, channel="general")
     try:
         while True:
             data = await websocket.receive_json()
             data["device_id"] = device_id
             if data.get("type") == "heartbeat":
-                await manager.handle_heartbeat(device_id, data)
+                await handle_heartbeat(device_id, data)
             else:
-                await manager.broadcast({"type": "message", "device_id": device_id, "data": data})
+                await manager.broadcast(
+                    {"type": "message", "device_id": device_id, "data": data},
+                    channel="general",
+                )
     except WebSocketDisconnect:
-        manager.disconnect(websocket)
+        await manager.disconnect(websocket)
 
 
 print("Bhudi RMM API initialized (Phase A+B)")
