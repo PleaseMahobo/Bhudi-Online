@@ -4,6 +4,16 @@ from .action import Action
 from .agent import Agent
 from .alert import Alert
 from .alert_rule import AlertRule
+from .asset_management import (
+    Asset,
+    AssetLifecycleEvent,
+    Contract,
+    License,
+    LicenseAssignment,
+    Purchase,
+    SoftwareInventoryItem,
+    Vendor,
+)
 from .audit_trail import AuditTrail
 from .automation_log import AutomationLog  # type: ignore[import]
 from .command import Command
@@ -37,10 +47,13 @@ __all__ = [
     "Agent",
     "Alert",
     "AlertRule",
+    "Asset",
+    "AssetLifecycleEvent",
     "AuditTrail",
     "AutomationLog",
     "Command",
     "ComplianceReport",
+    "Contract",
     "Device",
     "DeviceEvent",
     "DeviceHeartbeat",
@@ -51,11 +64,15 @@ __all__ = [
     "HuntResult",
     "Incident",
     "IncidentTimeline",
+    "License",
+    "LicenseAssignment",
     "Profile",
+    "Purchase",
     "RefreshToken",
     "ResponseAction",
     "Script",
     "ScriptTask",
+    "SoftwareInventoryItem",
     "Telemetry",
     "Tenant",
     "ThreatHunt",
@@ -64,4 +81,5 @@ __all__ = [
     "Permission",
     "Role",
     "RolePermission",
+    "Vendor",
 ]
