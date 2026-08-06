@@ -429,6 +429,141 @@ export interface WorkNote {
 }
 
 // =========================================================
+// Software Deployment (Phase 11)
+// =========================================================
+
+export type PackageType = "msi" | "exe" | "chocolatey" | "winget" | "custom" | string;
+
+export interface SoftwarePackage {
+  id: string;
+  name: string;
+  version: string;
+  publisher?: string | null;
+  description?: string | null;
+  package_type: PackageType;
+  source_url?: string | null;
+  file_name?: string | null;
+  sha256?: string | null;
+  file_size_bytes?: number | null;
+  choco_id?: string | null;
+  winget_id?: string | null;
+  install_args?: string | null;
+  uninstall_args?: string | null;
+  uninstall_command?: string | null;
+  success_exit_codes?: number[] | null;
+  requires_reboot: boolean;
+  requires_elevation: boolean;
+  timeout_seconds: number;
+  architecture?: string | null;
+  is_active: boolean;
+  tags?: Record<string, any> | null;
+  metadata_json?: Record<string, any> | null;
+  tenant_id?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type SoftwarePackageCreate = {
+  name: string;
+  version?: string;
+  publisher?: string | null;
+  description?: string | null;
+  package_type: PackageType;
+  source_url?: string | null;
+  file_name?: string | null;
+  sha256?: string | null;
+  file_size_bytes?: number | null;
+  choco_id?: string | null;
+  winget_id?: string | null;
+  install_args?: string | null;
+  uninstall_args?: string | null;
+  uninstall_command?: string | null;
+  success_exit_codes?: number[] | null;
+  requires_reboot?: boolean;
+  requires_elevation?: boolean;
+  timeout_seconds?: number;
+  architecture?: string | null;
+  is_active?: boolean;
+  tags?: Record<string, any> | null;
+};
+
+export interface DeploymentTarget {
+  id: string;
+  job_id: string;
+  device_id?: string | null;
+  agent_id?: string | null;
+  hostname?: string | null;
+  status: string;
+  exit_code?: number | null;
+  stdout?: string | null;
+  stderr?: string | null;
+  error_message?: string | null;
+  download_bytes?: number | null;
+  duration_ms?: number | null;
+  reboot_required: boolean;
+  started_at?: string | null;
+  finished_at?: string | null;
+  reported_at?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DeploymentJob {
+  id: string;
+  tenant_id?: string | null;
+  package_id: string;
+  name: string;
+  action: string;
+  status: string;
+  created_by?: string | null;
+  notes?: string | null;
+  rollback_of_job_id?: string | null;
+  scheduled_at?: string | null;
+  started_at?: string | null;
+  finished_at?: string | null;
+  targets_total: number;
+  targets_success: number;
+  targets_failed: number;
+  targets_pending: number;
+  tags?: Record<string, any> | null;
+  created_at: string;
+  updated_at: string;
+  targets?: DeploymentTarget[];
+}
+
+export type DeploymentJobCreate = {
+  package_id: string;
+  name: string;
+  action?: string;
+  device_ids?: string[];
+  hostnames?: string[];
+  created_by?: string | null;
+  notes?: string | null;
+  scheduled_at?: string | null;
+};
+
+export interface DeploymentJobSummary {
+  job_id: string;
+  status: string;
+  targets_total: number;
+  targets_success: number;
+  targets_failed: number;
+  targets_pending: number;
+  success_rate: number;
+  finished_at?: string | null;
+}
+
+export interface DeploymentEvent {
+  id: string;
+  job_id: string;
+  target_id?: string | null;
+  level: string;
+  message: string;
+  detail?: Record<string, any> | null;
+  created_at: string;
+}
+
+// =========================================================
 // Auth
 // =========================================================
 
@@ -832,4 +967,95 @@ export async function runWarrantyExpiryJob(withinDays = 30) {
     `/api/v1/itsm/jobs/warranty-expiry?within_days=${withinDays}`,
     { method: "POST" }
   );
+}
+
+// =========================================================
+// Software Deployment API (Phase 11)
+// =========================================================
+
+export async function listPackages(params?: {
+  package_type?: string;
+  active_only?: boolean;
+}) {
+  const qs = new URLSearchParams();
+  if (params?.package_type) qs.set("package_type", params.package_type);
+  if (params?.active_only) qs.set("active_only", "true");
+  const q = qs.toString() ? `?${qs}` : "";
+  return request<SoftwarePackage[]>(`/api/v1/software-deployment/packages${q}`);
+}
+
+export async function createPackage(data: SoftwarePackageCreate) {
+  return request<SoftwarePackage>(`/api/v1/software-deployment/packages`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function updatePackage(id: string, data: Partial<SoftwarePackageCreate>) {
+  return request<SoftwarePackage>(`/api/v1/software-deployment/packages/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function deletePackage(id: string) {
+  return request<void>(`/api/v1/software-deployment/packages/${id}`, {
+    method: "DELETE",
+  });
+}
+
+export async function listDeploymentJobs(params?: {
+  status?: string;
+  package_id?: string;
+}) {
+  const qs = new URLSearchParams();
+  if (params?.status) qs.set("status", params.status);
+  if (params?.package_id) qs.set("package_id", params.package_id);
+  const q = qs.toString() ? `?${qs}` : "";
+  return request<DeploymentJob[]>(`/api/v1/software-deployment/jobs${q}`);
+}
+
+export async function getDeploymentJob(id: string) {
+  return request<DeploymentJob>(`/api/v1/software-deployment/jobs/${id}`);
+}
+
+export async function createDeploymentJob(data: DeploymentJobCreate) {
+  return request<DeploymentJob>(`/api/v1/software-deployment/jobs`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function startDeploymentJob(id: string) {
+  return request<DeploymentJob>(`/api/v1/software-deployment/jobs/${id}/start`, {
+    method: "POST",
+  });
+}
+
+export async function cancelDeploymentJob(id: string) {
+  return request<DeploymentJob>(`/api/v1/software-deployment/jobs/${id}/cancel`, {
+    method: "POST",
+  });
+}
+
+export async function getDeploymentSummary(id: string) {
+  return request<DeploymentJobSummary>(`/api/v1/software-deployment/jobs/${id}/summary`);
+}
+
+export async function listDeploymentEvents(id: string) {
+  return request<DeploymentEvent[]>(`/api/v1/software-deployment/jobs/${id}/events`);
+}
+
+export async function rollbackDeploymentJob(
+  id: string,
+  opts?: { created_by?: string; notes?: string; device_ids?: string[] }
+) {
+  return request<DeploymentJob>(`/api/v1/software-deployment/jobs/${id}/rollback`, {
+    method: "POST",
+    body: JSON.stringify({
+      created_by: opts?.created_by || null,
+      notes: opts?.notes || null,
+      device_ids: opts?.device_ids || [],
+    }),
+  });
 }
