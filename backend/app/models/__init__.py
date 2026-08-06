@@ -28,6 +28,7 @@ from .file_task import FileTask
 from .hunt_result import HuntResult
 from .incident import Incident
 from .incident_timeline import IncidentTimeline
+from .itsm import ServiceTicket, TicketAssetLink, TicketWorkNote
 from .profile import Profile
 from .refresh_token import RefreshToken
 from .response_action import ResponseAction
@@ -72,10 +73,13 @@ __all__ = [
     "ResponseAction",
     "Script",
     "ScriptTask",
+    "ServiceTicket",
     "SoftwareInventoryItem",
     "Telemetry",
     "Tenant",
     "ThreatHunt",
+    "TicketAssetLink",
+    "TicketWorkNote",
     "User",
     "UserRole",
     "Permission",
