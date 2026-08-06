@@ -70,7 +70,7 @@ class SoftwareDeploymentService:
             elif job.targets_success == 0:
                 job.status = "failed"
             else:
-                job.status = "completed"  # partial success still completed
+                job.status = "completed"
             if job.finished_at is None:
                 job.finished_at = _utcnow()
 
@@ -118,7 +118,6 @@ class SoftwareDeploymentService:
         pkg = self.get_package(package_id)
         if not pkg:
             return False
-        # Soft-delete preferred if jobs exist
         has_jobs = (
             self.db.query(DeploymentJob)
             .filter(DeploymentJob.package_id == package_id)
@@ -155,24 +154,13 @@ class SoftwareDeploymentService:
         self.db.add(job)
         self.db.flush()
 
-        device_ids = list(payload.device_ids or [])
-        hostnames = list(payload.hostnames or [])
-
-        for did in device_ids:
+        for did in list(payload.device_ids or []):
             self.db.add(
-                DeploymentTarget(
-                    job_id=job.id,
-                    device_id=did,
-                    status="pending",
-                )
+                DeploymentTarget(job_id=job.id, device_id=did, status="pending")
             )
-        for hn in hostnames:
+        for hn in list(payload.hostnames or []):
             self.db.add(
-                DeploymentTarget(
-                    job_id=job.id,
-                    hostname=hn,
-                    status="pending",
-                )
+                DeploymentTarget(job_id=job.id, hostname=hn, status="pending")
             )
 
         self._recompute_job_counts(job)
@@ -280,7 +268,7 @@ class SoftwareDeploymentService:
         if not job:
             raise ValueError("Job not found")
 
-        if job.status == "queued":
+        if job.status in ("queued", "pending"):
             job.status = "running"
             job.started_at = job.started_at or _utcnow()
 
@@ -321,13 +309,17 @@ class SoftwareDeploymentService:
         pkg = self.get_package(original.package_id)
         if not pkg:
             raise ValueError("Package not found")
-        if not pkg.uninstall_command and not pkg.uninstall_args and not pkg.choco_id and not pkg.winget_id:
+        if (
+            not pkg.uninstall_command
+            and not pkg.uninstall_args
+            and not pkg.choco_id
+            and not pkg.winget_id
+        ):
             raise ValueError(
                 "Package has no uninstall/rollback definition "
                 "(uninstall_command, uninstall_args, choco_id, or winget_id)"
             )
 
-        # Targets to roll back: successful ones from original, optionally filtered
         candidates = [t for t in original.targets if t.status == "success"]
         if payload.device_ids:
             wanted = set(payload.device_ids)
@@ -361,7 +353,8 @@ class SoftwareDeploymentService:
             )
 
         self._recompute_job_counts(rb)
-        original.status = "rolled_back" if not payload.device_ids else original.status
+        if not payload.device_ids:
+            original.status = "rolled_back"
         self._event(
             rb.id,
             f"Rollback job created for {len(candidates)} target(s) of {original.id}",
@@ -379,7 +372,6 @@ class SoftwareDeploymentService:
         )
 
     def agent_payload(self, job_id: UUID, target_id: UUID) -> dict:
-        """Build the instruction payload an agent needs to execute."""
         job = self.get_job(job_id)
         if not job:
             raise ValueError("Job not found")
@@ -414,3 +406,47 @@ class SoftwareDeploymentService:
                 "architecture": pkg.architecture,
             },
         }
+
+    def pending_for_agent(
+        self,
+        *,
+        hostname: str | None = None,
+        device_id: UUID | None = None,
+        agent_id: UUID | None = None,
+    ) -> list[dict]:
+        """
+        Return full agent payloads for pending targets matching this agent.
+
+        Jobs must be queued or running. Targets must be pending.
+        """
+        if not hostname and not device_id and not agent_id:
+            return []
+
+        q = (
+            self.db.query(DeploymentTarget)
+            .join(DeploymentJob, DeploymentTarget.job_id == DeploymentJob.id)
+            .filter(
+                DeploymentTarget.status == "pending",
+                DeploymentJob.status.in_(["queued", "running", "pending"]),
+            )
+        )
+        clauses = []
+        if hostname:
+            clauses.append(DeploymentTarget.hostname == hostname)
+        if device_id:
+            clauses.append(DeploymentTarget.device_id == device_id)
+        if agent_id:
+            clauses.append(DeploymentTarget.agent_id == agent_id)
+
+        from sqlalchemy import or_
+
+        q = q.filter(or_(*clauses))
+        targets = q.order_by(DeploymentTarget.created_at.asc()).limit(20).all()
+
+        out: list[dict] = []
+        for t in targets:
+            try:
+                out.append(self.agent_payload(t.job_id, t.id))
+            except ValueError:
+                continue
+        return out
