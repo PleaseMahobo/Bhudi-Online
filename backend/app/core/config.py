@@ -98,6 +98,29 @@ class Settings:
         "1", "true", "yes", "on",
     )
 
+    # OpenTelemetry tracing
+    OTEL_ENABLED: bool = os.getenv("OTEL_ENABLED", "false").lower() in (
+        "1", "true", "yes", "on",
+    ) or bool(os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "").strip())
+    OTEL_SERVICE_NAME: str = os.getenv("OTEL_SERVICE_NAME", "bhudi-api")
+    OTEL_SERVICE_VERSION: str = os.getenv("OTEL_SERVICE_VERSION", "1.0.0")
+    OTEL_ENVIRONMENT: str = os.getenv(
+        "OTEL_ENVIRONMENT", os.getenv("ENVIRONMENT", "development")
+    )
+    OTEL_EXPORTER_OTLP_ENDPOINT: str = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "")
+    OTEL_EXPORTER_OTLP_PROTOCOL: str = os.getenv(
+        "OTEL_EXPORTER_OTLP_PROTOCOL", "grpc"
+    )
+    OTEL_TRACES_SAMPLER: str = os.getenv(
+        "OTEL_TRACES_SAMPLER", "parentbased_always_on"
+    )
+    OTEL_TRACES_SAMPLER_ARG: float = float(
+        os.getenv("OTEL_TRACES_SAMPLER_ARG", "1.0")
+    )
+    OTEL_CONSOLE_EXPORTER: bool = os.getenv("OTEL_CONSOLE_EXPORTER", "false").lower() in (
+        "1", "true", "yes", "on",
+    )
+
     def validate(self):
         required = {
             "DATABASE_URL": self.DATABASE_URL,
