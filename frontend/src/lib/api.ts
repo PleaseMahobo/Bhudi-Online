@@ -1334,3 +1334,6 @@ export async function recomputeAllSecurityScores() {
     { method: "POST" }
   );
 }
+
+// Enterprise modules (MSP, PSA, notifications, AI, reporting, compliance, backup, billing)
+export * from "./api-modules";
