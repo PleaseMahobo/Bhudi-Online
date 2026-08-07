@@ -28,6 +28,17 @@ try:
 except Exception as e:
     print(f"[startup] rate limit middleware skipped: {e}")
 
+# OpenTelemetry must instrument the app object before serving traffic
+try:
+    from app.core.telemetry import setup_tracing
+
+    if setup_tracing(app):
+        print("[startup] OpenTelemetry tracing enabled")
+    else:
+        print("[startup] OpenTelemetry tracing inactive")
+except Exception as e:
+    print(f"[startup] OpenTelemetry skipped: {e}")
+
 # Optional schema router (ignore if service missing)
 try:
     from app.api.schema_routes import router as schema_router
@@ -67,6 +78,12 @@ async def startup_event():
 @app.on_event("shutdown")
 async def shutdown_event():
     print("Bhudi RMM API shutting down...")
+    try:
+        from app.core.telemetry import shutdown_tracing
+
+        shutdown_tracing()
+    except Exception:
+        pass
     try:
         from app.workers.command_dispatcher import dispatcher
         dispatcher.stop()
