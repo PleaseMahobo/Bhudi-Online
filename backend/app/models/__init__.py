@@ -16,6 +16,12 @@ from .asset_management import (
 )
 from .audit_trail import AuditTrail
 from .automation_log import AutomationLog  # type: ignore[import]
+from .backup_integration import (
+    BackupJob,
+    BackupProvider,
+    ProtectedResource,
+    RestoreJob,
+)
 from .command import Command
 from .compliance_report import ComplianceReport
 from .device import Device
@@ -64,6 +70,8 @@ __all__ = [
     "AssetLifecycleEvent",
     "AuditTrail",
     "AutomationLog",
+    "BackupJob",
+    "BackupProvider",
     "Command",
     "ComplianceReport",
     "Contract",
@@ -85,9 +93,11 @@ __all__ = [
     "License",
     "LicenseAssignment",
     "Profile",
+    "ProtectedResource",
     "Purchase",
     "RefreshToken",
     "ResponseAction",
+    "RestoreJob",
     "Script",
     "ScriptTask",
     "SecurityFinding",
