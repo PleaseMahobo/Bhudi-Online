@@ -4,7 +4,7 @@ load_dotenv()
 import asyncio
 from typing import Dict
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Response, WebSocket, WebSocketDisconnect
 
 from app.api.v1.router import api_router
 from app.core.bootstrap import initialize_database
@@ -14,12 +14,19 @@ from app.core.ws_manager import manager
 app = FastAPI(
     title="Bhudi RMM API",
     description="Enterprise Remote Monitoring & Management Platform",
-    version="1.0.0-phase-ab",
+    version="1.0.0",
     docs_url="/docs",
     redoc_url="/redoc",
 )
 
 setup_cors(app)
+
+try:
+    from app.core.rate_limit import RateLimitMiddleware
+
+    app.add_middleware(RateLimitMiddleware)
+except Exception as e:
+    print(f"[startup] rate limit middleware skipped: {e}")
 
 # Optional schema router (ignore if service missing)
 try:
@@ -33,7 +40,7 @@ app.include_router(api_router, prefix="/api/v1")
 
 @app.on_event("startup")
 async def startup_event():
-    print("Bhudi RMM API starting (Phase A+B)...")
+    print("Bhudi RMM API starting...")
     bootstrap_result = initialize_database()
     print(f"[startup] bootstrap: {bootstrap_result}")
     try:
@@ -74,12 +81,30 @@ async def shutdown_event():
 
 @app.get("/health", tags=["Health"])
 async def health_check():
-    return {"status": "running", "service": "Bhudi RMM API", "version": "1.0.0-phase-ab"}
+    return {"status": "running", "service": "Bhudi RMM API", "version": "1.0.0"}
 
 
 @app.get("/", tags=["Health"])
 async def root():
     return {"message": "Bhudi RMM API is running", "docs": "/docs", "health": "/health"}
+
+
+@app.get("/metrics", tags=["Observability"])
+async def metrics():
+    """Prometheus text exposition (best-effort if client installed)."""
+    try:
+        from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
+
+        return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
+    except Exception:
+        return Response(
+            content=(
+                "# HELP bhudi_up 1 if process is up\n"
+                "# TYPE bhudi_up gauge\n"
+                "bhudi_up 1\n"
+            ),
+            media_type="text/plain; version=0.0.4",
+        )
 
 
 # Device heartbeat state (kept for backward compatibility)
@@ -168,4 +193,4 @@ async def device_ws(websocket: WebSocket, device_id: str):
         await manager.disconnect(websocket)
 
 
-print("Bhudi RMM API initialized (Phase A+B)")
+print("Bhudi RMM API initialized")
