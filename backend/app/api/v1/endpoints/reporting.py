@@ -4,7 +4,6 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
-from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.database.session import get_db
@@ -27,13 +26,18 @@ from app.schemas.reporting import (
 )
 from app.services.reporting_service import ReportingService
 
-router = APIRouter(prefix="/reports", tags=["Reporting"])
+from pydantic import BaseModel, Field
 
 
 class ReportEmailRequest(BaseModel):
     recipients: list[str] = Field(..., min_length=1)
     schedule_name: str | None = None
 
+
+router = APIRouter(prefix="/reports", tags=["Reporting"])
+
+
+# ----- Catalog / seed -----------------------------------------------------
 
 @router.get("/catalog")
 def get_catalog(db: Session = Depends(get_db)):
@@ -48,6 +52,8 @@ def get_catalog(db: Session = Depends(get_db)):
 def seed_templates(tenant_id: UUID | None = None, db: Session = Depends(get_db)):
     return ReportingService(db).seed_templates(tenant_id=tenant_id)
 
+
+# ----- Live dashboards ----------------------------------------------------
 
 @router.get("/dashboards/executive", response_model=ExecutiveDashboard)
 def executive_dashboard(
@@ -76,6 +82,8 @@ def security_compliance_summary(
 def asset_summary(tenant_id: UUID | None = None, db: Session = Depends(get_db)):
     return ReportingService(db).asset_summary(tenant_id=tenant_id)
 
+
+# ----- Templates ----------------------------------------------------------
 
 @router.post("/templates", response_model=ReportTemplateResponse, status_code=201)
 def create_template(payload: ReportTemplateCreate, db: Session = Depends(get_db)):
@@ -118,6 +126,8 @@ def delete_template(template_id: UUID, db: Session = Depends(get_db)):
         raise HTTPException(404, "Template not found")
 
 
+# ----- Definitions --------------------------------------------------------
+
 @router.post("/definitions", response_model=ReportDefinitionResponse, status_code=201)
 def create_definition(payload: ReportDefinitionCreate, db: Session = Depends(get_db)):
     return ReportingService(db).create_definition(payload)
@@ -159,6 +169,8 @@ def delete_definition(definition_id: UUID, db: Session = Depends(get_db)):
     if not ReportingService(db).delete_definition(definition_id):
         raise HTTPException(404, "Definition not found")
 
+
+# ----- Runs ---------------------------------------------------------------
 
 @router.post("/runs", response_model=ReportRunResponse, status_code=201)
 def create_run(payload: ReportRunCreate, db: Session = Depends(get_db)):
@@ -210,28 +222,13 @@ def download_run(run_id: UUID, db: Session = Depends(get_db)):
     )
 
 
-@router.post("/runs/{run_id}/email")
-def email_run(
-    run_id: UUID,
-    payload: ReportEmailRequest,
-    db: Session = Depends(get_db),
-):
-    """Send a completed report run to the given recipients."""
-    try:
-        return ReportingService(db).deliver_run_email(
-            run_id,
-            recipients=payload.recipients,
-            schedule_name=payload.schedule_name,
-        )
-    except ValueError as e:
-        raise HTTPException(400, str(e))
-
-
 @router.delete("/runs/{run_id}", status_code=204)
 def delete_run(run_id: UUID, db: Session = Depends(get_db)):
     if not ReportingService(db).delete_run(run_id):
         raise HTTPException(404, "Run not found")
 
+
+# ----- Schedules ----------------------------------------------------------
 
 @router.post("/schedules", response_model=ReportScheduleResponse, status_code=201)
 def create_schedule(payload: ReportScheduleCreate, db: Session = Depends(get_db)):
@@ -284,6 +281,23 @@ def process_due_schedules(
     return ReportingService(db).process_due_schedules(limit=limit)
 
 
+@router.post("/runs/{run_id}/email")
+def email_run(
+    run_id: UUID,
+    payload: ReportEmailRequest,
+    db: Session = Depends(get_db),
+):
+    """Send a completed report run to the given recipients."""
+    try:
+        return ReportingService(db).deliver_run_email(
+            run_id,
+            recipients=payload.recipients,
+            schedule_name=payload.schedule_name,
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
 @router.post("/schedules/{schedule_id}/send-now")
 def schedule_send_now(schedule_id: UUID, db: Session = Depends(get_db)):
     """Run a schedule immediately and email recipients if configured."""
@@ -291,6 +305,8 @@ def schedule_send_now(schedule_id: UUID, db: Session = Depends(get_db)):
     sched = svc.get_schedule(schedule_id)
     if not sched:
         raise HTTPException(404, "Schedule not found")
+    from app.schemas.reporting import ReportRunCreate
+
     run = svc.create_run(
         ReportRunCreate(
             name=sched.name,
@@ -315,7 +331,7 @@ def schedule_send_now(schedule_id: UUID, db: Session = Depends(get_db)):
             )
         except ValueError as e:
             delivery = {"ok": False, "error": str(e)}
-    return {"run_id": str(run.id), "run_status": run.status, "email": delivery}
+    return {"run": run, "email": delivery}
 
 
 @router.get("/email/status")
@@ -335,4 +351,8 @@ def email_status():
         "use_tls": settings.SMTP_USE_TLS,
         "use_ssl": settings.SMTP_USE_SSL,
         "has_credentials": bool(settings.SMTP_USERNAME),
+        "max_retries": getattr(settings, "SMTP_MAX_RETRIES", 3),
+        "retry_base_delay": getattr(settings, "SMTP_RETRY_BASE_DELAY", 1.0),
+        "retry_max_delay": getattr(settings, "SMTP_RETRY_MAX_DELAY", 30.0),
+        "timeout": getattr(settings, "SMTP_TIMEOUT", 30),
     }
