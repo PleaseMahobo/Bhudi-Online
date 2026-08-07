@@ -4,6 +4,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.database.session import get_db
@@ -27,6 +28,11 @@ from app.schemas.reporting import (
 from app.services.reporting_service import ReportingService
 
 router = APIRouter(prefix="/reports", tags=["Reporting"])
+
+
+class ReportEmailRequest(BaseModel):
+    recipients: list[str] = Field(..., min_length=1)
+    schedule_name: str | None = None
 
 
 @router.get("/catalog")
@@ -204,6 +210,23 @@ def download_run(run_id: UUID, db: Session = Depends(get_db)):
     )
 
 
+@router.post("/runs/{run_id}/email")
+def email_run(
+    run_id: UUID,
+    payload: ReportEmailRequest,
+    db: Session = Depends(get_db),
+):
+    """Send a completed report run to the given recipients."""
+    try:
+        return ReportingService(db).deliver_run_email(
+            run_id,
+            recipients=payload.recipients,
+            schedule_name=payload.schedule_name,
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
 @router.delete("/runs/{run_id}", status_code=204)
 def delete_run(run_id: UUID, db: Session = Depends(get_db)):
     if not ReportingService(db).delete_run(run_id):
@@ -257,5 +280,59 @@ def delete_schedule(schedule_id: UUID, db: Session = Depends(get_db)):
 def process_due_schedules(
     limit: int = Query(20, ge=1, le=100), db: Session = Depends(get_db)
 ):
-    """Worker/cron entrypoint: execute due scheduled reports."""
+    """Worker/cron entrypoint: execute due scheduled reports and email recipients."""
     return ReportingService(db).process_due_schedules(limit=limit)
+
+
+@router.post("/schedules/{schedule_id}/send-now")
+def schedule_send_now(schedule_id: UUID, db: Session = Depends(get_db)):
+    """Run a schedule immediately and email recipients if configured."""
+    svc = ReportingService(db)
+    sched = svc.get_schedule(schedule_id)
+    if not sched:
+        raise HTTPException(404, "Schedule not found")
+    run = svc.create_run(
+        ReportRunCreate(
+            name=sched.name,
+            template_id=sched.template_id,
+            definition_id=sched.definition_id,
+            format=sched.format,
+            parameters=sched.parameters,
+            tenant_id=sched.tenant_id,
+            triggered_by=f"manual:{schedule_id}",
+            run_now=True,
+        )
+    )
+    run.schedule_id = schedule_id
+    db.commit()
+    delivery = None
+    if run.status == "completed" and sched.recipients:
+        try:
+            delivery = svc.deliver_run_email(
+                run.id,
+                recipients=list(sched.recipients or []),
+                schedule_name=sched.name,
+            )
+        except ValueError as e:
+            delivery = {"ok": False, "error": str(e)}
+    return {"run_id": str(run.id), "run_status": run.status, "email": delivery}
+
+
+@router.get("/email/status")
+def email_status():
+    """SMTP configuration status (no secrets)."""
+    from app.core.config import settings
+    from app.services.email_service import EmailService
+
+    svc = EmailService()
+    return {
+        "enabled": settings.SMTP_ENABLED,
+        "configured": svc.configured,
+        "host": settings.SMTP_HOST or None,
+        "port": settings.SMTP_PORT,
+        "from_email": settings.SMTP_FROM_EMAIL or None,
+        "from_name": settings.SMTP_FROM_NAME,
+        "use_tls": settings.SMTP_USE_TLS,
+        "use_ssl": settings.SMTP_USE_SSL,
+        "has_credentials": bool(settings.SMTP_USERNAME),
+    }
