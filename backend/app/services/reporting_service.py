@@ -30,6 +30,7 @@ from app.schemas.reporting import (
     ReportTemplateUpdate,
     SecurityComplianceSummary,
 )
+from app.services.email_service import EmailService, normalize_recipients
 
 
 def _utcnow() -> datetime:
@@ -130,18 +131,11 @@ class ReportingService:
         return row
 
     def list_templates(
-        self,
-        *,
-        enabled_only: bool = False,
-        report_type: str | None = None,
-        tenant_id: UUID | None = None,
+        self, *, enabled_only: bool = False, report_type: str | None = None, tenant_id: UUID | None = None,
     ) -> list[ReportTemplate]:
         q = self.db.query(ReportTemplate)
         if tenant_id is not None:
-            q = q.filter(
-                (ReportTemplate.tenant_id == tenant_id)
-                | (ReportTemplate.tenant_id.is_(None))
-            )
+            q = q.filter((ReportTemplate.tenant_id == tenant_id) | (ReportTemplate.tenant_id.is_(None)))
         if enabled_only:
             q = q.filter(ReportTemplate.enabled.is_(True))
         if report_type:
@@ -151,9 +145,7 @@ class ReportingService:
     def get_template(self, template_id: UUID) -> ReportTemplate | None:
         return self.db.query(ReportTemplate).filter(ReportTemplate.id == template_id).first()
 
-    def update_template(
-        self, template_id: UUID, payload: ReportTemplateUpdate
-    ) -> ReportTemplate | None:
+    def update_template(self, template_id: UUID, payload: ReportTemplateUpdate) -> ReportTemplate | None:
         row = self.get_template(template_id)
         if not row:
             return None
@@ -178,22 +170,16 @@ class ReportingService:
 
     def create_definition(self, payload: ReportDefinitionCreate) -> ReportDefinition:
         row = ReportDefinition(
-            tenant_id=payload.tenant_id,
-            name=payload.name,
-            description=payload.description,
-            report_type=payload.report_type,
-            audience=payload.audience,
-            config=payload.config or {},
-            created_by=payload.created_by,
+            tenant_id=payload.tenant_id, name=payload.name, description=payload.description,
+            report_type=payload.report_type, audience=payload.audience,
+            config=payload.config or {}, created_by=payload.created_by,
         )
         self.db.add(row)
         self.db.commit()
         self.db.refresh(row)
         return row
 
-    def list_definitions(
-        self, *, tenant_id: UUID | None = None, report_type: str | None = None
-    ) -> list[ReportDefinition]:
+    def list_definitions(self, *, tenant_id: UUID | None = None, report_type: str | None = None) -> list[ReportDefinition]:
         q = self.db.query(ReportDefinition)
         if tenant_id is not None:
             q = q.filter(ReportDefinition.tenant_id == tenant_id)
@@ -202,15 +188,9 @@ class ReportingService:
         return q.order_by(ReportDefinition.updated_at.desc()).all()
 
     def get_definition(self, definition_id: UUID) -> ReportDefinition | None:
-        return (
-            self.db.query(ReportDefinition)
-            .filter(ReportDefinition.id == definition_id)
-            .first()
-        )
+        return self.db.query(ReportDefinition).filter(ReportDefinition.id == definition_id).first()
 
-    def update_definition(
-        self, definition_id: UUID, payload: ReportDefinitionUpdate
-    ) -> ReportDefinition | None:
+    def update_definition(self, definition_id: UUID, payload: ReportDefinitionUpdate) -> ReportDefinition | None:
         row = self.get_definition(definition_id)
         if not row:
             return None
@@ -231,12 +211,10 @@ class ReportingService:
 
     def executive_dashboard(self, tenant_id: UUID | None = None) -> ExecutiveDashboard:
         devices_total = devices_online = devices_offline = 0
-        open_alerts = critical_alerts = 0
-        open_tickets = incidents_open = 0
+        open_alerts = critical_alerts = open_tickets = incidents_open = 0
         avg_security = avg_compliance = patch_pct = None
         backup_failed = 0
         by_section: dict[str, Any] = {}
-
         try:
             from app.models.device import Device
             q = self.db.query(Device)
@@ -248,7 +226,6 @@ class ReportingService:
                 devices_offline = q.filter(Device.status == "offline").count()
         except Exception:
             pass
-
         try:
             from app.models.alert import Alert
             aq = self.db.query(Alert)
@@ -260,31 +237,24 @@ class ReportingService:
                 critical_alerts = aq.filter(Alert.severity.in_(["critical", "high"])).count()
         except Exception:
             pass
-
         try:
             from app.models.itsm import ServiceTicket
             tq = self.db.query(ServiceTicket)
             if tenant_id and hasattr(ServiceTicket, "tenant_id"):
                 tq = tq.filter(ServiceTicket.tenant_id == tenant_id)
             if hasattr(ServiceTicket, "status"):
-                open_tickets = tq.filter(
-                    ServiceTicket.status.in_(["open", "in_progress", "pending"])
-                ).count()
+                open_tickets = tq.filter(ServiceTicket.status.in_(["open", "in_progress", "pending"])).count()
         except Exception:
             pass
-
         try:
             from app.models.incident import Incident
             iq = self.db.query(Incident)
             if tenant_id and hasattr(Incident, "tenant_id"):
                 iq = iq.filter(Incident.tenant_id == tenant_id)
             if hasattr(Incident, "status"):
-                incidents_open = iq.filter(
-                    Incident.status.in_(["open", "investigating", "active"])
-                ).count()
+                incidents_open = iq.filter(Incident.status.in_(["open", "investigating", "active"])).count()
         except Exception:
             pass
-
         try:
             from app.models.endpoint_security import EndpointSecurityScore
             sq = self.db.query(EndpointSecurityScore)
@@ -295,7 +265,6 @@ class ReportingService:
                 avg_security = round(sum(scores) / len(scores), 1)
         except Exception:
             pass
-
         try:
             from app.models.compliance import ComplianceScore
             cq = self.db.query(ComplianceScore)
@@ -306,22 +275,16 @@ class ReportingService:
                 avg_compliance = round(sum(cscores) / len(cscores), 1)
         except Exception:
             pass
-
         try:
             from app.models.backup_integration import BackupJob
             since = _utcnow() - timedelta(hours=24)
             bq = self.db.query(BackupJob)
             if hasattr(BackupJob, "status") and hasattr(BackupJob, "created_at"):
-                backup_failed = bq.filter(
-                    BackupJob.status.in_(["failed", "error"]),
-                    BackupJob.created_at >= since,
-                ).count()
+                backup_failed = bq.filter(BackupJob.status.in_(["failed", "error"]), BackupJob.created_at >= since).count()
         except Exception:
             pass
-
         if devices_total > 0:
             patch_pct = round((devices_online / devices_total) * 100, 1)
-
         by_section = {
             "fleet": {"total": devices_total, "online": devices_online, "offline": devices_offline},
             "alerts": {"open": open_alerts, "critical": critical_alerts},
@@ -331,26 +294,15 @@ class ReportingService:
             "compliance": {"avg_score": avg_compliance},
             "backup": {"failed_24h": backup_failed},
         }
-
         return ExecutiveDashboard(
-            devices_total=devices_total,
-            devices_online=devices_online,
-            devices_offline=devices_offline,
-            open_alerts=open_alerts,
-            critical_alerts=critical_alerts,
-            open_tickets=open_tickets,
-            avg_security_score=avg_security,
-            avg_compliance_score=avg_compliance,
-            patch_compliance_pct=patch_pct,
-            backup_jobs_failed_24h=backup_failed,
-            incidents_open=incidents_open,
-            generated_at=_utcnow(),
-            by_section=by_section,
+            devices_total=devices_total, devices_online=devices_online, devices_offline=devices_offline,
+            open_alerts=open_alerts, critical_alerts=critical_alerts, open_tickets=open_tickets,
+            avg_security_score=avg_security, avg_compliance_score=avg_compliance,
+            patch_compliance_pct=patch_pct, backup_jobs_failed_24h=backup_failed,
+            incidents_open=incidents_open, generated_at=_utcnow(), by_section=by_section,
         )
 
-    def patch_compliance_summary(
-        self, tenant_id: UUID | None = None
-    ) -> PatchComplianceSummary:
+    def patch_compliance_summary(self, tenant_id: UUID | None = None) -> PatchComplianceSummary:
         devices_total = online = 0
         by_os: list[dict[str, Any]] = []
         try:
@@ -373,18 +325,11 @@ class ReportingService:
         noncompliant = max(devices_total - online, 0)
         pct = round((online / devices_total) * 100, 1) if devices_total else None
         return PatchComplianceSummary(
-            devices_total=devices_total,
-            devices_compliant=online,
-            devices_noncompliant=noncompliant,
-            compliance_pct=pct,
-            critical_missing=noncompliant,
-            by_os=by_os,
-            generated_at=_utcnow(),
+            devices_total=devices_total, devices_compliant=online, devices_noncompliant=noncompliant,
+            compliance_pct=pct, critical_missing=noncompliant, by_os=by_os, generated_at=_utcnow(),
         )
 
-    def security_compliance_summary(
-        self, tenant_id: UUID | None = None
-    ) -> SecurityComplianceSummary:
+    def security_compliance_summary(self, tenant_id: UUID | None = None) -> SecurityComplianceSummary:
         avg_endpoint = None
         open_findings = critical_findings = frameworks_scored = 0
         avg_fw = None
@@ -415,25 +360,17 @@ class ReportingService:
             frameworks_scored = len(rows)
             if rows:
                 avg_fw = round(sum(r.score for r in rows) / len(rows), 1)
-                by_fw = [
-                    {
-                        "framework_key": getattr(r.framework, "framework_key", None),
-                        "display_name": getattr(r.framework, "display_name", None),
-                        "score": r.score,
-                        "grade": r.grade,
-                    }
-                    for r in rows
-                ]
+                by_fw = [{
+                    "framework_key": getattr(r.framework, "framework_key", None),
+                    "display_name": getattr(r.framework, "display_name", None),
+                    "score": r.score, "grade": r.grade,
+                } for r in rows]
         except Exception:
             pass
         return SecurityComplianceSummary(
-            avg_endpoint_score=avg_endpoint,
-            open_findings=open_findings,
-            critical_findings=critical_findings,
-            frameworks_scored=frameworks_scored,
-            avg_framework_score=avg_fw,
-            generated_at=_utcnow(),
-            by_framework=by_fw,
+            avg_endpoint_score=avg_endpoint, open_findings=open_findings,
+            critical_findings=critical_findings, frameworks_scored=frameworks_scored,
+            avg_framework_score=avg_fw, generated_at=_utcnow(), by_framework=by_fw,
         )
 
     def asset_summary(self, tenant_id: UUID | None = None) -> AssetReportSummary:
@@ -463,23 +400,16 @@ class ReportingService:
             if tenant_id and hasattr(License, "tenant_id"):
                 lq = lq.filter(License.tenant_id == tenant_id)
             if hasattr(License, "expires_at"):
-                licenses_expiring = lq.filter(
-                    License.expires_at >= now, License.expires_at <= soon
-                ).count()
+                licenses_expiring = lq.filter(License.expires_at >= now, License.expires_at <= soon).count()
         except Exception:
             pass
         return AssetReportSummary(
-            assets_total=assets_total,
-            by_status=by_status,
-            by_type=by_type,
-            licenses_expiring_30d=licenses_expiring,
-            warranty_expiring_90d=warranty_expiring,
+            assets_total=assets_total, by_status=by_status, by_type=by_type,
+            licenses_expiring_30d=licenses_expiring, warranty_expiring_90d=warranty_expiring,
             generated_at=_utcnow(),
         )
 
-    def _build_report_data(
-        self, report_type: str, tenant_id: UUID | None, parameters: dict[str, Any] | None
-    ) -> dict[str, Any]:
+    def _build_report_data(self, report_type: str, tenant_id: UUID | None, parameters: dict[str, Any] | None) -> dict[str, Any]:
         params = parameters or {}
         if report_type == "executive":
             return self.executive_dashboard(tenant_id).model_dump(mode="json")
@@ -491,31 +421,16 @@ class ReportingService:
             return self.asset_summary(tenant_id).model_dump(mode="json")
         if report_type == "customer":
             dash = self.executive_dashboard(tenant_id)
-            return {
-                "title": "Customer SLA Report",
-                "period": params.get("period", "last_30_days"),
-                "uptime_pct": dash.patch_compliance_pct,
-                "open_tickets": dash.open_tickets,
-                "devices_total": dash.devices_total,
-                "devices_online": dash.devices_online,
-                "generated_at": dash.generated_at.isoformat(),
-            }
+            return {"title": "Customer SLA Report", "period": params.get("period", "last_30_days"),
+                    "uptime_pct": dash.patch_compliance_pct, "open_tickets": dash.open_tickets,
+                    "devices_total": dash.devices_total, "devices_online": dash.devices_online,
+                    "generated_at": dash.generated_at.isoformat()}
         if report_type == "technician":
             dash = self.executive_dashboard(tenant_id)
-            return {
-                "title": "Technician Workload",
-                "open_tickets": dash.open_tickets,
-                "critical_alerts": dash.critical_alerts,
-                "offline_devices": dash.devices_offline,
-                "open_incidents": dash.incidents_open,
-                "generated_at": dash.generated_at.isoformat(),
-            }
-        return {
-            "report_type": report_type,
-            "parameters": params,
-            "generated_at": _utcnow().isoformat(),
-            "note": "Custom report payload",
-        }
+            return {"title": "Technician Workload", "open_tickets": dash.open_tickets,
+                    "critical_alerts": dash.critical_alerts, "offline_devices": dash.devices_offline,
+                    "open_incidents": dash.incidents_open, "generated_at": dash.generated_at.isoformat()}
+        return {"report_type": report_type, "parameters": params, "generated_at": _utcnow().isoformat(), "note": "Custom report payload"}
 
     def _flatten_rows(self, data: dict[str, Any]) -> list[dict[str, Any]]:
         rows: list[dict[str, Any]] = []
@@ -576,8 +491,7 @@ class ReportingService:
             return s.replace("&", "&").replace("<", "<").replace(">", ">").replace('"', """)
 
         parts = [
-            '<?xml version="1.0"?>',
-            '<?mso-application progid="Excel.Sheet"?>',
+            '<?xml version="1.0"?>', '<?mso-application progid="Excel.Sheet"?>',
             '<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"',
             ' xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">',
             '<Worksheet ss:Name="Report"><Table>',
@@ -594,8 +508,7 @@ class ReportingService:
                 parts.append(f'<Cell><Data ss:Type="{typ}">{_esc(val)}</Data></Cell>')
             parts.append("</Row>")
         parts.append("</Table></Worksheet></Workbook>")
-        content = "\n".join(parts).encode("utf-8")
-        return content, "application/vnd.ms-excel", len(rows)
+        return "\n".join(parts).encode("utf-8"), "application/vnd.ms-excel", len(rows)
 
     def _export_pdf(self, data: dict[str, Any], title: str) -> tuple[bytes, str, int]:
         lines = [title, "=" * len(title), ""]
@@ -611,16 +524,9 @@ class ReportingService:
         objects: list[bytes | str] = []
         objects.append("1 0 obj<< /Type /Catalog /Pages 2 0 R >>endobj\n")
         objects.append("2 0 obj<< /Type /Pages /Kids [3 0 R] /Count 1 >>endobj\n")
-        objects.append(
-            "3 0 obj<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
-            "/Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>endobj\n"
-        )
+        objects.append("3 0 obj<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>endobj\n")
         stream = content_stream.encode("latin-1", errors="replace")
-        objects.append(
-            f"4 0 obj<< /Length {len(stream)} >>stream\n".encode()
-            + stream
-            + b"\nendstream\nendobj\n"
-        )
+        objects.append(f"4 0 obj<< /Length {len(stream)} >>stream\n".encode() + stream + b"\nendstream\nendobj\n")
         objects.append(b"5 0 obj<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>endobj\n")
         out = bytearray(b"%PDF-1.4\n")
         offsets = [0]
@@ -632,14 +538,10 @@ class ReportingService:
         out.extend(b"0000000000 65535 f \n")
         for off in offsets[1:]:
             out.extend(f"{off:010d} 00000 n \n".encode())
-        out.extend(
-            f"trailer<< /Size {len(offsets)} /Root 1 0 R >>\nstartxref\n{xref_pos}\n%%EOF\n".encode()
-        )
+        out.extend(f"trailer<< /Size {len(offsets)} /Root 1 0 R >>\nstartxref\n{xref_pos}\n%%EOF\n".encode())
         return bytes(out), CONTENT_TYPES["pdf"], len(self._flatten_rows(data))
 
-    def _render_export(
-        self, fmt: str, data: dict[str, Any], title: str
-    ) -> tuple[bytes, str, int]:
+    def _render_export(self, fmt: str, data: dict[str, Any], title: str) -> tuple[bytes, str, int]:
         fmt = (fmt or "json").lower()
         if fmt not in REPORT_FORMATS:
             fmt = "json"
@@ -671,16 +573,9 @@ class ReportingService:
             name = name or definition.name
         name = name or f"{report_type} report"
         row = ReportRun(
-            tenant_id=payload.tenant_id,
-            template_id=payload.template_id,
-            definition_id=payload.definition_id,
-            name=name,
-            report_type=report_type,
-            audience=audience,
-            format=payload.format,
-            status="pending",
-            parameters=payload.parameters,
-            triggered_by=payload.triggered_by,
+            tenant_id=payload.tenant_id, template_id=payload.template_id, definition_id=payload.definition_id,
+            name=name, report_type=report_type, audience=audience, format=payload.format,
+            status="pending", parameters=payload.parameters, triggered_by=payload.triggered_by,
         )
         self.db.add(row)
         self.db.commit()
@@ -700,14 +595,7 @@ class ReportingService:
         try:
             data = self._build_report_data(row.report_type, row.tenant_id, row.parameters)
             content, content_type, row_count = self._render_export(row.format, data, row.name)
-            row.result_data = {
-                **data,
-                "_export_meta": {
-                    "content_type": content_type,
-                    "size_bytes": len(content),
-                    "format": row.format,
-                },
-            }
+            row.result_data = {**data, "_export_meta": {"content_type": content_type, "size_bytes": len(content), "format": row.format}}
             row.storage_uri = f"memory://reports/{row.id}.{row.format}"
             row.content_type = content_type
             row.size_bytes = len(content)
@@ -733,26 +621,16 @@ class ReportingService:
             return None
         cached = _EXPORT_CACHE.get(str(run_id))
         if cached is None:
-            data = row.result_data or self._build_report_data(
-                row.report_type, row.tenant_id, row.parameters
-            )
+            data = row.result_data or self._build_report_data(row.report_type, row.tenant_id, row.parameters)
             clean = {k: v for k, v in data.items() if not str(k).startswith("_")}
             cached, content_type, _ = self._render_export(row.format, clean, row.name)
             _EXPORT_CACHE[str(run_id)] = cached
         else:
             content_type = row.content_type or CONTENT_TYPES.get(row.format, "application/octet-stream")
         ext = {"excel": "xls", "pdf": "pdf", "csv": "csv", "json": "json"}.get(row.format, "bin")
-        filename = f"{row.report_type}_{row.id}.{ext}"
-        return cached, content_type, filename
+        return cached, content_type, f"{row.report_type}_{row.id}.{ext}"
 
-    def list_runs(
-        self,
-        *,
-        tenant_id: UUID | None = None,
-        report_type: str | None = None,
-        status: str | None = None,
-        limit: int = 50,
-    ) -> list[ReportRun]:
+    def list_runs(self, *, tenant_id: UUID | None = None, report_type: str | None = None, status: str | None = None, limit: int = 50) -> list[ReportRun]:
         q = self.db.query(ReportRun)
         if tenant_id is not None:
             q = q.filter(ReportRun.tenant_id == tenant_id)
@@ -778,27 +656,17 @@ class ReportingService:
         if not payload.template_id and not payload.definition_id:
             raise ValueError("template_id or definition_id required")
         row = ReportSchedule(
-            tenant_id=payload.tenant_id,
-            template_id=payload.template_id,
-            definition_id=payload.definition_id,
-            name=payload.name,
-            frequency=payload.frequency,
-            cron_hint=payload.cron_hint,
-            format=payload.format,
-            parameters=payload.parameters,
-            recipients=payload.recipients,
-            enabled=payload.enabled,
-            created_by=payload.created_by,
-            next_run_at=_next_run(payload.frequency),
+            tenant_id=payload.tenant_id, template_id=payload.template_id, definition_id=payload.definition_id,
+            name=payload.name, frequency=payload.frequency, cron_hint=payload.cron_hint,
+            format=payload.format, parameters=payload.parameters, recipients=payload.recipients,
+            enabled=payload.enabled, created_by=payload.created_by, next_run_at=_next_run(payload.frequency),
         )
         self.db.add(row)
         self.db.commit()
         self.db.refresh(row)
         return row
 
-    def list_schedules(
-        self, *, tenant_id: UUID | None = None, enabled_only: bool = False
-    ) -> list[ReportSchedule]:
+    def list_schedules(self, *, tenant_id: UUID | None = None, enabled_only: bool = False) -> list[ReportSchedule]:
         q = self.db.query(ReportSchedule)
         if tenant_id is not None:
             q = q.filter(ReportSchedule.tenant_id == tenant_id)
@@ -809,9 +677,7 @@ class ReportingService:
     def get_schedule(self, schedule_id: UUID) -> ReportSchedule | None:
         return self.db.query(ReportSchedule).filter(ReportSchedule.id == schedule_id).first()
 
-    def update_schedule(
-        self, schedule_id: UUID, payload: ReportScheduleUpdate
-    ) -> ReportSchedule | None:
+    def update_schedule(self, schedule_id: UUID, payload: ReportScheduleUpdate) -> ReportSchedule | None:
         row = self.get_schedule(schedule_id)
         if not row:
             return None
@@ -833,30 +699,94 @@ class ReportingService:
         self.db.commit()
         return True
 
+    def _summary_lines(self, data: dict[str, Any] | None) -> list[str]:
+        if not data:
+            return []
+        lines: list[str] = []
+        skip = {"_export_meta", "_email_delivery"}
+        for k, v in data.items():
+            if k in skip or isinstance(v, (dict, list)):
+                continue
+            lines.append(f"{k}: {v}")
+        if "by_section" in data and isinstance(data["by_section"], dict):
+            for section, vals in data["by_section"].items():
+                if isinstance(vals, dict):
+                    parts = ", ".join(f"{a}={b}" for a, b in vals.items())
+                    lines.append(f"{section}: {parts}")
+                else:
+                    lines.append(f"{section}: {vals}")
+        return lines[:20]
+
+    def deliver_run_email(
+        self, run_id: UUID, *, recipients: list[str] | None = None, schedule_name: str | None = None,
+    ) -> dict[str, Any]:
+        """Email a completed report run to recipients (attachment included)."""
+        row = self.get_run(run_id)
+        if not row:
+            raise ValueError("Run not found")
+        if row.status != "completed":
+            raise ValueError(f"Run status is {row.status}, expected completed")
+        to = normalize_recipients(recipients)
+        if not to and row.schedule_id:
+            sched = self.get_schedule(row.schedule_id)
+            if sched:
+                to = normalize_recipients(sched.recipients)
+                schedule_name = schedule_name or sched.name
+        if not to:
+            raise ValueError("No recipients provided")
+        blob = self.get_run_bytes(run_id)
+        if not blob:
+            raise ValueError("Report bytes unavailable")
+        content, content_type, filename = blob
+        data = row.result_data or {}
+        clean = {k: v for k, v in data.items() if not str(k).startswith("_")}
+        result = EmailService().send_report(
+            recipients=to, report_name=row.name, report_type=row.report_type, format=row.format,
+            attachment_bytes=content, filename=filename, content_type=content_type,
+            summary_lines=self._summary_lines(clean), schedule_name=schedule_name,
+        )
+        delivery = {
+            "ok": result.ok, "skipped": result.skipped, "recipients": result.recipients,
+            "message_id": result.message_id, "error": result.error, "sent_at": _utcnow().isoformat(),
+        }
+        meta = dict(row.result_data or {})
+        meta["_email_delivery"] = delivery
+        row.result_data = meta
+        self.db.commit()
+        self.db.refresh(row)
+        return delivery
+
     def process_due_schedules(self, limit: int = 20) -> list[ReportRun]:
+        """Execute due schedules, then email recipients when configured."""
         now = _utcnow()
         due = (
             self.db.query(ReportSchedule)
             .filter(ReportSchedule.enabled.is_(True), ReportSchedule.next_run_at <= now)
-            .limit(limit)
-            .all()
+            .limit(limit).all()
         )
         runs: list[ReportRun] = []
         for sched in due:
             try:
-                run_payload = ReportRunCreate(
-                    name=sched.name,
-                    template_id=sched.template_id,
-                    definition_id=sched.definition_id,
-                    format=sched.format,
-                    parameters=sched.parameters,
-                    tenant_id=sched.tenant_id,
-                    triggered_by=f"schedule:{sched.id}",
-                    run_now=True,
-                )
-                run = self.create_run(run_payload)
+                run = self.create_run(ReportRunCreate(
+                    name=sched.name, template_id=sched.template_id, definition_id=sched.definition_id,
+                    format=sched.format, parameters=sched.parameters, tenant_id=sched.tenant_id,
+                    triggered_by=f"schedule:{sched.id}", run_now=True,
+                ))
                 run.schedule_id = sched.id
                 self.db.commit()
+                if run.status == "completed" and sched.recipients:
+                    try:
+                        self.deliver_run_email(
+                            run.id, recipients=list(sched.recipients or []), schedule_name=sched.name,
+                        )
+                        self.db.refresh(run)
+                    except Exception as mail_exc:
+                        meta = dict(run.result_data or {})
+                        meta["_email_delivery"] = {
+                            "ok": False, "error": str(mail_exc)[:1000], "sent_at": _utcnow().isoformat(),
+                        }
+                        run.result_data = meta
+                        self.db.commit()
                 sched.last_run_at = now
                 sched.last_run_status = run.status
                 sched.run_count = (sched.run_count or 0) + 1
