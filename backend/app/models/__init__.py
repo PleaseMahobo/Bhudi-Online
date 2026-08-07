@@ -23,6 +23,14 @@ from .backup_integration import (
     RestoreJob,
 )
 from .command import Command
+from .compliance import (
+    ComplianceAssessment,
+    ComplianceControl,
+    ComplianceEvidence,
+    ComplianceFramework,
+    ComplianceScore,
+    ControlResult,
+)
 from .compliance_report import ComplianceReport
 from .device import Device
 from .device_event import DeviceEvent
@@ -73,8 +81,14 @@ __all__ = [
     "BackupJob",
     "BackupProvider",
     "Command",
+    "ComplianceAssessment",
+    "ComplianceControl",
+    "ComplianceEvidence",
+    "ComplianceFramework",
     "ComplianceReport",
+    "ComplianceScore",
     "Contract",
+    "ControlResult",
     "DeploymentEvent",
     "DeploymentJob",
     "DeploymentTarget",
@@ -98,6 +112,8 @@ __all__ = [
     "RefreshToken",
     "ResponseAction",
     "RestoreJob",
+    "Role",
+    "RolePermission",
     "Script",
     "ScriptTask",
     "SecurityFinding",
@@ -113,7 +129,5 @@ __all__ = [
     "User",
     "UserRole",
     "Permission",
-    "Role",
-    "RolePermission",
     "Vendor",
 ]
