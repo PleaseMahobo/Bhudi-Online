@@ -35,6 +35,23 @@ Handled events:
 - `customer.subscription.created` / `updated` / `deleted`
 - `invoice.paid` / `invoice.payment_failed`
 
+## Script exit codes (`stripe_cli_test.sh`)
+
+| Code | Meaning |
+|------|---------|
+| 0 | Success |
+| 1 | Usage / unknown command |
+| 2 | Missing dependency (stripe, curl, pytest) |
+| 3 | API unreachable or non-2xx status |
+| 4 | Stripe CLI command failed (`listen` / all triggers) |
+| 5 | Unit tests failed |
+
+Hints:
+
+- Auth errors from Stripe CLI → `stripe login`
+- `status` connection refused → start the API; check `BASE_URL`
+- Partial trigger failures → non-fatal unless `STRICT_TRIGGER=1`
+
 ## Without Stripe CLI (signed local POST)
 
 ```bash
@@ -51,6 +68,8 @@ python scripts/stripe_sign_payload.py \
   --plan-code professional \
   --post
 ```
+
+`stripe_sign_payload.py` exit codes: `0` ok · `1` HTTP/usage · `2` file/JSON · `3` network.
 
 ## Link events to a tenant
 
