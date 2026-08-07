@@ -12,10 +12,17 @@ services:
       STRIPE_ENABLED: ${STRIPE_ENABLED:-false}
       AI_ENABLED: ${AI_ENABLED:-false}
       RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-120}
+      OTEL_ENABLED: ${OTEL_ENABLED:-true}
+      OTEL_SERVICE_NAME: bhudi-api
+      OTEL_ENVIRONMENT: ${OTEL_ENVIRONMENT:-docker}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4317}
+      OTEL_EXPORTER_OTLP_PROTOCOL: ${OTEL_EXPORTER_OTLP_PROTOCOL:-grpc}
+      OTEL_TRACES_SAMPLER: ${OTEL_TRACES_SAMPLER:-parentbased_always_on}
     depends_on:
       - postgres
       - redis
       - rabbitmq
+      - otel-collector
     expose:
       - "8000"
     restart: unless-stopped
