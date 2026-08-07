@@ -55,11 +55,11 @@ from .msp import (
     Department,
     Organization,
     Site,
-    StripeWebhookEvent,
     Technician,
     TenantBranding,
     TenantSubscription,
 )
+from .stripe_webhook import StripeWebhookEvent
 from .profile import Profile
 from .refresh_token import RefreshToken
 from .reporting import (
