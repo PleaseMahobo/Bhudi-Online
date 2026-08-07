@@ -15,6 +15,12 @@ from app.schemas.backup_integration import (
     VerificationTimeoutSweepResult,
     VerificationWorkflow,
 )
+from app.services.backup_circuit import (
+    BackupCircuitOpenError,
+    guard_verification,
+    record_verification_failure,
+    record_verification_success,
+)
 from app.services.backup_integration_helpers import (
     DEFAULT_MAX_RETRIES,
     DEFAULT_VERIFICATION_TIMEOUT_SECONDS,
@@ -29,7 +35,21 @@ from app.services.backup_integration_helpers import (
 
 
 class BackupVerificationMixin:
-    """Timeout + retry verification workflows."""
+    """Timeout + retry + circuit-breaker verification workflows."""
+
+    def _provider_id_for_restore(self, row: RestoreJob) -> UUID | str:
+        return row.provider_id
+
+    def _guard_verification_circuit(self, row: RestoreJob) -> None:
+        """Reject if the provider verification circuit is open."""
+        guard_verification(self._provider_id_for_restore(row))
+
+    def _record_verification_outcome(self, row: RestoreJob, *, success: bool) -> None:
+        pid = self._provider_id_for_restore(row)
+        if success:
+            record_verification_success(pid)
+        else:
+            record_verification_failure(pid)
 
     def create_restore(self, payload: RestoreJobCreate):
         if not self.get_provider(payload.provider_id):
@@ -147,10 +167,12 @@ class BackupVerificationMixin:
         row.automation = automation
         self.db.commit()
         self.db.refresh(row)
+        # Timeout counts as a verification failure for the circuit
+        self._record_verification_outcome(row, success=False)
         if auto_retry and bool(verification.get("auto_retry")) and retries_remaining > 0:
             try:
                 return self.retry_verification(row.id, RetryVerificationRequest(force=False))
-            except (VerificationRetryExhaustedError, ValueError):
+            except (VerificationRetryExhaustedError, BackupCircuitOpenError, ValueError):
                 return row
         return row
 
@@ -198,6 +220,8 @@ class BackupVerificationMixin:
         verification = automation.get("verification") or {}
         verify_enabled = bool(automation.get("verify", True)) and bool(verification.get("enabled", True))
         if verify_enabled and not skip_verification:
+            # Circuit guard before entering verification
+            self._guard_verification_circuit(row)
             row.status = "verifying"
             automation["current_step"] = "verify"
             if not verification.get("checks"):
@@ -251,6 +275,7 @@ class BackupVerificationMixin:
         row = self.db.get(RestoreJob, restore_id)
         if not row:
             raise ValueError("Restore not found")
+        self._guard_verification_circuit(row)
         payload = payload or StartVerificationRequest()
         automation = dict(row.automation or {})
         verification = automation.get("verification") or {}
@@ -292,6 +317,7 @@ class BackupVerificationMixin:
         row = self.db.get(RestoreJob, restore_id)
         if not row:
             raise ValueError("Restore not found")
+        self._guard_verification_circuit(row)
         automation = dict(row.automation or {})
         verification = dict(automation.get("verification") or {})
         timed_out = verification.get("status") == "timed_out" or (
@@ -393,6 +419,7 @@ class BackupVerificationMixin:
             raise VerificationTimeoutError(
                 row.error_message or "Verification timed out", restore_id=row.id
             )
+        self._guard_verification_circuit(row)
         payload = payload or RunVerificationRequest()
         automation = dict(row.automation or {})
         verification = automation.get("verification") or _build_verification(
@@ -442,12 +469,14 @@ class BackupVerificationMixin:
                 )
                 row.finished_at = _utcnow()
                 automation["current_step"] = "verify_failed"
+                self._record_verification_outcome(row, success=False)
             else:
                 verification["status"] = "passed"
                 row.status = "success"
                 row.error_message = None
                 row.finished_at = _utcnow()
                 automation["current_step"] = "done"
+                self._record_verification_outcome(row, success=True)
             automation["finished_at"] = _iso(row.finished_at)
         automation["verification"] = verification
         row.automation = automation

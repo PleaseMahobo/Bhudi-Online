@@ -27,6 +27,12 @@ from app.schemas.backup_integration import (
     VerificationTimeoutSweepResult,
     VerificationWorkflow,
 )
+from app.services.backup_circuit import (
+    BackupCircuitOpenError,
+    list_backup_circuits,
+    reset_all_backup_circuits,
+    reset_backup_circuit,
+)
 from app.services.backup_integration_service import (
     PROVIDER_CATALOG,
     BackupIntegrationService,
@@ -65,6 +71,22 @@ def _load_restore(svc: BackupIntegrationService, restore_id: UUID):
 
 def _http_from_value_error(e: Exception) -> HTTPException:
     msg = str(e)
+    if isinstance(e, BackupCircuitOpenError):
+        return HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail={
+                "error": "circuit_open",
+                "message": msg,
+                "key": e.key,
+                "retry_after_seconds": e.retry_after_seconds,
+                "failure_count": e.failure_count,
+            },
+            headers=(
+                {"Retry-After": str(int(e.retry_after_seconds or 0))}
+                if e.retry_after_seconds is not None
+                else None
+            ),
+        )
     if isinstance(e, VerificationRetryExhaustedError):
         return HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -252,10 +274,13 @@ def start_restore(restore_id: UUID, db: Session = Depends(get_db)):
 def complete_restore(restore_id: UUID, success: bool = True, bytes_restored: int | None = None,
                      error_message: str | None = None, skip_verification: bool = False,
                      db: Session = Depends(get_db)):
-    row = BackupIntegrationService(db).complete_restore(
-        restore_id, success=success, bytes_restored=bytes_restored,
-        error_message=error_message, skip_verification=skip_verification,
-    )
+    try:
+        row = BackupIntegrationService(db).complete_restore(
+            restore_id, success=success, bytes_restored=bytes_restored,
+            error_message=error_message, skip_verification=skip_verification,
+        )
+    except (ValueError, BackupCircuitOpenError) as e:
+        raise _http_from_value_error(e)
     if not row:
         raise HTTPException(404, "Restore not found")
     loaded = _load_restore(BackupIntegrationService(db), row.id) or row
@@ -280,7 +305,7 @@ def get_verification(restore_id: UUID, db: Session = Depends(get_db)):
 def start_verification(restore_id: UUID, payload: StartVerificationRequest | None = None, db: Session = Depends(get_db)):
     try:
         row = BackupIntegrationService(db).start_verification(restore_id, payload)
-    except ValueError as e:
+    except (ValueError, BackupCircuitOpenError) as e:
         raise _http_from_value_error(e)
     loaded = _load_restore(BackupIntegrationService(db), row.id) or row
     return _restore_resp(loaded)
@@ -291,7 +316,7 @@ def retry_verification(restore_id: UUID, payload: RetryVerificationRequest | Non
     """Restart verification after a timeout (consumes one retry)."""
     try:
         row = BackupIntegrationService(db).retry_verification(restore_id, payload)
-    except ValueError as e:
+    except (ValueError, BackupCircuitOpenError) as e:
         raise _http_from_value_error(e)
     loaded = _load_restore(BackupIntegrationService(db), row.id) or row
     return _restore_resp(loaded)
@@ -301,7 +326,7 @@ def retry_verification(restore_id: UUID, payload: RetryVerificationRequest | Non
 def report_verification_check(restore_id: UUID, payload: VerificationCheckResult, db: Session = Depends(get_db)):
     try:
         row = BackupIntegrationService(db).report_check(restore_id, payload)
-    except ValueError as e:
+    except (ValueError, BackupCircuitOpenError) as e:
         raise _http_from_value_error(e)
     loaded = _load_restore(BackupIntegrationService(db), row.id) or row
     return _restore_resp(loaded)
@@ -311,7 +336,7 @@ def report_verification_check(restore_id: UUID, payload: VerificationCheckResult
 def run_verification(restore_id: UUID, payload: RunVerificationRequest | None = None, db: Session = Depends(get_db)):
     try:
         row = BackupIntegrationService(db).run_verification(restore_id, payload)
-    except ValueError as e:
+    except (ValueError, BackupCircuitOpenError) as e:
         raise _http_from_value_error(e)
     loaded = _load_restore(BackupIntegrationService(db), row.id) or row
     return _restore_resp(loaded)
@@ -321,7 +346,7 @@ def run_verification(restore_id: UUID, payload: RunVerificationRequest | None = 
 def skip_verification(restore_id: UUID, reason: str | None = None, db: Session = Depends(get_db)):
     try:
         row = BackupIntegrationService(db).skip_verification(restore_id, reason=reason)
-    except ValueError as e:
+    except (ValueError, BackupCircuitOpenError) as e:
         raise _http_from_value_error(e)
     loaded = _load_restore(BackupIntegrationService(db), row.id) or row
     return _restore_resp(loaded)
@@ -344,3 +369,28 @@ def sweep_verification_timeouts(db: Session = Depends(get_db)):
 @router.get("/summary", response_model=BackupFleetSummary)
 def fleet_summary(db: Session = Depends(get_db)):
     return BackupIntegrationService(db).fleet_summary()
+
+
+# ---------------------------------------------------------------------------
+# Circuit breaker status / reset
+# ---------------------------------------------------------------------------
+
+@router.get("/circuits")
+def get_backup_circuits():
+    """List all in-process backup provider / verification circuit states."""
+    return {"circuits": list_backup_circuits()}
+
+
+@router.post("/circuits/reset")
+def reset_circuits(key: str | None = None):
+    """
+    Reset a single circuit by key (e.g. backup:verification:<provider_id>)
+    or all backup circuits when key is omitted.
+    """
+    if key:
+        ok = reset_backup_circuit(key)
+        if not ok:
+            raise HTTPException(404, f"Circuit key not found: {key}")
+        return {"reset": 1, "key": key}
+    n = reset_all_backup_circuits()
+    return {"reset": n}
