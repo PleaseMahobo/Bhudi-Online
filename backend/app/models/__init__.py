@@ -2,6 +2,7 @@ from .base import Base
 
 from .action import Action
 from .agent import Agent
+from .ai import AIRun, KnowledgeArticle, PredictionRecord
 from .alert import Alert
 from .alert_rule import AlertRule
 from .asset_management import (
@@ -59,6 +60,7 @@ from .msp import (
     TenantBranding,
     TenantSubscription,
 )
+from .notification import NotificationChannel, NotificationDelivery, NotificationTemplate
 from .psa import PSAConnection, PSASyncEvent, PSATicketLink
 from .stripe_webhook import StripeWebhookEvent
 from .profile import Profile
@@ -90,6 +92,7 @@ from .user_role import UserRole
 __all__ = [
     "Action",
     "Agent",
+    "AIRun",
     "Alert",
     "AlertRule",
     "Asset",
@@ -125,12 +128,17 @@ __all__ = [
     "HuntResult",
     "Incident",
     "IncidentTimeline",
+    "KnowledgeArticle",
     "License",
     "LicenseAssignment",
+    "NotificationChannel",
+    "NotificationDelivery",
+    "NotificationTemplate",
     "Organization",
     "PSAConnection",
     "PSASyncEvent",
     "PSATicketLink",
+    "PredictionRecord",
     "Profile",
     "ProtectedResource",
     "Purchase",
