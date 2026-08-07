@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -159,6 +159,9 @@ class RestoreJobCreate(BaseModel):
     automation: dict[str, Any] | None = None
     requested_by: str | None = None
     details: dict[str, Any] | None = None
+    # Verification preferences at create time
+    verify: bool = True
+    verification_policy: Literal["quick", "standard", "strict"] = "standard"
 
 
 class RestoreJobUpdate(BaseModel):
@@ -198,6 +201,66 @@ class RestoreJobResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+# ---------- Restore verification workflow ----------
+
+class VerificationCheckResult(BaseModel):
+    """Agent / operator reports outcome of a single verification check."""
+
+    check_id: str
+    status: Literal["passed", "failed", "skipped"]
+    message: str | None = None
+    evidence: dict[str, Any] | None = None
+
+
+class VerificationCheck(BaseModel):
+    id: str
+    name: str
+    description: str | None = None
+    required: bool = True
+    status: Literal["pending", "running", "passed", "failed", "skipped"] = "pending"
+    message: str | None = None
+    evidence: dict[str, Any] | None = None
+    started_at: str | None = None
+    finished_at: str | None = None
+
+
+class VerificationSummary(BaseModel):
+    total: int
+    passed: int
+    failed: int
+    skipped: int
+    pending: int
+    required_failed: int
+
+
+class VerificationWorkflow(BaseModel):
+    enabled: bool
+    policy: Literal["quick", "standard", "strict"]
+    status: Literal["pending", "running", "passed", "failed", "skipped"]
+    started_at: str | None = None
+    finished_at: str | None = None
+    checks: list[VerificationCheck] = []
+    summary: VerificationSummary | None = None
+
+
+class StartVerificationRequest(BaseModel):
+    policy: Literal["quick", "standard", "strict"] | None = None
+    force: bool = False
+
+
+class RunVerificationRequest(BaseModel):
+    """
+    Execute / simulate verification checks.
+
+    When results is provided, those outcomes are applied.
+    When omitted, the service runs a dry/simulated evaluation
+    (agents should POST real results in production).
+    """
+
+    results: list[VerificationCheckResult] | None = None
+    simulate_pass: bool = True
+
+
 class BackupFleetSummary(BaseModel):
     providers_enabled: int
     resources_total: int
@@ -206,3 +269,5 @@ class BackupFleetSummary(BaseModel):
     jobs_success_24h: int
     jobs_failed_24h: int
     restores_open: int
+    restores_verifying: int = 0
+    restores_verify_failed: int = 0
