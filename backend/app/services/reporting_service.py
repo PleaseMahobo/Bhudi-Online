@@ -462,8 +462,10 @@ class ReportingService:
             lq = self.db.query(License)
             if tenant_id and hasattr(License, "tenant_id"):
                 lq = lq.filter(License.tenant_id == tenant_id)
-            if hasattr(License, "expires_at":
-                licenses_expiring = lq.filter(License.expires_at >= now, License.expires_at <= soon).count()
+            if hasattr(License, "expires_at"):
+                licenses_expiring = lq.filter(
+                    License.expires_at >= now, License.expires_at <= soon
+                ).count()
         except Exception:
             pass
         return AssetReportSummary(
@@ -571,7 +573,7 @@ class ReportingService:
 
         def _esc(v: Any) -> str:
             s = "" if v is None else str(v)
-            return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
+            return s.replace("&", "&").replace("<", "<").replace(">", ">").replace('"', """)
 
         parts = [
             '<?xml version="1.0"?>',
