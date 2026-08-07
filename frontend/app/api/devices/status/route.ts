@@ -1,14 +1,21 @@
-// frontend/app/api/devices/status/route.ts
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 
-const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || 'https://bhudi-online-production.up.railway.app';
+const BACKEND = (
+  process.env.API_BASE_URL ||
+  process.env.NEXT_PUBLIC_API_URL ||
+  'https://bhudi-online-production.up.railway.app'
+).replace(/\/$/, '');
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
-    const res = await fetch(`${BACKEND_URL}/devices/status`, { cache: 'no-store' });
-    const data = await res.json();
-    return NextResponse.json(data);
-  } catch (error) {
+    const auth = request.headers.get('authorization') || '';
+    const res = await fetch(`${BACKEND}/api/v1/devices/`, {
+      headers: auth ? { Authorization: auth } : {},
+      cache: 'no-store',
+    });
+    const data = await res.json().catch(() => ({ devices: [] }));
+    return NextResponse.json(data, { status: res.status });
+  } catch {
     return NextResponse.json({ devices: [] }, { status: 503 });
   }
 }
