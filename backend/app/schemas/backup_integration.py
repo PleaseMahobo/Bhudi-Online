@@ -161,10 +161,15 @@ class RestoreJobCreate(BaseModel):
     details: dict[str, Any] | None = None
     verify: bool = True
     verification_policy: Literal["quick", "standard", "strict"] = "standard"
-    # Max seconds allowed for verification after it starts (default applied in service)
     verification_timeout_seconds: int | None = Field(
         default=None, ge=60, le=86400, description="60s–24h; default 3600"
     )
+    # Max automatic/manual verification retries after timeout (default 3)
+    verification_max_retries: int | None = Field(
+        default=None, ge=0, le=10, description="0–10; default 3"
+    )
+    # Auto-restart verification when timeout hits (if retries remain)
+    verification_auto_retry: bool = False
 
 
 class RestoreJobUpdate(BaseModel):
@@ -234,6 +239,13 @@ class VerificationSummary(BaseModel):
     required_failed: int
 
 
+class VerificationRetryAttempt(BaseModel):
+    attempt: int
+    timed_out_at: str | None = None
+    error: str | None = None
+    restarted_at: str | None = None
+
+
 class VerificationWorkflow(BaseModel):
     enabled: bool
     policy: Literal["quick", "standard", "strict"]
@@ -246,6 +258,12 @@ class VerificationWorkflow(BaseModel):
     deadline_at: str | None = None
     timed_out_at: str | None = None
     timeout_error: str | None = None
+    # Retry state
+    attempt: int = 1
+    max_retries: int = 3
+    auto_retry: bool = False
+    retries_remaining: int | None = None
+    retry_history: list[VerificationRetryAttempt] = []
     checks: list[VerificationCheck] = []
     summary: VerificationSummary | None = None
 
@@ -254,6 +272,17 @@ class StartVerificationRequest(BaseModel):
     policy: Literal["quick", "standard", "strict"] | None = None
     force: bool = False
     timeout_seconds: int | None = Field(default=None, ge=60, le=86400)
+    max_retries: int | None = Field(default=None, ge=0, le=10)
+    auto_retry: bool | None = None
+
+
+class RetryVerificationRequest(BaseModel):
+    """Restart verification after a timeout (consumes one retry)."""
+
+    policy: Literal["quick", "standard", "strict"] | None = None
+    timeout_seconds: int | None = Field(default=None, ge=60, le=86400)
+    # When true, ignore max_retries ceiling (operator override)
+    force: bool = False
 
 
 class RunVerificationRequest(BaseModel):
@@ -264,7 +293,9 @@ class RunVerificationRequest(BaseModel):
 class VerificationTimeoutSweepResult(BaseModel):
     scanned: int
     timed_out: int
+    auto_retried: int = 0
     restore_ids: list[UUID] = []
+    retried_ids: list[UUID] = []
 
 
 class BackupFleetSummary(BaseModel):
