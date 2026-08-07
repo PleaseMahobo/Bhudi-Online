@@ -4,7 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { useAuth } from "@/shared/auth/AuthContext";
 import { useRouter } from "next/navigation";
 import { motion } from 'framer-motion';
-import { Server, Cpu, Zap, LogOut, Wifi, Copy, Check } from 'lucide-react';
+import { Server, Cpu, Zap, Wifi, Copy, Check } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import {
     getHealth,
@@ -12,9 +12,10 @@ import {
 } from "@/lib/api";
 
 import { useWebSocket } from "@/lib/websocket";
+import AppSidebar from "@/shared/layout/AppSidebar";
 
 export default function RMMDashboard() {
-  const { user, loading, logout } = useAuth();
+  const { user, loading } = useAuth();
   const router = useRouter();
   const [devices, setDevices] = useState<any[]>([]);
   const [cpuData, setCpuData] = useState<any[]>([]);
@@ -80,36 +81,7 @@ export default function RMMDashboard() {
 
   return (
     <div className="min-h-screen bg-[#0a0f1c] text-white flex">
-      {/* Sidebar */}
-      <div className="w-72 bg-[#111827] border-r border-[#1e2937] p-6 fixed h-screen overflow-auto">
-        <div className="flex items-center gap-3 mb-12">
-          <div className="w-12 h-12 bg-gradient-to-br from-sky-400 to-blue-600 rounded-2xl flex items-center justify-center font-bold text-3xl">B</div>
-          <div>
-            <h1 className="text-3xl font-bold tracking-tighter">BHUDI</h1>
-            <p className="text-sky-400 text-sm -mt-1">RMM PLATFORM</p>
-          </div>
-        </div>
-
-        <div className="mb-8">
-          <p className="text-xs text-zinc-500">Logged in as</p>
-          <p className="font-medium">{user?.email}</p>
-        </div>
-
-        <nav className="space-y-1">
-          {['Dashboard', 'Devices', 'Live Alerts', 'Command Center', 'Analytics', 'Settings'].map((item, i) => (
-            <a key={i} href="#" className={`flex items-center gap-3 px-4 py-3.5 rounded-2xl transition-all ${i === 0 ? 'bg-sky-500 text-white' : 'hover:bg-zinc-800 text-zinc-300'}`}>
-              {item}
-            </a>
-          ))}
-        </nav>
-
-        <button 
-          onClick={logout}
-          className="absolute bottom-8 left-6 flex items-center gap-3 text-red-400 hover:text-red-500"
-        >
-          <LogOut size={20} /> Sign Out
-        </button>
-      </div>
+      <AppSidebar />
 
       <div className="flex-1 ml-72 p-10">
         <div className="max-w-7xl mx-auto">
