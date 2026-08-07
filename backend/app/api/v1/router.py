@@ -42,3 +42,4 @@ _safe_include("app.api.v1.endpoints.backup_integration", tags=["Backup Integrati
 _safe_include("app.api.v1.endpoints.compliance", tags=["Compliance"])
 _safe_include("app.api.v1.endpoints.reporting", tags=["Reporting"])
 _safe_include("app.api.v1.endpoints.msp", tags=["MSP Multi-Tenant"])
+_safe_include("app.api.v1.endpoints.stripe_billing", tags=["Stripe Billing"])
