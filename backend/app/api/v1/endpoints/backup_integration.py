@@ -20,6 +20,10 @@ from app.schemas.backup_integration import (
     RestoreJobCreate,
     RestoreJobResponse,
     RestoreJobUpdate,
+    RunVerificationRequest,
+    StartVerificationRequest,
+    VerificationCheckResult,
+    VerificationWorkflow,
 )
 from app.services.backup_integration_service import (
     PROVIDER_CATALOG,
@@ -45,9 +49,14 @@ def _job_resp(row) -> BackupJobResponse:
 
 def _restore_resp(row) -> RestoreJobResponse:
     data = RestoreJobResponse.model_validate(row)
-    if row.provider:
+    if getattr(row, "provider", None):
         data.provider_key = row.provider.provider_key
     return data
+
+
+def _load_restore(svc: BackupIntegrationService, restore_id: UUID):
+    rows = svc.list_restores()
+    return next((r for r in rows if r.id == restore_id), None)
 
 
 # ---------- Catalog / providers ----------
@@ -233,9 +242,8 @@ def create_restore(payload: RestoreJobCreate, db: Session = Depends(get_db)):
         row = BackupIntegrationService(db).create_restore(payload)
     except ValueError as e:
         raise HTTPException(400, str(e))
-    rows = BackupIntegrationService(db).list_restores()
-    row = next((r for r in rows if r.id == row.id), row)
-    return _restore_resp(row)
+    loaded = _load_restore(BackupIntegrationService(db), row.id) or row
+    return _restore_resp(loaded)
 
 
 @router.get("/restores", response_model=list[RestoreJobResponse])
@@ -258,9 +266,8 @@ def update_restore(
     row = BackupIntegrationService(db).update_restore(restore_id, payload)
     if not row:
         raise HTTPException(404, "Restore not found")
-    rows = BackupIntegrationService(db).list_restores()
-    row = next((r for r in rows if r.id == row.id), row)
-    return _restore_resp(row)
+    loaded = _load_restore(BackupIntegrationService(db), row.id) or row
+    return _restore_resp(loaded)
 
 
 @router.post("/restores/{restore_id}/start", response_model=RestoreJobResponse)
@@ -271,9 +278,8 @@ def start_restore(restore_id: UUID, db: Session = Depends(get_db)):
         raise HTTPException(400, str(e))
     if not row:
         raise HTTPException(404, "Restore not found")
-    rows = BackupIntegrationService(db).list_restores()
-    row = next((r for r in rows if r.id == row.id), row)
-    return _restore_resp(row)
+    loaded = _load_restore(BackupIntegrationService(db), row.id) or row
+    return _restore_resp(loaded)
 
 
 @router.post("/restores/{restore_id}/complete", response_model=RestoreJobResponse)
@@ -282,25 +288,127 @@ def complete_restore(
     success: bool = True,
     bytes_restored: int | None = None,
     error_message: str | None = None,
+    skip_verification: bool = False,
     db: Session = Depends(get_db),
 ):
+    """
+    Mark data-plane restore finished.
+
+    On success with verification enabled, status becomes ``verifying``
+    (not terminal). Call verification endpoints next.
+    """
     row = BackupIntegrationService(db).complete_restore(
         restore_id,
         success=success,
         bytes_restored=bytes_restored,
         error_message=error_message,
+        skip_verification=skip_verification,
     )
     if not row:
         raise HTTPException(404, "Restore not found")
-    rows = BackupIntegrationService(db).list_restores()
-    row = next((r for r in rows if r.id == row.id), row)
-    return _restore_resp(row)
+    loaded = _load_restore(BackupIntegrationService(db), row.id) or row
+    return _restore_resp(loaded)
 
 
 @router.delete("/restores/{restore_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_restore(restore_id: UUID, db: Session = Depends(get_db)):
     if not BackupIntegrationService(db).delete_restore(restore_id):
         raise HTTPException(404, "Restore not found")
+
+
+# ---------- Restore verification workflows ----------
+
+@router.get(
+    "/restores/{restore_id}/verification",
+    response_model=VerificationWorkflow,
+)
+def get_verification(restore_id: UUID, db: Session = Depends(get_db)):
+    wf = BackupIntegrationService(db).get_verification(restore_id)
+    if not wf:
+        raise HTTPException(404, "Verification workflow not found")
+    return wf
+
+
+@router.post(
+    "/restores/{restore_id}/verification/start",
+    response_model=RestoreJobResponse,
+)
+def start_verification(
+    restore_id: UUID,
+    payload: StartVerificationRequest | None = None,
+    db: Session = Depends(get_db),
+):
+    try:
+        row = BackupIntegrationService(db).start_verification(restore_id, payload)
+    except ValueError as e:
+        msg = str(e)
+        code = 404 if "not found" in msg.lower() else 400
+        raise HTTPException(code, msg)
+    loaded = _load_restore(BackupIntegrationService(db), row.id) or row
+    return _restore_resp(loaded)
+
+
+@router.post(
+    "/restores/{restore_id}/verification/checks",
+    response_model=RestoreJobResponse,
+)
+def report_verification_check(
+    restore_id: UUID,
+    payload: VerificationCheckResult,
+    db: Session = Depends(get_db),
+):
+    """Agent/operator reports a single check outcome."""
+    try:
+        row = BackupIntegrationService(db).report_check(restore_id, payload)
+    except ValueError as e:
+        msg = str(e)
+        code = 404 if "not found" in msg.lower() else 400
+        raise HTTPException(code, msg)
+    loaded = _load_restore(BackupIntegrationService(db), row.id) or row
+    return _restore_resp(loaded)
+
+
+@router.post(
+    "/restores/{restore_id}/verification/run",
+    response_model=RestoreJobResponse,
+)
+def run_verification(
+    restore_id: UUID,
+    payload: RunVerificationRequest | None = None,
+    db: Session = Depends(get_db),
+):
+    """
+    Apply batch check results (or simulate) and finalize the workflow.
+
+    Terminal statuses: ``success`` | ``verify_failed``.
+    """
+    try:
+        row = BackupIntegrationService(db).run_verification(restore_id, payload)
+    except ValueError as e:
+        msg = str(e)
+        code = 404 if "not found" in msg.lower() else 400
+        raise HTTPException(code, msg)
+    loaded = _load_restore(BackupIntegrationService(db), row.id) or row
+    return _restore_resp(loaded)
+
+
+@router.post(
+    "/restores/{restore_id}/verification/skip",
+    response_model=RestoreJobResponse,
+)
+def skip_verification(
+    restore_id: UUID,
+    reason: str | None = None,
+    db: Session = Depends(get_db),
+):
+    try:
+        row = BackupIntegrationService(db).skip_verification(restore_id, reason=reason)
+    except ValueError as e:
+        msg = str(e)
+        code = 404 if "not found" in msg.lower() else 400
+        raise HTTPException(code, msg)
+    loaded = _load_restore(BackupIntegrationService(db), row.id) or row
+    return _restore_resp(loaded)
 
 
 # ---------- Summary ----------
