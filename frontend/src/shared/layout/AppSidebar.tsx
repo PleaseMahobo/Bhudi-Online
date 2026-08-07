@@ -16,6 +16,14 @@ import {
   Boxes,
   Settings,
   LogOut,
+  Building2,
+  Plug,
+  Megaphone,
+  Sparkles,
+  FileBarChart2,
+  ClipboardCheck,
+  HardDrive,
+  CreditCard,
   type LucideIcon,
 } from 'lucide-react';
 import { useAuth } from '@/shared/auth/AuthContext';
@@ -37,18 +45,17 @@ const NAV_ITEMS: NavItem[] = [
   { label: 'Assets', href: '/assets', icon: Boxes },
   { label: 'ITSM', href: '/itsm', icon: Ticket },
   { label: 'Packages', href: '/software-deployment#packages', icon: Package },
+  { label: 'MSP', href: '/msp', icon: Building2 },
+  { label: 'PSA', href: '/psa', icon: Plug },
+  { label: 'Notifications', href: '/notifications', icon: Megaphone },
+  { label: 'AI', href: '/ai', icon: Sparkles },
+  { label: 'Reporting', href: '/reporting', icon: FileBarChart2 },
+  { label: 'Compliance', href: '/compliance', icon: ClipboardCheck },
+  { label: 'Backup', href: '/backup', icon: HardDrive },
+  { label: 'Billing', href: '/billing', icon: CreditCard },
   { label: 'Settings', href: '/dashboard#settings', icon: Settings },
 ];
 
-/**
- * Spring presets (mass–stiffness–damping model).
- *
- * Mental model:
- *   F = -k * x  -  c * v
- *   higher stiffness  → snaps harder / faster toward target
- *   higher damping    → less bounce (overdamped when c is large)
- *   higher mass       → heavier feel, slower response
- */
 const SPRING_SNAPPY: Transition = {
   type: 'spring',
   stiffness: 420,
@@ -141,7 +148,7 @@ export default function AppSidebar() {
               animate={{ opacity: 1, x: 0 }}
               transition={{
                 ...SPRING_SOFT,
-                delay: index * 0.035,
+                delay: index * 0.02,
               }}
               whileHover={active ? { scale: 1.02, x: 2 } : { scale: 1.02, x: 6 }}
               whileTap={{ scale: 0.97 }}
@@ -158,7 +165,6 @@ export default function AppSidebar() {
                     ].join(' ')
               }
             >
-              {/* Active layout bar — shared layoutId gives springy handoff between routes */}
               {active && (
                 <motion.span
                   layoutId="sidebar-active-bar"
