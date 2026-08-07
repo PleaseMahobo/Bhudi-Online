@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.database.session import get_db
@@ -22,16 +22,6 @@ router = APIRouter(prefix="/notifications", tags=["Notifications"])
 
 
 @router.get("/catalog")
-def catalog():
-    return NotificationService.__dict__.get("list_catalog") or NotificationService(None)  # type: ignore
-
-
-@router.get("/catalog/")
-def catalog_list(db: Session = Depends(get_db)):
-    return NotificationService(db).list_catalog()
-
-
-@router.get("/channels/catalog")
 def channel_catalog(db: Session = Depends(get_db)):
     return NotificationService(db).list_catalog()
 
