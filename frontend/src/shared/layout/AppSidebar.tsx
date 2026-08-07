@@ -23,20 +23,43 @@ type NavItem = {
   label: string;
   href: string;
   icon: LucideIcon;
+  /** When true, only exact pathname match counts as active */
+  exact?: boolean;
 };
 
 const NAV_ITEMS: NavItem[] = [
-  { label: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
-  { label: 'Devices', href: '/dashboard', icon: Server },
+  { label: 'Dashboard', href: '/dashboard', icon: LayoutDashboard, exact: true },
+  { label: 'Devices', href: '/dashboard#devices', icon: Server },
   { label: 'Alert Engine', href: '/alert-engine', icon: Bell },
   { label: 'Commands', href: '/commands', icon: Terminal },
   { label: 'Endpoint Security', href: '/endpoint-security', icon: Shield },
   { label: 'Software Deploy', href: '/software-deployment', icon: Download },
   { label: 'Assets', href: '/assets', icon: Boxes },
   { label: 'ITSM', href: '/itsm', icon: Ticket },
-  { label: 'Packages', href: '/software-deployment', icon: Package },
-  { label: 'Settings', href: '/dashboard', icon: Settings },
+  { label: 'Packages', href: '/software-deployment#packages', icon: Package },
+  { label: 'Settings', href: '/dashboard#settings', icon: Settings },
 ];
+
+function pathWithoutHash(href: string): string {
+  return href.split('#')[0] || href;
+}
+
+function isActivePath(pathname: string | null, item: NavItem): boolean {
+  if (!pathname) return false;
+  const base = pathWithoutHash(item.href);
+
+  // Hash-only secondary items never steal active from primary routes
+  if (item.href.includes('#')) {
+    return false;
+  }
+
+  if (item.exact) {
+    return pathname === base;
+  }
+
+  if (pathname === base) return true;
+  return pathname.startsWith(`${base}/`);
+}
 
 export default function AppSidebar() {
   const pathname = usePathname();
@@ -54,7 +77,7 @@ export default function AppSidebar() {
   return (
     <div className="w-72 bg-[#111827] border-r border-[#1e2937] p-6 fixed h-screen overflow-auto z-40">
       <div className="flex items-center gap-3 mb-10">
-        <div className="w-12 h-12 bg-gradient-to-br from-sky-400 to-blue-600 rounded-2xl flex items-center justify-center font-bold text-3xl">
+        <div className="w-12 h-12 bg-gradient-to-br from-sky-400 to-blue-600 rounded-2xl flex items-center justify-center font-bold text-3xl shadow-lg shadow-sky-500/30">
           B
         </div>
         <div>
@@ -64,28 +87,64 @@ export default function AppSidebar() {
       </div>
 
       <div className="mb-8">
-        <p className="text-xs text-zinc-500">Logged in as</p>
+        <p className="text-xs text-zinc-500 uppercase tracking-wider">Logged in as</p>
         <p className="font-medium text-zinc-200 truncate">{user?.email || '—'}</p>
       </div>
 
-      <nav className="space-y-1 pb-24">
+      <nav className="space-y-1.5 pb-24" aria-label="Main">
         {NAV_ITEMS.map((item) => {
-          const active =
-            pathname === item.href ||
-            (item.href !== '/dashboard' && pathname?.startsWith(item.href));
+          const active = isActivePath(pathname, item);
           const Icon = item.icon;
+
           return (
             <Link
               key={`${item.href}-${item.label}`}
               href={item.href}
-              className={`flex items-center gap-3 px-4 py-3 rounded-2xl transition-all text-sm ${
+              aria-current={active ? 'page' : undefined}
+              className={
                 active
-                  ? 'bg-sky-500 text-white shadow-lg shadow-sky-500/20'
-                  : 'hover:bg-zinc-800 text-zinc-300'
-              }`}
+                  ? [
+                      'group relative flex items-center gap-3 px-4 py-3 rounded-2xl text-sm font-semibold',
+                      'text-white bg-gradient-to-r from-sky-600 to-sky-500',
+                      'shadow-lg shadow-sky-500/25 ring-1 ring-sky-300/40',
+                      'transition-all duration-200',
+                    ].join(' ')
+                  : [
+                      'group relative flex items-center gap-3 px-4 py-3 rounded-2xl text-sm font-medium',
+                      'text-zinc-400 hover:text-zinc-100',
+                      'hover:bg-zinc-800/80',
+                      'transition-all duration-200',
+                    ].join(' ')
+              }
             >
-              <Icon size={18} className={active ? 'text-white' : 'text-zinc-400'} />
-              {item.label}
+              {/* Active indicator bar */}
+              <span
+                className={
+                  active
+                    ? 'absolute left-0 top-1/2 -translate-y-1/2 h-8 w-1 rounded-r-full bg-white shadow-[0_0_12px_rgba(255,255,255,0.6)]'
+                    : 'absolute left-0 top-1/2 -translate-y-1/2 h-0 w-1 rounded-r-full bg-sky-400 opacity-0 group-hover:opacity-40 group-hover:h-5 transition-all'
+                }
+                aria-hidden
+              />
+
+              <span
+                className={
+                  active
+                    ? 'flex h-8 w-8 items-center justify-center rounded-xl bg-white/15 text-white'
+                    : 'flex h-8 w-8 items-center justify-center rounded-xl bg-zinc-800/60 text-zinc-400 group-hover:text-sky-300 group-hover:bg-zinc-800 transition-colors'
+                }
+              >
+                <Icon size={17} strokeWidth={active ? 2.25 : 1.75} />
+              </span>
+
+              <span className="truncate">{item.label}</span>
+
+              {active && (
+                <span
+                  className="ml-auto h-1.5 w-1.5 rounded-full bg-white/90 shadow-[0_0_8px_rgba(255,255,255,0.8)]"
+                  aria-hidden
+                />
+              )}
             </Link>
           );
         })}
@@ -94,7 +153,7 @@ export default function AppSidebar() {
       <button
         type="button"
         onClick={handleLogout}
-        className="absolute bottom-8 left-6 right-6 flex items-center gap-3 text-red-400 hover:text-red-300 text-sm"
+        className="absolute bottom-8 left-6 right-6 flex items-center gap-3 rounded-2xl px-4 py-3 text-sm text-red-400 hover:text-red-300 hover:bg-red-950/40 transition-colors"
       >
         <LogOut size={20} /> Sign Out
       </button>
