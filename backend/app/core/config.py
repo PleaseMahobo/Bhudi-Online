@@ -81,6 +81,10 @@ class Settings:
     SMTP_FROM_EMAIL: str = os.getenv("SMTP_FROM_EMAIL", "")
     SMTP_FROM_NAME: str = os.getenv("SMTP_FROM_NAME", "Bhudi Reports")
     SMTP_TIMEOUT: int = int(os.getenv("SMTP_TIMEOUT", "30"))
+    # Retry policy for transient SMTP / network failures
+    SMTP_MAX_RETRIES: int = int(os.getenv("SMTP_MAX_RETRIES", "3"))
+    SMTP_RETRY_BASE_DELAY: float = float(os.getenv("SMTP_RETRY_BASE_DELAY", "1.0"))
+    SMTP_RETRY_MAX_DELAY: float = float(os.getenv("SMTP_RETRY_MAX_DELAY", "30.0"))
 
     def validate(self):
         required = {
