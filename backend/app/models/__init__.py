@@ -51,6 +51,12 @@ from .incident_timeline import IncidentTimeline
 from .itsm import ServiceTicket, TicketAssetLink, TicketWorkNote
 from .profile import Profile
 from .refresh_token import RefreshToken
+from .reporting import (
+    ReportDefinition,
+    ReportRun,
+    ReportSchedule,
+    ReportTemplate,
+)
 from .response_action import ResponseAction
 from .script import Script
 from .script_task import ScriptTask
@@ -110,6 +116,10 @@ __all__ = [
     "ProtectedResource",
     "Purchase",
     "RefreshToken",
+    "ReportDefinition",
+    "ReportRun",
+    "ReportSchedule",
+    "ReportTemplate",
     "ResponseAction",
     "RestoreJob",
     "Role",
