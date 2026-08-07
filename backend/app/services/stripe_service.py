@@ -18,11 +18,11 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.models.msp import BillingPlan, Organization, StripeWebhookEvent, TenantSubscription
+from app.models.msp import BillingPlan, Organization, TenantSubscription
+from app.models.stripe_webhook import StripeWebhookEvent
 
 logger = logging.getLogger(__name__)
 
-# Stripe subscription.status → internal status
 _STATUS_MAP = {
     "trialing": "trialing",
     "active": "active",
@@ -72,10 +72,7 @@ def verify_stripe_signature(
     *,
     tolerance: int = DEFAULT_TOLERANCE_SECONDS,
 ) -> None:
-    """Verify Stripe-Signature header (t=...,v1=...).
-
-    Raises StripeSignatureError on failure.
-    """
+    """Verify Stripe-Signature header (t=...,v1=...). Raises StripeSignatureError."""
     if not secret:
         raise StripeSignatureError("STRIPE_WEBHOOK_SECRET is not configured")
     if not sig_header:
@@ -101,14 +98,8 @@ def verify_stripe_signature(
         raise StripeSignatureError("Signature timestamp outside tolerance")
 
     signed = f"{timestamp}.".encode("utf-8") + payload
-    expected = hmac.new(
-        secret.encode("utf-8"),
-        signed,
-        hashlib.sha256,
-    ).hexdigest()
-
-    candidates = parts["v1"]
-    if not any(hmac.compare_digest(expected, c) for c in candidates):
+    expected = hmac.new(secret.encode("utf-8"), signed, hashlib.sha256).hexdigest()
+    if not any(hmac.compare_digest(expected, c) for c in parts["v1"]):
         raise StripeSignatureError("Signature mismatch")
 
 
@@ -116,14 +107,7 @@ class StripeBillingService:
     def __init__(self, db: Session) -> None:
         self.db = db
 
-    # ----- Public entry ---------------------------------------------------
-
-    def process_webhook(
-        self,
-        payload: bytes,
-        sig_header: str | None,
-    ) -> dict[str, Any]:
-        """Verify signature, parse JSON, idempotently handle event."""
+    def process_webhook(self, payload: bytes, sig_header: str | None) -> dict[str, Any]:
         if not settings.STRIPE_ENABLED:
             return {"ok": False, "reason": "stripe_disabled"}
 
@@ -203,23 +187,12 @@ class StripeBillingService:
             "handled_events": sorted(HANDLED_EVENTS),
         }
 
-    # ----- Dispatch -------------------------------------------------------
-
-    def _dispatch(
-        self,
-        event_type: str,
-        obj: dict[str, Any],
-        full_event: dict[str, Any],
-    ) -> str:
+    def _dispatch(self, event_type: str, obj: dict[str, Any], full_event: dict[str, Any]) -> str:
         if event_type not in HANDLED_EVENTS:
             return f"ignored:{event_type}"
-
         if event_type == "checkout.session.completed":
             return self._on_checkout_completed(obj)
-        if event_type in (
-            "customer.subscription.created",
-            "customer.subscription.updated",
-        ):
+        if event_type in ("customer.subscription.created", "customer.subscription.updated"):
             return self._on_subscription_upsert(obj)
         if event_type == "customer.subscription.deleted":
             return self._on_subscription_deleted(obj)
@@ -229,10 +202,7 @@ class StripeBillingService:
             return self._on_invoice_payment_failed(obj)
         return f"ignored:{event_type}"
 
-    # ----- Handlers -------------------------------------------------------
-
     def _on_checkout_completed(self, session: dict[str, Any]) -> str:
-        """Link customer/subscription after Checkout completes."""
         customer_id = session.get("customer")
         subscription_id = session.get("subscription")
         metadata = session.get("metadata") or {}
@@ -247,21 +217,14 @@ class StripeBillingService:
         if sub is None and customer_id:
             sub = self._get_sub_by_customer(str(customer_id))
 
-        if sub is None:
-            if organization_id:
-                org = (
-                    self.db.query(Organization)
-                    .filter(Organization.id == organization_id)
-                    .first()
+        if sub is None and organization_id:
+            org = self.db.query(Organization).filter(Organization.id == organization_id).first()
+            if org:
+                sub = TenantSubscription(
+                    tenant_id=org.tenant_id, organization_id=org.id, status="trialing"
                 )
-                if org:
-                    sub = TenantSubscription(
-                        tenant_id=org.tenant_id,
-                        organization_id=org.id,
-                        status="trialing",
-                    )
-                    self.db.add(sub)
-                    self.db.flush()
+                self.db.add(sub)
+                self.db.flush()
 
         if sub is None:
             return "checkout:no_matching_subscription"
@@ -273,11 +236,7 @@ class StripeBillingService:
 
         plan_code = metadata.get("plan_code")
         if plan_code:
-            plan = (
-                self.db.query(BillingPlan)
-                .filter(BillingPlan.code == str(plan_code))
-                .first()
-            )
+            plan = self.db.query(BillingPlan).filter(BillingPlan.code == str(plan_code)).first()
             if plan:
                 sub.plan_id = plan.id
 
@@ -310,16 +269,10 @@ class StripeBillingService:
             sub = self._get_sub_by_org(organization_id)
 
         if sub is None and organization_id:
-            org = (
-                self.db.query(Organization)
-                .filter(Organization.id == organization_id)
-                .first()
-            )
+            org = self.db.query(Organization).filter(Organization.id == organization_id).first()
             if org:
                 sub = TenantSubscription(
-                    tenant_id=org.tenant_id,
-                    organization_id=org.id,
-                    status=status,
+                    tenant_id=org.tenant_id, organization_id=org.id, status=status
                 )
                 self.db.add(sub)
                 self.db.flush()
@@ -387,9 +340,7 @@ class StripeBillingService:
         sub.updated_at = _utcnow()
         meta = dict(sub.meta or {})
         meta["last_invoice_id"] = invoice.get("id")
-        meta["last_invoice_paid_at"] = invoice.get("status_transitions", {}).get(
-            "paid_at"
-        )
+        meta["last_invoice_paid_at"] = invoice.get("status_transitions", {}).get("paid_at")
         sub.meta = meta
         return f"invoice.paid:{sub.id}"
 
@@ -405,35 +356,17 @@ class StripeBillingService:
         sub.meta = meta
         return f"invoice.payment_failed:{sub.id}"
 
-    # ----- Lookups --------------------------------------------------------
-
     def _get_sub_by_tenant(self, tenant_id: UUID) -> TenantSubscription | None:
-        return (
-            self.db.query(TenantSubscription)
-            .filter(TenantSubscription.tenant_id == tenant_id)
-            .first()
-        )
+        return self.db.query(TenantSubscription).filter(TenantSubscription.tenant_id == tenant_id).first()
 
     def _get_sub_by_org(self, org_id: UUID) -> TenantSubscription | None:
-        return (
-            self.db.query(TenantSubscription)
-            .filter(TenantSubscription.organization_id == org_id)
-            .first()
-        )
+        return self.db.query(TenantSubscription).filter(TenantSubscription.organization_id == org_id).first()
 
     def _get_sub_by_customer(self, customer_id: str) -> TenantSubscription | None:
-        return (
-            self.db.query(TenantSubscription)
-            .filter(TenantSubscription.external_customer_id == customer_id)
-            .first()
-        )
+        return self.db.query(TenantSubscription).filter(TenantSubscription.external_customer_id == customer_id).first()
 
     def _get_sub_by_external_sub(self, sub_id: str) -> TenantSubscription | None:
-        return (
-            self.db.query(TenantSubscription)
-            .filter(TenantSubscription.external_subscription_id == sub_id)
-            .first()
-        )
+        return self.db.query(TenantSubscription).filter(TenantSubscription.external_subscription_id == sub_id).first()
 
     def _sub_from_invoice(self, invoice: dict[str, Any]) -> TenantSubscription | None:
         sub_id = invoice.get("subscription")
@@ -447,33 +380,28 @@ class StripeBillingService:
         return None
 
     def _resolve_plan_from_stripe_sub(
-        self,
-        stripe_sub: dict[str, Any],
-        metadata: dict[str, Any],
+        self, stripe_sub: dict[str, Any], metadata: dict[str, Any]
     ) -> BillingPlan | None:
         plan_code = metadata.get("plan_code")
         if plan_code:
-            plan = (
-                self.db.query(BillingPlan)
-                .filter(BillingPlan.code == str(plan_code))
-                .first()
-            )
+            plan = self.db.query(BillingPlan).filter(BillingPlan.code == str(plan_code)).first()
             if plan:
                 return plan
 
         items = (stripe_sub.get("items") or {}).get("data") or []
+        price_ids = set()
         for item in items:
             price = item.get("price") or {}
             price_id = price.get("id")
-            if not price_id:
-                continue
-            plan = (
-                self.db.query(BillingPlan)
-                .filter(BillingPlan.stripe_price_id == str(price_id))
-                .first()
-            )
-            if plan:
-                return plan
+            if price_id:
+                price_ids.add(str(price_id))
+        if price_ids:
+            for plan in self.db.query(BillingPlan).filter(BillingPlan.active.is_(True)).all():
+                feats = plan.features or {}
+                if str(feats.get("stripe_price_id") or "") in price_ids:
+                    return plan
+                if getattr(plan, "stripe_price_id", None) and str(plan.stripe_price_id) in price_ids:
+                    return plan
         return None
 
     @staticmethod
