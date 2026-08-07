@@ -49,6 +49,16 @@ from .hunt_result import HuntResult
 from .incident import Incident
 from .incident_timeline import IncidentTimeline
 from .itsm import ServiceTicket, TicketAssetLink, TicketWorkNote
+from .msp import (
+    BillingPlan,
+    Contact,
+    Department,
+    Organization,
+    Site,
+    Technician,
+    TenantBranding,
+    TenantSubscription,
+)
 from .profile import Profile
 from .refresh_token import RefreshToken
 from .reporting import (
@@ -86,6 +96,7 @@ __all__ = [
     "AutomationLog",
     "BackupJob",
     "BackupProvider",
+    "BillingPlan",
     "Command",
     "ComplianceAssessment",
     "ComplianceControl",
@@ -93,8 +104,10 @@ __all__ = [
     "ComplianceFramework",
     "ComplianceReport",
     "ComplianceScore",
+    "Contact",
     "Contract",
     "ControlResult",
+    "Department",
     "DeploymentEvent",
     "DeploymentJob",
     "DeploymentTarget",
@@ -112,6 +125,7 @@ __all__ = [
     "IncidentTimeline",
     "License",
     "LicenseAssignment",
+    "Organization",
     "Profile",
     "ProtectedResource",
     "Purchase",
@@ -129,10 +143,14 @@ __all__ = [
     "SecurityFinding",
     "SecurityProvider",
     "ServiceTicket",
+    "Site",
     "SoftwareInventoryItem",
     "SoftwarePackage",
+    "Technician",
     "Telemetry",
     "Tenant",
+    "TenantBranding",
+    "TenantSubscription",
     "ThreatHunt",
     "TicketAssetLink",
     "TicketWorkNote",
