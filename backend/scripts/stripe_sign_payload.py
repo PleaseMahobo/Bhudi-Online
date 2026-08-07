@@ -7,6 +7,12 @@ Examples:
   python scripts/stripe_sign_payload.py --secret whsec_test --event invoice.paid --print-curl
   python scripts/stripe_sign_payload.py --secret whsec_test --event customer.subscription.updated --post
   python scripts/stripe_sign_payload.py --secret whsec_test --payload event.json --post
+
+Exit codes:
+  0 success
+  1 usage / validation / HTTP error
+  2 file or JSON error
+  3 network / API unreachable
 """
 from __future__ import annotations
 
@@ -18,6 +24,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from pathlib import Path
 from typing import Any
 
 
@@ -136,6 +143,37 @@ def sign(payload: bytes, secret: str, timestamp: int | None = None) -> str:
     return f"t={ts},v1={digest}"
 
 
+def _load_event(args: argparse.Namespace) -> dict[str, Any]:
+    if args.payload:
+        path = Path(args.payload)
+        if not path.is_file():
+            print(f"error: payload file not found: {path}", file=sys.stderr)
+            raise SystemExit(2)
+        try:
+            raw = path.read_bytes()
+        except OSError as e:
+            print(f"error: cannot read {path}: {e}", file=sys.stderr)
+            raise SystemExit(2) from e
+        try:
+            event = json.loads(raw.decode("utf-8"))
+        except UnicodeDecodeError as e:
+            print(f"error: payload is not valid UTF-8: {e}", file=sys.stderr)
+            raise SystemExit(2) from e
+        except json.JSONDecodeError as e:
+            print(f"error: invalid JSON in {path}: {e}", file=sys.stderr)
+            raise SystemExit(2) from e
+        if not isinstance(event, dict):
+            print("error: payload root must be a JSON object", file=sys.stderr)
+            raise SystemExit(2)
+        return event
+
+    if args.event:
+        return json.loads(json.dumps(FIXTURES[args.event]))  # deep copy
+
+    print("error: provide --event or --payload", file=sys.stderr)
+    raise SystemExit(1)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Sign / post Stripe webhook test payloads")
     parser.add_argument("--secret", required=True, help="Webhook signing secret (whsec_...)")
@@ -151,18 +189,23 @@ def main() -> int:
     parser.add_argument("--tenant-id", default="", help="Inject metadata.tenant_id")
     parser.add_argument("--organization-id", default="", help="Inject metadata.organization_id")
     parser.add_argument("--plan-code", default="", help="Inject metadata.plan_code")
+    parser.add_argument("--timeout", type=float, default=30.0, help="HTTP timeout seconds (default 30)")
     args = parser.parse_args()
 
-    if args.payload:
-        with open(args.payload, "rb") as f:
-            payload = f.read()
-        event = json.loads(payload.decode("utf-8"))
-    elif args.event:
-        event = json.loads(json.dumps(FIXTURES[args.event]))
-    else:
-        parser.error("Provide --event or --payload")
+    if not args.secret.strip():
+        print("error: --secret must not be empty", file=sys.stderr)
+        return 1
+
+    try:
+        event = _load_event(args)
+    except SystemExit as e:
+        return int(e.code) if isinstance(e.code, int) else 1
 
     obj = (event.get("data") or {}).get("object") or {}
+    if not isinstance(obj, dict):
+        print("error: data.object must be a JSON object when present", file=sys.stderr)
+        return 2
+
     meta = dict(obj.get("metadata") or {})
     if args.tenant_id:
         meta["tenant_id"] = args.tenant_id
@@ -175,9 +218,14 @@ def main() -> int:
         event.setdefault("data", {})["object"] = obj
 
     if args.event and not args.payload:
-        event["id"] = f"{event['id']}_{int(time.time())}"
+        event["id"] = f"{event.get('id', 'evt_cli')}_{int(time.time())}"
 
-    payload = json.dumps(event, separators=(",", ":")).encode("utf-8")
+    try:
+        payload = json.dumps(event, separators=(",", ":")).encode("utf-8")
+    except (TypeError, ValueError) as e:
+        print(f"error: cannot serialize event to JSON: {e}", file=sys.stderr)
+        return 2
+
     header = sign(payload, args.secret)
 
     if args.print_curl or not args.post:
@@ -189,27 +237,51 @@ def main() -> int:
             f"  -d '{body}'"
         )
 
-    if args.post:
-        req = urllib.request.Request(
-            args.url,
-            data=payload,
-            headers={"Content-Type": "application/json", "Stripe-Signature": header},
-            method="POST",
-        )
-        try:
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                print(f"HTTP {resp.status}")
-                print(resp.read().decode("utf-8"))
-        except urllib.error.HTTPError as e:
-            print(f"HTTP {e.code}", file=sys.stderr)
-            print(e.read().decode("utf-8"), file=sys.stderr)
-            return 1
-        except urllib.error.URLError as e:
-            print(f"Request failed: {e}", file=sys.stderr)
-            return 1
+    if not args.post:
+        return 0
+
+    req = urllib.request.Request(
+        args.url,
+        data=payload,
+        headers={"Content-Type": "application/json", "Stripe-Signature": header},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=args.timeout) as resp:
+            body = resp.read().decode("utf-8", errors="replace")
+            print(f"HTTP {resp.status}")
+            print(body)
+            if resp.status >= 400:
+                return 1
+    except urllib.error.HTTPError as e:
+        err_body = e.read().decode("utf-8", errors="replace")
+        print(f"error: HTTP {e.code} from {args.url}", file=sys.stderr)
+        if err_body:
+            print(err_body, file=sys.stderr)
+        if e.code == 400 and "signature" in err_body.lower():
+            print(
+                "hint: ensure STRIPE_ENABLED=true and STRIPE_WEBHOOK_SECRET matches --secret",
+                file=sys.stderr,
+            )
+        return 1
+    except urllib.error.URLError as e:
+        reason = getattr(e, "reason", e)
+        print(f"error: API unreachable at {args.url}: {reason}", file=sys.stderr)
+        print("hint: start the API (e.g. ./scripts/start_uvicorn.sh) and check --url", file=sys.stderr)
+        return 3
+    except TimeoutError:
+        print(f"error: request timed out after {args.timeout}s: {args.url}", file=sys.stderr)
+        return 3
+    except OSError as e:
+        print(f"error: network failure: {e}", file=sys.stderr)
+        return 3
 
     return 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    except KeyboardInterrupt:
+        print("interrupted", file=sys.stderr)
+        raise SystemExit(130) from None
