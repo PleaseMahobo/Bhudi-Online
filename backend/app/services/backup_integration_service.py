@@ -25,11 +25,21 @@ from app.schemas.backup_integration import (
     RestoreJobUpdate,
     RunVerificationRequest,
     StartVerificationRequest,
-    VerificationCheck,
     VerificationCheckResult,
-    VerificationSummary,
+    VerificationTimeoutSweepResult,
     VerificationWorkflow,
 )
+
+# Default verification window once verification starts (1 hour)
+DEFAULT_VERIFICATION_TIMEOUT_SECONDS = 3600
+
+
+class VerificationTimeoutError(ValueError):
+    """Raised when a verification workflow has exceeded its deadline."""
+
+    def __init__(self, message: str, restore_id: UUID | None = None) -> None:
+        super().__init__(message)
+        self.restore_id = restore_id
 
 
 def _utcnow() -> datetime:
@@ -38,6 +48,20 @@ def _utcnow() -> datetime:
 
 def _iso(dt: datetime | None = None) -> str:
     return (dt or _utcnow()).isoformat()
+
+
+def _parse_iso(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        # Support trailing Z
+        normalized = value.replace("Z", "+00:00")
+        dt = datetime.fromisoformat(normalized)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+    except (TypeError, ValueError):
+        return None
 
 
 PROVIDER_CATALOG: list[dict[str, str]] = [
@@ -50,7 +74,6 @@ PROVIDER_CATALOG: list[dict[str, str]] = [
     {"provider_key": "google_drive", "display_name": "Google Drive"},
 ]
 
-# Check catalogs by restore_type and policy severity
 _BASE_CHECKS: dict[str, list[dict[str, Any]]] = {
     "file": [
         {
@@ -178,16 +201,17 @@ _BASE_CHECKS: dict[str, list[dict[str, Any]]] = {
 def _checks_for(restore_type: str, policy: str) -> list[dict[str, Any]]:
     base = list(_BASE_CHECKS.get(restore_type, _BASE_CHECKS["file"]))
     if policy == "quick":
-        # only required checks
         base = [c for c in base if c.get("required")]
     elif policy == "strict":
-        # all checks become required
         base = [{**c, "required": True} for c in base]
     return base
 
 
 def _build_verification(
-    restore_type: str, policy: str, enabled: bool = True
+    restore_type: str,
+    policy: str,
+    enabled: bool = True,
+    timeout_seconds: int | None = None,
 ) -> dict[str, Any]:
     checks = []
     for c in _checks_for(restore_type, policy):
@@ -204,12 +228,21 @@ def _build_verification(
                 "finished_at": None,
             }
         )
+    timeout = timeout_seconds or DEFAULT_VERIFICATION_TIMEOUT_SECONDS
+    if timeout < 60:
+        timeout = 60
+    if timeout > 86400:
+        timeout = 86400
     return {
         "enabled": enabled,
         "policy": policy,
         "status": "pending" if enabled else "skipped",
         "started_at": None,
         "finished_at": None,
+        "timeout_seconds": timeout,
+        "deadline_at": None,
+        "timed_out_at": None,
+        "timeout_error": None,
         "checks": checks,
         "summary": _summarize_checks(checks),
     }
@@ -232,6 +265,29 @@ def _summarize_checks(checks: list[dict[str, Any]]) -> dict[str, int]:
         "pending": pending,
         "required_failed": required_failed,
     }
+
+
+def _verification_deadline(verification: dict[str, Any]) -> datetime | None:
+    """Compute deadline from explicit deadline_at or started_at + timeout."""
+    explicit = _parse_iso(verification.get("deadline_at"))
+    if explicit:
+        return explicit
+    started = _parse_iso(verification.get("started_at"))
+    if not started:
+        return None
+    timeout = int(
+        verification.get("timeout_seconds") or DEFAULT_VERIFICATION_TIMEOUT_SECONDS
+    )
+    return started + timedelta(seconds=timeout)
+
+
+def _is_timed_out(verification: dict[str, Any], now: datetime | None = None) -> bool:
+    if verification.get("status") in ("passed", "failed", "skipped", "timed_out"):
+        return verification.get("status") == "timed_out"
+    deadline = _verification_deadline(verification)
+    if not deadline:
+        return False
+    return (now or _utcnow()) > deadline
 
 
 class BackupIntegrationService:
@@ -269,10 +325,6 @@ class BackupIntegrationService:
 
     def create_provider(self, payload: BackupProviderCreate) -> BackupProvider:
         key = payload.provider_key.strip().lower()
-        if key not in BACKUP_PROVIDERS and key not in {
-            p["provider_key"] for p in PROVIDER_CATALOG
-        }:
-            pass
         row = BackupProvider(
             provider_key=key,
             display_name=payload.display_name,
@@ -445,12 +497,13 @@ class BackupIntegrationService:
             raise ValueError("Provider not found")
 
         data = payload.model_dump(
-            exclude={"verify", "verification_policy"}
+            exclude={"verify", "verification_policy", "verification_timeout_seconds"}
         )
         row = RestoreJob(**data)
 
         policy = payload.verification_policy or "standard"
         verify = payload.verify
+        timeout = payload.verification_timeout_seconds or DEFAULT_VERIFICATION_TIMEOUT_SECONDS
 
         automation = dict(row.automation or {})
         automation.setdefault(
@@ -458,7 +511,7 @@ class BackupIntegrationService:
         )
         automation["verify"] = verify
         automation["verification"] = _build_verification(
-            row.restore_type, policy, enabled=verify
+            row.restore_type, policy, enabled=verify, timeout_seconds=timeout
         )
 
         if row.auto_start:
@@ -519,6 +572,93 @@ class BackupIntegrationService:
         self.db.refresh(row)
         return row
 
+    def _mark_verification_timed_out(
+        self, row: RestoreJob, *, reason: str | None = None
+    ) -> RestoreJob:
+        """Terminal failure path for verification timeout."""
+        automation = dict(row.automation or {})
+        verification = dict(automation.get("verification") or {})
+        now = _utcnow()
+        timeout = int(
+            verification.get("timeout_seconds") or DEFAULT_VERIFICATION_TIMEOUT_SECONDS
+        )
+        deadline = _verification_deadline(verification)
+
+        checks = list(verification.get("checks") or [])
+        for c in checks:
+            if c.get("status") in ("pending", "running"):
+                c["status"] = "failed"
+                c["message"] = reason or (
+                    f"Verification timed out after {timeout}s "
+                    f"(check still {c.get('status')})"
+                )
+                c["finished_at"] = _iso(now)
+                if not c.get("started_at"):
+                    c["started_at"] = c["finished_at"]
+
+        msg = reason or (
+            f"Verification timed out after {timeout} seconds"
+            + (f" (deadline {deadline.isoformat()})" if deadline else "")
+        )
+
+        verification["checks"] = checks
+        verification["summary"] = _summarize_checks(checks)
+        verification["status"] = "timed_out"
+        verification["timed_out_at"] = _iso(now)
+        verification["timeout_error"] = msg
+        verification["finished_at"] = _iso(now)
+        if deadline and not verification.get("deadline_at"):
+            verification["deadline_at"] = deadline.isoformat()
+
+        automation["verification"] = verification
+        automation["current_step"] = "verify_timeout"
+        automation["finished_at"] = _iso(now)
+
+        row.status = "verify_failed"
+        row.error_message = msg
+        row.finished_at = now
+        row.automation = automation
+
+        self.db.commit()
+        self.db.refresh(row)
+        return row
+
+    def enforce_verification_timeout(
+        self, restore_id: UUID, *, raise_on_timeout: bool = False
+    ) -> RestoreJob | None:
+        """
+        If verification is past its deadline, mark timed_out / verify_failed.
+
+        When raise_on_timeout is True, raises VerificationTimeoutError after persisting.
+        """
+        row = self.db.get(RestoreJob, restore_id)
+        if not row:
+            return None
+
+        if row.status != "verifying":
+            return row
+
+        automation = dict(row.automation or {})
+        verification = automation.get("verification") or {}
+        if not verification or verification.get("status") in (
+            "passed",
+            "failed",
+            "skipped",
+            "timed_out",
+        ):
+            return row
+
+        if not _is_timed_out(verification):
+            return row
+
+        row = self._mark_verification_timed_out(row)
+        if raise_on_timeout:
+            raise VerificationTimeoutError(
+                row.error_message or "Verification timed out",
+                restore_id=row.id,
+            )
+        return row
+
     def complete_restore(
         self,
         restore_id: UUID,
@@ -528,12 +668,6 @@ class BackupIntegrationService:
         error_message: str | None = None,
         skip_verification: bool = False,
     ) -> RestoreJob | None:
-        """
-        Mark data-plane restore finished.
-
-        On success with verification enabled → status becomes ``verifying``
-        and the verification workflow is started (not terminal yet).
-        """
         row = self.db.get(RestoreJob, restore_id)
         if not row:
             return None
@@ -562,24 +696,32 @@ class BackupIntegrationService:
         if verify_enabled and not skip_verification:
             row.status = "verifying"
             automation["current_step"] = "verify"
-            # ensure verification block exists
             if not verification.get("checks"):
                 policy = verification.get("policy") or "standard"
+                timeout = verification.get("timeout_seconds")
                 verification = _build_verification(
-                    row.restore_type, policy, enabled=True
+                    row.restore_type,
+                    policy,
+                    enabled=True,
+                    timeout_seconds=timeout,
                 )
+            started = _utcnow()
+            timeout = int(
+                verification.get("timeout_seconds")
+                or DEFAULT_VERIFICATION_TIMEOUT_SECONDS
+            )
             verification["status"] = "running"
-            verification["started_at"] = _iso()
-            for c in verification.get("checks", []):
-                if c.get("status") == "pending":
-                    c["status"] = "pending"
+            verification["started_at"] = _iso(started)
+            verification["timeout_seconds"] = timeout
+            verification["deadline_at"] = _iso(started + timedelta(seconds=timeout))
+            verification["timed_out_at"] = None
+            verification["timeout_error"] = None
             automation["verification"] = verification
             row.automation = automation
             self.db.commit()
             self.db.refresh(row)
             return row
 
-        # No verification — terminal success
         row.status = "success"
         row.finished_at = _utcnow()
         automation["current_step"] = "done"
@@ -592,6 +734,8 @@ class BackupIntegrationService:
         return row
 
     def get_verification(self, restore_id: UUID) -> VerificationWorkflow | None:
+        # Auto-enforce timeout so reads stay consistent
+        self.enforce_verification_timeout(restore_id)
         row = self.db.get(RestoreJob, restore_id)
         if not row:
             return None
@@ -617,22 +761,28 @@ class BackupIntegrationService:
                 f"Cannot verify restore in status '{row.status}' (use force=true)"
             )
 
-        # Allow start after restore completed into verifying, or re-run
-        if row.status not in ("verifying", "success", "running") and not payload.force:
-            if row.status not in ("pending", "queued"):
-                # still allow if restore data-plane already done
-                pass
-
         policy = payload.policy or verification.get("policy") or "standard"
-        verification = _build_verification(row.restore_type, policy, enabled=True)
+        timeout = (
+            payload.timeout_seconds
+            or verification.get("timeout_seconds")
+            or DEFAULT_VERIFICATION_TIMEOUT_SECONDS
+        )
+        verification = _build_verification(
+            row.restore_type, policy, enabled=True, timeout_seconds=int(timeout)
+        )
+        started = _utcnow()
         verification["status"] = "running"
-        verification["started_at"] = _iso()
+        verification["started_at"] = _iso(started)
+        verification["deadline_at"] = _iso(
+            started + timedelta(seconds=int(timeout))
+        )
 
         automation["verify"] = True
         automation["verification"] = verification
         automation["current_step"] = "verify"
         row.status = "verifying"
         row.finished_at = None
+        row.error_message = None
         row.automation = automation
 
         self.db.commit()
@@ -642,14 +792,26 @@ class BackupIntegrationService:
     def report_check(
         self, restore_id: UUID, result: VerificationCheckResult
     ) -> RestoreJob:
-        row = self.db.get(RestoreJob, restore_id)
+        row = self.enforce_verification_timeout(restore_id, raise_on_timeout=True)
         if not row:
             raise ValueError("Restore not found")
+
+        if row.status == "verify_failed":
+            raise VerificationTimeoutError(
+                row.error_message or "Verification timed out",
+                restore_id=row.id,
+            )
 
         automation = dict(row.automation or {})
         verification = automation.get("verification")
         if not verification:
             raise ValueError("No verification workflow on this restore")
+
+        if verification.get("status") == "timed_out":
+            raise VerificationTimeoutError(
+                verification.get("timeout_error") or "Verification timed out",
+                restore_id=row.id,
+            )
 
         checks = list(verification.get("checks") or [])
         found = False
@@ -678,25 +840,37 @@ class BackupIntegrationService:
     def run_verification(
         self, restore_id: UUID, payload: RunVerificationRequest | None = None
     ) -> RestoreJob:
-        """
-        Apply a batch of check results (or simulate) and finalize verification.
-        """
-        row = self.db.get(RestoreJob, restore_id)
+        row = self.enforce_verification_timeout(restore_id, raise_on_timeout=True)
         if not row:
             raise ValueError("Restore not found")
+
+        if row.status == "verify_failed" and (
+            (row.automation or {}).get("verification") or {}
+        ).get("status") == "timed_out":
+            raise VerificationTimeoutError(
+                row.error_message or "Verification timed out",
+                restore_id=row.id,
+            )
 
         payload = payload or RunVerificationRequest()
         automation = dict(row.automation or {})
         verification = automation.get("verification")
         if not verification or not verification.get("enabled", True):
-            # init if missing
             verification = _build_verification(
                 row.restore_type, "standard", enabled=True
             )
 
         if verification.get("status") == "pending":
+            started = _utcnow()
+            timeout = int(
+                verification.get("timeout_seconds")
+                or DEFAULT_VERIFICATION_TIMEOUT_SECONDS
+            )
             verification["status"] = "running"
-            verification["started_at"] = _iso()
+            verification["started_at"] = _iso(started)
+            verification["deadline_at"] = _iso(
+                started + timedelta(seconds=timeout)
+            )
 
         checks = list(verification.get("checks") or [])
         by_id = {c["id"]: c for c in checks}
@@ -713,7 +887,6 @@ class BackupIntegrationService:
                 if not c.get("started_at"):
                     c["started_at"] = c["finished_at"]
         else:
-            # Simulated evaluation for lab / dry-run (agents replace this)
             for c in checks:
                 if c.get("status") in ("passed", "failed", "skipped"):
                     continue
@@ -732,7 +905,6 @@ class BackupIntegrationService:
         summary = _summarize_checks(checks)
         verification["summary"] = summary
 
-        # Finalize when no pending/running checks remain
         if summary["pending"] == 0:
             verification["finished_at"] = _iso()
             if summary["required_failed"] > 0:
@@ -761,12 +933,28 @@ class BackupIntegrationService:
         return row
 
     def skip_verification(self, restore_id: UUID, reason: str | None = None) -> RestoreJob:
+        # Allow skip even after timeout? Only if still verifying — timeout already terminal
         row = self.db.get(RestoreJob, restore_id)
         if not row:
             raise ValueError("Restore not found")
 
+        # If already timed out, do not silently convert to success
         automation = dict(row.automation or {})
         verification = automation.get("verification") or {}
+        if verification.get("status") == "timed_out" or (
+            row.status == "verify_failed" and verification.get("timed_out_at")
+        ):
+            raise VerificationTimeoutError(
+                verification.get("timeout_error")
+                or row.error_message
+                or "Verification already timed out; restart verification to retry",
+                restore_id=row.id,
+            )
+
+        # Enforce timeout first if still open
+        if row.status == "verifying" and _is_timed_out(verification):
+            return self._mark_verification_timed_out(row)
+
         checks = list(verification.get("checks") or [])
         for c in checks:
             if c.get("status") in ("pending", "running"):
@@ -784,7 +972,6 @@ class BackupIntegrationService:
         automation["current_step"] = "done"
         automation["finished_at"] = _iso()
 
-        # Treat data-plane success + skipped verify as overall success
         if row.status in ("verifying", "running", "queued", "pending"):
             row.status = "success"
         row.finished_at = _utcnow()
@@ -793,6 +980,25 @@ class BackupIntegrationService:
         self.db.commit()
         self.db.refresh(row)
         return row
+
+    def sweep_verification_timeouts(self) -> VerificationTimeoutSweepResult:
+        """Batch job: expire all open verifying restores past deadline."""
+        open_rows = (
+            self.db.query(RestoreJob)
+            .filter(RestoreJob.status == "verifying")
+            .all()
+        )
+        timed_out_ids: list[UUID] = []
+        for row in open_rows:
+            before = row.status
+            updated = self.enforce_verification_timeout(row.id)
+            if updated and updated.status == "verify_failed" and before == "verifying":
+                timed_out_ids.append(updated.id)
+        return VerificationTimeoutSweepResult(
+            scanned=len(open_rows),
+            timed_out=len(timed_out_ids),
+            restore_ids=timed_out_ids,
+        )
 
     def delete_restore(self, restore_id: UUID) -> bool:
         row = self.db.get(RestoreJob, restore_id)
