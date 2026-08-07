@@ -159,9 +159,12 @@ class RestoreJobCreate(BaseModel):
     automation: dict[str, Any] | None = None
     requested_by: str | None = None
     details: dict[str, Any] | None = None
-    # Verification preferences at create time
     verify: bool = True
     verification_policy: Literal["quick", "standard", "strict"] = "standard"
+    # Max seconds allowed for verification after it starts (default applied in service)
+    verification_timeout_seconds: int | None = Field(
+        default=None, ge=60, le=86400, description="60s–24h; default 3600"
+    )
 
 
 class RestoreJobUpdate(BaseModel):
@@ -204,8 +207,6 @@ class RestoreJobResponse(BaseModel):
 # ---------- Restore verification workflow ----------
 
 class VerificationCheckResult(BaseModel):
-    """Agent / operator reports outcome of a single verification check."""
-
     check_id: str
     status: Literal["passed", "failed", "skipped"]
     message: str | None = None
@@ -236,9 +237,15 @@ class VerificationSummary(BaseModel):
 class VerificationWorkflow(BaseModel):
     enabled: bool
     policy: Literal["quick", "standard", "strict"]
-    status: Literal["pending", "running", "passed", "failed", "skipped"]
+    status: Literal[
+        "pending", "running", "passed", "failed", "skipped", "timed_out"
+    ]
     started_at: str | None = None
     finished_at: str | None = None
+    timeout_seconds: int | None = None
+    deadline_at: str | None = None
+    timed_out_at: str | None = None
+    timeout_error: str | None = None
     checks: list[VerificationCheck] = []
     summary: VerificationSummary | None = None
 
@@ -246,19 +253,18 @@ class VerificationWorkflow(BaseModel):
 class StartVerificationRequest(BaseModel):
     policy: Literal["quick", "standard", "strict"] | None = None
     force: bool = False
+    timeout_seconds: int | None = Field(default=None, ge=60, le=86400)
 
 
 class RunVerificationRequest(BaseModel):
-    """
-    Execute / simulate verification checks.
-
-    When results is provided, those outcomes are applied.
-    When omitted, the service runs a dry/simulated evaluation
-    (agents should POST real results in production).
-    """
-
     results: list[VerificationCheckResult] | None = None
     simulate_pass: bool = True
+
+
+class VerificationTimeoutSweepResult(BaseModel):
+    scanned: int
+    timed_out: int
+    restore_ids: list[UUID] = []
 
 
 class BackupFleetSummary(BaseModel):
