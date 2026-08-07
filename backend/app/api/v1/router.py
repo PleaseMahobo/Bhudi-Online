@@ -38,3 +38,4 @@ _safe_include("app.api.v1.endpoints.asset_management", tags=["Asset Management"]
 _safe_include("app.api.v1.endpoints.itsm", tags=["ITSM"])
 _safe_include("app.api.v1.endpoints.software_deployment", tags=["Software Deployment"])
 _safe_include("app.api.v1.endpoints.endpoint_security", tags=["Endpoint Security"])
+_safe_include("app.api.v1.endpoints.backup_integration", tags=["Backup Integration"])
