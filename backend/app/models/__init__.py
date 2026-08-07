@@ -59,6 +59,7 @@ from .msp import (
     TenantBranding,
     TenantSubscription,
 )
+from .psa import PSAConnection, PSASyncEvent, PSATicketLink
 from .stripe_webhook import StripeWebhookEvent
 from .profile import Profile
 from .refresh_token import RefreshToken
@@ -127,6 +128,9 @@ __all__ = [
     "License",
     "LicenseAssignment",
     "Organization",
+    "PSAConnection",
+    "PSASyncEvent",
+    "PSATicketLink",
     "Profile",
     "ProtectedResource",
     "Purchase",
