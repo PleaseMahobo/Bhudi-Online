@@ -25,7 +25,7 @@ class CircuitState(str, Enum):
 class CircuitOpenError(RuntimeError):
     """Raised when the circuit is open and calls are rejected."""
 
-    def __init(
+    def __init__(
         self,
         message: str,
         *,
@@ -86,7 +86,7 @@ class _Breaker:
     failure_threshold: int = 5
     recovery_timeout_seconds: float = 60.0
     half_open_max_calls: int = 1
-    success_threshold: int = 1  # consecutive successes in half-open to close
+    success_threshold: int = 1
 
     state: CircuitState = CircuitState.CLOSED
     failure_count: int = 0
@@ -128,7 +128,6 @@ class _Breaker:
                 return True
             if self.state == CircuitState.OPEN:
                 return False
-            # HALF_OPEN — limited probe traffic
             if self.half_open_inflight < self.half_open_max_calls:
                 self.half_open_inflight += 1
                 return True
@@ -239,11 +238,6 @@ class CircuitBreakerRegistry:
         success_threshold: int = 1,
         on_open: Callable[[CircuitOpenError], None] | None = None,
     ) -> T:
-        """
-        Execute ``fn`` if the circuit allows it.
-
-        Records success/failure. Raises CircuitOpenError when open.
-        """
         breaker = self.get(
             key,
             failure_threshold=failure_threshold,
@@ -277,7 +271,6 @@ class CircuitBreakerRegistry:
         return result
 
 
-# Process-wide default registry (backup providers, verification, etc.)
 circuit_registry = CircuitBreakerRegistry()
 
 
