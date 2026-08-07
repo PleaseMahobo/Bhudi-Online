@@ -1,34 +1,36 @@
-import { verifyAccessToken } from "@/lib/jwt";
-import { cookies } from "next/headers";
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from 'next/server';
 
-export async function GET() {
-  const cookieStore = await cookies();
+const BACKEND = (
+  process.env.API_BASE_URL ||
+  process.env.NEXT_PUBLIC_API_URL ||
+  'https://bhudi-online-production.up.railway.app'
+).replace(/\/$/, '');
 
-  const token = cookieStore.get("access_token")?.value;
-
-  if (!token) {
-    return NextResponse.json(
-      {
-        authenticated: false,
-      },
-      { status: 401 }
-    );
-  }
-
+export async function GET(request: NextRequest) {
   try {
-    const payload = await verifyAccessToken(token);
+    const auth =
+      request.headers.get('authorization') ||
+      (request.cookies.get('access_token')?.value
+        ? `Bearer ${request.cookies.get('access_token')!.value}`
+        : '');
 
-    return NextResponse.json({
-      authenticated: true,
-      user: payload,
+    if (!auth) {
+      return NextResponse.json({ authenticated: false }, { status: 401 });
+    }
+
+    const res = await fetch(`${BACKEND}/api/v1/auth/me`, {
+      headers: { Authorization: auth },
+      cache: 'no-store',
     });
-  } catch {
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      return NextResponse.json({ authenticated: false, ...data }, { status: res.status });
+    }
+    return NextResponse.json({ authenticated: true, user: data });
+  } catch (e) {
     return NextResponse.json(
-      {
-        authenticated: false,
-      },
-      { status: 401 }
+      { authenticated: false, detail: String(e) },
+      { status: 503 }
     );
   }
 }
