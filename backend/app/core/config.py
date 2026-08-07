@@ -86,6 +86,18 @@ class Settings:
     SMTP_RETRY_BASE_DELAY: float = float(os.getenv("SMTP_RETRY_BASE_DELAY", "1.0"))
     SMTP_RETRY_MAX_DELAY: float = float(os.getenv("SMTP_RETRY_MAX_DELAY", "30.0"))
 
+    # Stripe billing / webhooks
+    STRIPE_ENABLED: bool = os.getenv("STRIPE_ENABLED", "false").lower() in (
+        "1", "true", "yes", "on",
+    )
+    STRIPE_SECRET_KEY: str = os.getenv("STRIPE_SECRET_KEY", "")
+    STRIPE_WEBHOOK_SECRET: str = os.getenv("STRIPE_WEBHOOK_SECRET", "")
+    STRIPE_WEBHOOK_TOLERANCE: int = int(os.getenv("STRIPE_WEBHOOK_TOLERANCE", "300"))
+    # Persist full event JSON for debugging (disable in high-volume prod)
+    STRIPE_STORE_PAYLOAD: bool = os.getenv("STRIPE_STORE_PAYLOAD", "true").lower() in (
+        "1", "true", "yes", "on",
+    )
+
     def validate(self):
         required = {
             "DATABASE_URL": self.DATABASE_URL,
