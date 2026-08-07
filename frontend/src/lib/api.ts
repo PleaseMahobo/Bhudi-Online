@@ -564,6 +564,135 @@ export interface DeploymentEvent {
 }
 
 // =========================================================
+// Endpoint Security (Phase 12)
+// =========================================================
+
+export interface SecurityProviderCatalogItem {
+  provider_key: string;
+  display_name: string;
+}
+
+export interface SecurityProvider {
+  id: string;
+  tenant_id?: string | null;
+  provider_key: string;
+  display_name: string;
+  enabled: boolean;
+  config?: Record<string, any> | null;
+  last_sync_at?: string | null;
+  last_sync_status?: string | null;
+  last_sync_error?: string | null;
+  notes?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type SecurityProviderCreate = {
+  provider_key: string;
+  display_name: string;
+  enabled?: boolean;
+  config?: Record<string, any> | null;
+  notes?: string | null;
+  tenant_id?: string | null;
+};
+
+export interface EndpointSecurityAgent {
+  id: string;
+  device_id?: string | null;
+  hostname?: string | null;
+  provider_id: string;
+  external_agent_id?: string | null;
+  agent_version?: string | null;
+  status: string;
+  real_time_protection?: boolean | null;
+  definitions_up_to_date?: boolean | null;
+  last_scan_at?: string | null;
+  last_seen_at?: string | null;
+  details?: Record<string, any> | null;
+  created_at: string;
+  updated_at: string;
+  provider_key?: string | null;
+  provider_name?: string | null;
+}
+
+export type EndpointSecurityAgentCreate = {
+  provider_id: string;
+  device_id?: string | null;
+  hostname?: string | null;
+  external_agent_id?: string | null;
+  agent_version?: string | null;
+  status?: string;
+  real_time_protection?: boolean | null;
+  definitions_up_to_date?: boolean | null;
+  last_scan_at?: string | null;
+  last_seen_at?: string | null;
+  details?: Record<string, any> | null;
+};
+
+export interface SecurityFinding {
+  id: string;
+  provider_id: string;
+  device_id?: string | null;
+  hostname?: string | null;
+  external_id?: string | null;
+  title: string;
+  description?: string | null;
+  severity: string;
+  status: string;
+  category?: string | null;
+  confidence?: number | null;
+  detected_at?: string | null;
+  resolved_at?: string | null;
+  raw?: Record<string, any> | null;
+  created_at: string;
+  updated_at: string;
+  provider_key?: string | null;
+}
+
+export type SecurityFindingCreate = {
+  provider_id: string;
+  device_id?: string | null;
+  hostname?: string | null;
+  external_id?: string | null;
+  title: string;
+  description?: string | null;
+  severity?: string;
+  status?: string;
+  category?: string | null;
+  confidence?: number | null;
+  detected_at?: string | null;
+  raw?: Record<string, any> | null;
+};
+
+export interface EndpointSecurityScore {
+  id: string;
+  device_id: string;
+  hostname?: string | null;
+  score: number;
+  grade: string;
+  factors?: Record<string, any> | null;
+  open_critical: number;
+  open_high: number;
+  agents_healthy: number;
+  agents_total: number;
+  computed_at: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface OrgSecurityScore {
+  devices_scored: number;
+  average_score: number;
+  median_score: number;
+  grade_distribution: Record<string, number>;
+  open_critical_total: number;
+  open_high_total: number;
+  providers_enabled: number;
+  agents_healthy: number;
+  agents_total: number;
+}
+
+// =========================================================
 // Auth
 // =========================================================
 
@@ -1058,4 +1187,150 @@ export async function rollbackDeploymentJob(
       device_ids: opts?.device_ids || [],
     }),
   });
+}
+
+// =========================================================
+// Endpoint Security API (Phase 12)
+// =========================================================
+
+export async function listSecurityCatalog() {
+  return request<SecurityProviderCatalogItem[]>(`/api/v1/endpoint-security/catalog`);
+}
+
+export async function seedSecurityProviders() {
+  return request<SecurityProvider[]>(`/api/v1/endpoint-security/providers/seed`, {
+    method: "POST",
+  });
+}
+
+export async function listSecurityProviders(enabledOnly = false) {
+  const q = enabledOnly ? "?enabled_only=true" : "";
+  return request<SecurityProvider[]>(`/api/v1/endpoint-security/providers${q}`);
+}
+
+export async function createSecurityProvider(data: SecurityProviderCreate) {
+  return request<SecurityProvider>(`/api/v1/endpoint-security/providers`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function updateSecurityProvider(
+  id: string,
+  data: Partial<SecurityProviderCreate> & {
+    last_sync_status?: string | null;
+    last_sync_error?: string | null;
+  }
+) {
+  return request<SecurityProvider>(`/api/v1/endpoint-security/providers/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function deleteSecurityProvider(id: string) {
+  return request<void>(`/api/v1/endpoint-security/providers/${id}`, {
+    method: "DELETE",
+  });
+}
+
+export async function listSecurityAgents(params?: {
+  device_id?: string;
+  provider_id?: string;
+  status?: string;
+}) {
+  const qs = new URLSearchParams();
+  if (params?.device_id) qs.set("device_id", params.device_id);
+  if (params?.provider_id) qs.set("provider_id", params.provider_id);
+  if (params?.status) qs.set("status", params.status);
+  const q = qs.toString() ? `?${qs}` : "";
+  return request<EndpointSecurityAgent[]>(`/api/v1/endpoint-security/agents${q}`);
+}
+
+export async function createSecurityAgent(data: EndpointSecurityAgentCreate) {
+  return request<EndpointSecurityAgent>(`/api/v1/endpoint-security/agents`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function updateSecurityAgent(
+  id: string,
+  data: Partial<EndpointSecurityAgentCreate>
+) {
+  return request<EndpointSecurityAgent>(`/api/v1/endpoint-security/agents/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function deleteSecurityAgent(id: string) {
+  return request<void>(`/api/v1/endpoint-security/agents/${id}`, {
+    method: "DELETE",
+  });
+}
+
+export async function listSecurityFindings(params?: {
+  device_id?: string;
+  provider_id?: string;
+  status?: string;
+  severity?: string;
+}) {
+  const qs = new URLSearchParams();
+  if (params?.device_id) qs.set("device_id", params.device_id);
+  if (params?.provider_id) qs.set("provider_id", params.provider_id);
+  if (params?.status) qs.set("status", params.status);
+  if (params?.severity) qs.set("severity", params.severity);
+  const q = qs.toString() ? `?${qs}` : "";
+  return request<SecurityFinding[]>(`/api/v1/endpoint-security/findings${q}`);
+}
+
+export async function createSecurityFinding(data: SecurityFindingCreate) {
+  return request<SecurityFinding>(`/api/v1/endpoint-security/findings`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function updateSecurityFinding(
+  id: string,
+  data: Partial<SecurityFindingCreate> & { resolved_at?: string | null }
+) {
+  return request<SecurityFinding>(`/api/v1/endpoint-security/findings/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function deleteSecurityFinding(id: string) {
+  return request<void>(`/api/v1/endpoint-security/findings/${id}`, {
+    method: "DELETE",
+  });
+}
+
+export async function getOrgSecurityScore() {
+  return request<OrgSecurityScore>(`/api/v1/endpoint-security/scores/org`);
+}
+
+export async function listSecurityScores(minScore?: number) {
+  const q = minScore != null ? `?min_score=${minScore}` : "";
+  return request<EndpointSecurityScore[]>(`/api/v1/endpoint-security/scores${q}`);
+}
+
+export async function getDeviceSecurityScore(deviceId: string) {
+  return request<EndpointSecurityScore>(`/api/v1/endpoint-security/scores/${deviceId}`);
+}
+
+export async function recomputeDeviceSecurityScore(deviceId: string) {
+  return request<EndpointSecurityScore>(
+    `/api/v1/endpoint-security/scores/${deviceId}/recompute`,
+    { method: "POST" }
+  );
+}
+
+export async function recomputeAllSecurityScores() {
+  return request<{ devices_scored: number }>(
+    `/api/v1/endpoint-security/scores/recompute-all`,
+    { method: "POST" }
+  );
 }
