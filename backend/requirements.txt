@@ -27,10 +27,18 @@ markdown-it-py==4.2.0
 mdurl==0.1.2
 mmh3==5.2.1
 multidict==6.7.1
+opentelemetry-api>=1.27.0
+opentelemetry-sdk>=1.27.0
+opentelemetry-exporter-otlp>=1.27.0
+opentelemetry-instrumentation-fastapi>=0.48b0
+opentelemetry-instrumentation-sqlalchemy>=0.48b0
+opentelemetry-instrumentation-requests>=0.48b0
+opentelemetry-instrumentation-urllib>=0.48b0
 packaging==26.2
 passlib[argon2]>=1.7.4
 passlib[bcrypt]==1.7.4
 postgrest==2.30.1
+prometheus-client>=0.20.0
 propcache==0.5.2
 psycopg[binary]>=3.2
 psycopg[binary]
@@ -47,6 +55,7 @@ python-dateutil==2.9.0.post0
 python-dotenv==1.2.2
 python-jose[cryptography]==3.5.0
 realtime==2.30.1
+redis>=5.0.0
 requests==2.34.2
 rich==14.3.4
 six==1.17.0
