@@ -23,11 +23,13 @@ from app.schemas.backup_integration import (
     RunVerificationRequest,
     StartVerificationRequest,
     VerificationCheckResult,
+    VerificationTimeoutSweepResult,
     VerificationWorkflow,
 )
 from app.services.backup_integration_service import (
     PROVIDER_CATALOG,
     BackupIntegrationService,
+    VerificationTimeoutError,
 )
 
 router = APIRouter(prefix="/backup", tags=["Backup Integration"])
@@ -57,6 +59,21 @@ def _restore_resp(row) -> RestoreJobResponse:
 def _load_restore(svc: BackupIntegrationService, restore_id: UUID):
     rows = svc.list_restores()
     return next((r for r in rows if r.id == restore_id), None)
+
+
+def _http_from_value_error(e: Exception) -> HTTPException:
+    msg = str(e)
+    if isinstance(e, VerificationTimeoutError):
+        return HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "error": "verification_timeout",
+                "message": msg,
+                "restore_id": str(e.restore_id) if e.restore_id else None,
+            },
+        )
+    code = 404 if "not found" in msg.lower() else 400
+    return HTTPException(code, msg)
 
 
 # ---------- Catalog / providers ----------
@@ -291,12 +308,6 @@ def complete_restore(
     skip_verification: bool = False,
     db: Session = Depends(get_db),
 ):
-    """
-    Mark data-plane restore finished.
-
-    On success with verification enabled, status becomes ``verifying``
-    (not terminal). Call verification endpoints next.
-    """
     row = BackupIntegrationService(db).complete_restore(
         restore_id,
         success=success,
@@ -323,6 +334,7 @@ def delete_restore(restore_id: UUID, db: Session = Depends(get_db)):
     response_model=VerificationWorkflow,
 )
 def get_verification(restore_id: UUID, db: Session = Depends(get_db)):
+    """Returns workflow state; auto-expires if past deadline."""
     wf = BackupIntegrationService(db).get_verification(restore_id)
     if not wf:
         raise HTTPException(404, "Verification workflow not found")
@@ -341,9 +353,7 @@ def start_verification(
     try:
         row = BackupIntegrationService(db).start_verification(restore_id, payload)
     except ValueError as e:
-        msg = str(e)
-        code = 404 if "not found" in msg.lower() else 400
-        raise HTTPException(code, msg)
+        raise _http_from_value_error(e)
     loaded = _load_restore(BackupIntegrationService(db), row.id) or row
     return _restore_resp(loaded)
 
@@ -357,13 +367,10 @@ def report_verification_check(
     payload: VerificationCheckResult,
     db: Session = Depends(get_db),
 ):
-    """Agent/operator reports a single check outcome."""
     try:
         row = BackupIntegrationService(db).report_check(restore_id, payload)
     except ValueError as e:
-        msg = str(e)
-        code = 404 if "not found" in msg.lower() else 400
-        raise HTTPException(code, msg)
+        raise _http_from_value_error(e)
     loaded = _load_restore(BackupIntegrationService(db), row.id) or row
     return _restore_resp(loaded)
 
@@ -377,17 +384,10 @@ def run_verification(
     payload: RunVerificationRequest | None = None,
     db: Session = Depends(get_db),
 ):
-    """
-    Apply batch check results (or simulate) and finalize the workflow.
-
-    Terminal statuses: ``success`` | ``verify_failed``.
-    """
     try:
         row = BackupIntegrationService(db).run_verification(restore_id, payload)
     except ValueError as e:
-        msg = str(e)
-        code = 404 if "not found" in msg.lower() else 400
-        raise HTTPException(code, msg)
+        raise _http_from_value_error(e)
     loaded = _load_restore(BackupIntegrationService(db), row.id) or row
     return _restore_resp(loaded)
 
@@ -404,11 +404,35 @@ def skip_verification(
     try:
         row = BackupIntegrationService(db).skip_verification(restore_id, reason=reason)
     except ValueError as e:
-        msg = str(e)
-        code = 404 if "not found" in msg.lower() else 400
-        raise HTTPException(code, msg)
+        raise _http_from_value_error(e)
     loaded = _load_restore(BackupIntegrationService(db), row.id) or row
     return _restore_resp(loaded)
+
+
+@router.post(
+    "/restores/{restore_id}/verification/enforce-timeout",
+    response_model=RestoreJobResponse,
+)
+def enforce_verification_timeout(restore_id: UUID, db: Session = Depends(get_db)):
+    """
+    Explicitly check and expire this restore's verification if past deadline.
+
+    Safe to call from a scheduler or after a long agent silence.
+    """
+    row = BackupIntegrationService(db).enforce_verification_timeout(restore_id)
+    if not row:
+        raise HTTPException(404, "Restore not found")
+    loaded = _load_restore(BackupIntegrationService(db), row.id) or row
+    return _restore_resp(loaded)
+
+
+@router.post(
+    "/jobs/verification-timeout-sweep",
+    response_model=VerificationTimeoutSweepResult,
+)
+def sweep_verification_timeouts(db: Session = Depends(get_db)):
+    """Cron-friendly: expire all verifying restores past their deadline."""
+    return BackupIntegrationService(db).sweep_verification_timeouts()
 
 
 # ---------- Summary ----------
