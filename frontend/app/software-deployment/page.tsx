@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useState } from 'react';
 import { useAuth } from '@/shared/auth/AuthContext';
+import ModuleShell from '@/shared/components/ModuleShell';
 import { useRouter } from 'next/navigation';
 import {
   listPackages,
@@ -280,15 +281,15 @@ export default function SoftwareDeploymentPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#0a0f1c] flex items-center justify-center text-white">
-        Loading Software Deployment...
-      </div>
+      <ModuleShell title="Software Deployment">
+        <div className="text-slate-500">Loading…</div>
+      </ModuleShell>
     );
   }
 
   return (
-    <div className="min-h-screen bg-[#0a0f1c] text-white">
-      <div className="max-w-7xl mx-auto p-8">
+    <ModuleShell title="Software Deployment" subtitle="Packages, jobs & rollouts">
+      <div className="space-y-6">
         <div className="flex items-center justify-between mb-8">
           <div className="flex items-center gap-4">
             <button
@@ -574,7 +575,6 @@ export default function SoftwareDeploymentPage() {
           </div>
         </div>
 
-        {/* Package modal */}
         {showPkgForm && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
             <div className="bg-zinc-900 border border-zinc-700 rounded-3xl w-full max-w-2xl max-h-[90vh] overflow-y-auto p-8">
@@ -706,7 +706,6 @@ export default function SoftwareDeploymentPage() {
           </div>
         )}
 
-        {/* Job modal */}
         {showJobForm && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
             <div className="bg-zinc-900 border border-zinc-700 rounded-3xl w-full max-w-xl max-h-[90vh] overflow-y-auto p-8">
@@ -812,6 +811,6 @@ export default function SoftwareDeploymentPage() {
           </div>
         )}
       </div>
-    </div>
+    </ModuleShell>
   );
 }
