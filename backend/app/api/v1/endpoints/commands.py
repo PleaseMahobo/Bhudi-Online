@@ -9,65 +9,29 @@ from app.database.session import get_db
 from app.schemas.command import CommandCreateRequest
 from app.services.agent_dispatcher import AgentDispatcher
 
-router = APIRouter(
-    prefix="/commands",
-    tags=["Commands"],
-)
+router = APIRouter(prefix="/commands", tags=["Commands"])
 
 
-@router.post(
-    "",
-    status_code=status.HTTP_201_CREATED,
-)
-def queue_command(
-    request: CommandCreateRequest,
-    db: Session = Depends(get_db),
-):
-
+@router.post("", status_code=status.HTTP_201_CREATED)
+def queue_command(request: CommandCreateRequest, db: Session = Depends(get_db)):
     dispatcher = AgentDispatcher(db)
-
     try:
-
         command = dispatcher.queue_command(
-
             agent_id=request.agent_id,
-
             command_type=request.command_type,
-
             payload=request.payload,
-
-            priority=request.priority,
-
             requested_by=request.requested_by,
-
+            priority=request.priority,
+            timeout_seconds=request.timeout_seconds,
+            requires_reboot=request.requires_reboot,
         )
-
     except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-        raise HTTPException(
-            status_code=400,
-            detail=str(exc),
-        )
-
-    return {
-
-        "id": command.id,
-
-        "status": "queued",
-
-        "agent_id": command.agent_id,
-
-    }
+    return {"id": command.id, "status": command.status, "agent_id": command.agent_id, "command_type": command.command_type}
 
 
 @router.get("/{agent_id}")
-def list_agent_commands(
-    agent_id: uuid.UUID,
-    db: Session = Depends(get_db),
-):
-
+def list_agent_commands(agent_id: uuid.UUID, db: Session = Depends(get_db)):
     dispatcher = AgentDispatcher(db)
-
-    commands = dispatcher.get_pending_commands(agent_id)
-
-    return commands
+    return dispatcher.get_pending_commands(agent_id)
