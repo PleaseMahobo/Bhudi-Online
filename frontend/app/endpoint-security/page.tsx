@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAuth } from '@/shared/auth/AuthContext';
+import ModuleShell from '@/shared/components/ModuleShell';
 import { useRouter } from 'next/navigation';
 import {
   listSecurityProviders,
@@ -283,15 +284,15 @@ export default function EndpointSecurityPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#0a0f1c] flex items-center justify-center text-white">
-        Loading Endpoint Security...
-      </div>
+      <ModuleShell title="Endpoint Security">
+        <div className="text-slate-500">Loading…</div>
+      </ModuleShell>
     );
   }
 
   return (
-    <div className="min-h-screen bg-[#0a0f1c] text-white">
-      <div className="max-w-7xl mx-auto p-8">
+    <ModuleShell title="Endpoint Security" subtitle="Providers, agents, findings & security scores">
+      <div className="space-y-6">
         <div className="flex items-center justify-between mb-8">
           <div className="flex items-center gap-4">
             <button
@@ -336,7 +337,6 @@ export default function EndpointSecurityPage() {
           </div>
         )}
 
-        {/* Org score cards */}
         {org && (
           <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3 mb-6">
             <div className="bg-zinc-900 border border-zinc-700 rounded-2xl p-4">
@@ -392,7 +392,6 @@ export default function EndpointSecurityPage() {
           ))}
         </div>
 
-        {/* Overview */}
         {tab === 'overview' && (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <div className="bg-zinc-900 border border-zinc-700 rounded-3xl p-6">
@@ -467,7 +466,6 @@ export default function EndpointSecurityPage() {
           </div>
         )}
 
-        {/* Providers */}
         {tab === 'providers' && (
           <div className="space-y-4">
             <div className="flex justify-end">
@@ -526,7 +524,6 @@ export default function EndpointSecurityPage() {
           </div>
         )}
 
-        {/* Agents */}
         {tab === 'agents' && (
           <div className="space-y-4">
             <div className="flex justify-end">
@@ -580,7 +577,6 @@ export default function EndpointSecurityPage() {
           </div>
         )}
 
-        {/* Findings */}
         {tab === 'findings' && (
           <div className="space-y-4">
             <div className="flex flex-wrap gap-3 items-center justify-between">
@@ -673,7 +669,6 @@ export default function EndpointSecurityPage() {
           </div>
         )}
 
-        {/* Scores */}
         {tab === 'scores' && (
           <div className="space-y-4">
             {scores.length === 0 && !busy && (
@@ -716,7 +711,6 @@ export default function EndpointSecurityPage() {
           </div>
         )}
 
-        {/* Agent modal */}
         {showAgentForm && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
             <div className="bg-zinc-900 border border-zinc-700 rounded-3xl w-full max-w-lg max-h-[90vh] overflow-y-auto p-8">
@@ -848,7 +842,6 @@ export default function EndpointSecurityPage() {
           </div>
         )}
 
-        {/* Finding modal */}
         {showFindingForm && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
             <div className="bg-zinc-900 border border-zinc-700 rounded-3xl w-full max-w-lg max-h-[90vh] overflow-y-auto p-8">
@@ -957,6 +950,6 @@ export default function EndpointSecurityPage() {
           </div>
         )}
       </div>
-    </div>
+    </ModuleShell>
   );
 }
