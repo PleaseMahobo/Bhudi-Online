@@ -7,203 +7,62 @@ import ModuleShell from '@/shared/components/ModuleShell';
 import { getDevices, listTickets, type ServiceTicket } from '@/lib/api';
 import { useWebSocket } from '@/lib/websocket';
 import {
-  Activity,
-  AlertTriangle,
-  ArrowRight,
-  Bell,
-  CheckCircle2,
-  CircleAlert,
-  Clock3,
-  Copy,
-  ExternalLink,
-  Gauge,
-  Monitor,
-  RefreshCw,
-  Server,
-  ShieldCheck,
-  Ticket,
-  Wifi,
-  WifiOff,
-  Zap,
+  Activity, AlertTriangle, ArrowRight, Bell, CheckCircle2, CircleAlert, Clock3, Copy,
+  Gauge, Monitor, RefreshCw, Server, ShieldCheck, Ticket, Wifi, Zap,
 } from 'lucide-react';
 
 type DeviceRow = { id: string; hostname?: string; name?: string; status?: string; online?: boolean };
-
 type Tone = 'neutral' | 'info' | 'warning' | 'danger' | 'success';
-
-const toneMap: Record<Tone, { badge: string; dot: string; icon: string }> = {
-  neutral: { badge: 'bg-slate-100 text-slate-700', dot: 'bg-slate-400', icon: 'text-slate-500' },
-  info: { badge: 'bg-indigo-50 text-indigo-700', dot: 'bg-indigo-500', icon: 'text-indigo-600' },
-  warning: { badge: 'bg-amber-50 text-amber-800', dot: 'bg-amber-500', icon: 'text-amber-600' },
-  danger: { badge: 'bg-red-50 text-red-700', dot: 'bg-red-500', icon: 'text-red-600' },
-  success: { badge: 'bg-emerald-50 text-emerald-700', dot: 'bg-emerald-500', icon: 'text-emerald-600' },
+const toneMap: Record<Tone, { dot: string; icon: string }> = {
+  neutral: { dot: 'bg-slate-400', icon: 'text-slate-500' }, info: { dot: 'bg-indigo-500', icon: 'text-indigo-600' },
+  warning: { dot: 'bg-amber-500', icon: 'text-amber-600' }, danger: { dot: 'bg-red-500', icon: 'text-red-600' }, success: { dot: 'bg-emerald-500', icon: 'text-emerald-600' },
 };
-
-function resolved(status?: string) {
-  return ['resolved', 'closed', 'done', 'cancelled'].includes((status || '').toLowerCase());
-}
-
-function pending(status?: string) {
-  return ['pending', 'waiting', 'on_hold', 'on-hold', 'customer_pending'].includes((status || '').toLowerCase());
-}
-
-function dueDays(value?: string | null) {
-  if (!value) return null;
-  const time = new Date(value).getTime();
-  if (Number.isNaN(time)) return null;
-  return Math.floor((time - Date.now()) / 86400000);
-}
+const resolved = (status?: string) => ['resolved', 'closed', 'done', 'cancelled'].includes((status || '').toLowerCase());
+const pending = (status?: string) => ['pending', 'waiting', 'on_hold', 'on-hold', 'customer_pending'].includes((status || '').toLowerCase());
+function dueDays(value?: string | null) { if (!value) return null; const time = new Date(value).getTime(); return Number.isNaN(time) ? null : Math.floor((time - Date.now()) / 86400000); }
 
 function Card({ title, icon, action, children, className = '' }: { title: string; icon?: React.ReactNode; action?: React.ReactNode; children: React.ReactNode; className?: string }) {
-  return (
-    <section className={`rounded-2xl border border-slate-200 bg-white shadow-sm ${className}`}>
-      <header className="flex items-center justify-between gap-3 border-b border-slate-100 px-5 py-4">
-        <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">{icon}{title}</div>
-        {action}
-      </header>
-      <div className="p-5">{children}</div>
-    </section>
-  );
+  return <section className={`rounded-2xl border border-slate-200 bg-white shadow-sm ${className}`}><header className="flex items-center justify-between gap-3 border-b border-slate-100 px-5 py-4"><div className="flex items-center gap-2 text-sm font-semibold text-slate-900">{icon}{title}</div>{action}</header><div className="p-5">{children}</div></section>;
 }
-
 function Metric({ label, value, detail, icon, href, tone = 'neutral' }: { label: string; value: number | string; detail?: string; icon: React.ReactNode; href?: string; tone?: Tone }) {
-  const content = (
-    <div className="group rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:border-indigo-200 hover:shadow-md">
-      <div className="flex items-center justify-between"><span className="text-xs font-medium text-slate-500">{label}</span><span className={toneMap[tone].icon}>{icon}</span></div>
-      <div className="mt-2 flex items-end gap-2"><span className="text-3xl font-bold tracking-tight text-slate-900 tabular-nums">{value}</span>{detail && <span className="pb-1 text-xs text-slate-500">{detail}</span>}</div>
-    </div>
-  );
+  const content = <div className="group rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:border-indigo-200 hover:shadow-md"><div className="flex items-center justify-between"><span className="text-xs font-medium text-slate-500">{label}</span><span className={toneMap[tone].icon}>{icon}</span></div><div className="mt-2 flex items-end gap-2"><span className="text-3xl font-bold tracking-tight text-slate-900 tabular-nums">{value}</span>{detail && <span className="pb-1 text-xs text-slate-500">{detail}</span>}</div></div>;
   return href ? <Link href={href}>{content}</Link> : content;
 }
 
 export default function DashboardPage() {
-  const { user, loading } = useAuth();
-  const { isConnected } = useWebSocket();
-  const [devices, setDevices] = useState<DeviceRow[]>([]);
-  const [tickets, setTickets] = useState<ServiceTicket[]>([]);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
-
+  const { user, loading } = useAuth(); const { isConnected } = useWebSocket();
+  const [devices, setDevices] = useState<DeviceRow[]>([]); const [tickets, setTickets] = useState<ServiceTicket[]>([]); const [busy, setBusy] = useState(false); const [error, setError] = useState<string | null>(null); const [copied, setCopied] = useState(false);
   const agentStartCommand = "$env:BHUDI_SERVER_URL='https://bhudi-online-production.up.railway.app'; Set-Location .\\agent; pip install -r requirements.txt; python main.py";
-
-  const load = useCallback(async () => {
-    try {
-      setBusy(true);
-      setError(null);
-      const [deviceList, ticketList] = await Promise.all([getDevices().catch(() => []), listTickets().catch(() => [] as ServiceTicket[])]);
-      setDevices(Array.isArray(deviceList) ? deviceList : []);
-      setTickets(Array.isArray(ticketList) ? ticketList : []);
-    } catch (e: any) {
-      setError(e?.message || 'Failed to load dashboard');
-    } finally {
-      setBusy(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (loading || !user) return;
-    load();
-    const interval = setInterval(load, 30000);
-    return () => clearInterval(interval);
-  }, [loading, user, load]);
+  const load = useCallback(async () => { try { setBusy(true); setError(null); const [deviceList, ticketList] = await Promise.all([getDevices().catch(() => []), listTickets().catch(() => [] as ServiceTicket[])]); setDevices(Array.isArray(deviceList) ? deviceList : []); setTickets(Array.isArray(ticketList) ? ticketList : []); } catch (e: any) { setError(e?.message || 'Failed to load dashboard'); } finally { setBusy(false); } }, []);
+  useEffect(() => { if (loading || !user) return; load(); const interval = setInterval(load, 30000); return () => clearInterval(interval); }, [loading, user, load]);
 
   const stats = useMemo(() => {
-    const total = devices.length;
-    const online = devices.filter((d) => d.online === true || d.status?.toLowerCase() === 'online').length;
-    const offline = Math.max(0, total - online);
-    const activeTickets = tickets.filter((t) => !resolved(t.status));
-    const open = activeTickets.filter((t) => !pending(t.status)).length;
-    const pendingTickets = activeTickets.filter((t) => pending(t.status)).length;
-    const criticalTickets = activeTickets.filter((t) => ['critical', 'urgent', 'p1'].includes((t.priority || '').toLowerCase())).length;
-    const highTickets = activeTickets.filter((t) => ['high', 'warning', 'p2'].includes((t.priority || '').toLowerCase())).length;
-    const dueToday = activeTickets.filter((t) => dueDays((t as any).due_at || (t as any).due_date || (t as any).sla_due_at) === 0).length;
-    const overdue = activeTickets.filter((t) => { const d = dueDays((t as any).due_at || (t as any).due_date || (t as any).sla_due_at); return d !== null && d < 0; }).length;
-    return { total, online, offline, activeTickets: activeTickets.length, open, pendingTickets, criticalTickets, highTickets, dueToday, overdue };
+    const total = devices.length; const online = devices.filter((d) => d.online === true || d.status?.toLowerCase() === 'online').length; const offline = Math.max(0, total - online);
+    const active = tickets.filter((t) => !resolved(t.status)); const open = active.filter((t) => !pending(t.status)).length; const pendingTickets = active.filter((t) => pending(t.status)).length;
+    const criticalTickets = active.filter((t) => ['critical', 'urgent', 'p1'].includes((t.priority || '').toLowerCase())).length; const highTickets = active.filter((t) => ['high', 'warning', 'p2'].includes((t.priority || '').toLowerCase())).length;
+    const dueToday = active.filter((t) => dueDays((t as any).due_at || (t as any).due_date || (t as any).sla_due_at) === 0).length;
+    const overdue = active.filter((t) => { const d = dueDays((t as any).due_at || (t as any).due_date || (t as any).sla_due_at); return d !== null && d < 0; }).length;
+    return { total, online, offline, activeTickets: active.length, open, pendingTickets, criticalTickets, highTickets, dueToday, overdue };
   }, [devices, tickets]);
-
   const recentTickets = useMemo(() => [...tickets].sort((a, b) => new Date((b as any).updated_at || (b as any).created_at || 0).getTime() - new Date((a as any).updated_at || (a as any).created_at || 0).getTime()).slice(0, 6), [tickets]);
   const recentDevices = useMemo(() => devices.slice(0, 8), [devices]);
-
-  const copyCommand = async () => {
-    try { await navigator.clipboard.writeText(agentStartCommand); setCopied(true); window.setTimeout(() => setCopied(false), 1800); } catch { setCopied(false); }
-  };
-
+  const copyCommand = async () => { try { await navigator.clipboard.writeText(agentStartCommand); setCopied(true); window.setTimeout(() => setCopied(false), 1800); } catch { setCopied(false); } };
   if (loading) return <ModuleShell title="Dashboard"><div className="text-slate-500">Loading…</div></ModuleShell>;
 
-  return (
-    <ModuleShell title="Operations Center" subtitle="Live operational view across devices, tickets, alerts and security posture">
-      <div className="space-y-6">
-        <div className="flex flex-col gap-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex flex-wrap items-center gap-3">
-            <div><p className="text-xs font-medium uppercase tracking-wide text-slate-400">Workspace</p><p className="text-sm font-semibold text-slate-900">{user?.email || 'Bhudi Workspace'}</p></div>
-            <span className="hidden h-8 w-px bg-slate-200 sm:block" />
-            <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${isConnected ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-600'}`}><span className={`h-1.5 w-1.5 rounded-full ${isConnected ? 'bg-emerald-500' : 'bg-slate-400'}`} />{isConnected ? 'Live' : 'Offline'} telemetry</span>
-            {busy && <span className="text-xs text-slate-400">Refreshing…</span>}
-          </div>
-          <div className="flex gap-2">
-            <Link href="/reports" className="hidden rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 sm:inline-flex">Reports</Link>
-            <button type="button" onClick={load} className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-xs font-semibold text-white hover:bg-indigo-500"><RefreshCw size={14} className={busy ? 'animate-spin' : undefined} />Refresh</button>
-          </div>
-        </div>
+  return <ModuleShell title="Operations Center" subtitle="Live operational view across devices, tickets, alerts and security posture"><div className="space-y-6">
+    <div className="flex flex-col gap-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between"><div className="flex flex-wrap items-center gap-3"><div><p className="text-xs font-medium uppercase tracking-wide text-slate-400">Workspace</p><p className="text-sm font-semibold text-slate-900">{user?.email || 'Bhudi Workspace'}</p></div><span className="hidden h-8 w-px bg-slate-200 sm:block" /><span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${isConnected ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-600'}`}><span className={`h-1.5 w-1.5 rounded-full ${isConnected ? 'bg-emerald-500' : 'bg-slate-400'}`} />{isConnected ? 'Live' : 'Offline'} telemetry</span>{busy && <span className="text-xs text-slate-400">Refreshing…</span>}</div><div className="flex gap-2"><Link href="/reporting" className="hidden rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 sm:inline-flex">Reports</Link><button type="button" onClick={load} className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-xs font-semibold text-white hover:bg-indigo-500"><RefreshCw size={14} className={busy ? 'animate-spin' : undefined} />Refresh</button></div></div>
+    {error && <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
 
-        {error && <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
+    <div className="grid grid-cols-2 gap-3 xl:grid-cols-4"><Metric label="Total devices" value={stats.total} detail="managed" icon={<Server size={18} />} href="/assets" /><Metric label="Online" value={stats.online} detail={stats.total ? `${Math.round((stats.online / stats.total) * 100)}%` : '—'} icon={<Wifi size={18} />} href="/assets" tone="success" /><Metric label="Open work" value={stats.activeTickets} detail="tickets" icon={<Ticket size={18} />} href="/itsm" tone="info" /><Metric label="Critical signals" value={stats.criticalTickets + stats.offline} detail="needs attention" icon={<CircleAlert size={18} />} href="/alert-engine" tone={stats.criticalTickets + stats.offline ? 'danger' : 'success'} /></div>
 
-        <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
-          <Metric label="Total devices" value={stats.total} detail="managed" icon={<Server size={18} />} href="/assets" />
-          <Metric label="Online" value={stats.online} detail={stats.total ? `${Math.round((stats.online / stats.total) * 100)}%` : '—'} icon={<Wifi size={18} />} href="/assets" tone="success" />
-          <Metric label="Open work" value={stats.activeTickets} detail="tickets" icon={<Ticket size={18} />} href="/itsm" tone="info" />
-          <Metric label="Critical signals" value={stats.criticalTickets + stats.offline} detail="needs attention" icon={<CircleAlert size={18} />} href="/alert-engine" tone={stats.criticalTickets + stats.offline ? 'danger' : 'success'} />
-        </div>
+    <div className="grid gap-6 xl:grid-cols-[1.6fr_.9fr]"><Card title="Attention queue" icon={<AlertTriangle size={17} className="text-amber-600" />} action={<Link href="/alert-engine" className="text-xs font-semibold text-indigo-600">Open alert engine</Link>}><div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">{([['Critical', stats.criticalTickets + stats.offline, 'Offline devices + urgent tickets', 'danger', '/alert-engine'], ['High priority', stats.highTickets, 'Priority tickets', 'warning', '/itsm'], ['Due today', stats.dueToday, 'SLA / due dates', 'info', '/itsm'], ['Overdue', stats.overdue, 'Past due', 'danger', '/itsm']] as const).map(([label, value, description, tone, href]) => <Link key={label} href={href} className="rounded-xl border border-slate-100 bg-slate-50 p-4 hover:border-indigo-200 hover:bg-white"><div className="flex items-center justify-between"><span className="text-xs font-semibold text-slate-500">{label}</span><span className={`h-2 w-2 rounded-full ${toneMap[tone].dot}`} /></div><p className="mt-2 text-2xl font-bold text-slate-900 tabular-nums">{value}</p><p className="mt-1 text-[11px] leading-4 text-slate-500">{description}</p></Link>)}</div></Card><Card title="Security posture" icon={<ShieldCheck size={17} className="text-emerald-600" />}><div className="flex items-center gap-4"><div className="relative flex h-20 w-20 items-center justify-center rounded-full border-8 border-emerald-100"><span className="text-xl font-bold text-slate-900">—</span></div><div><p className="font-semibold text-slate-900">Security score</p><p className="mt-1 text-xs leading-5 text-slate-500">Vendor security telemetry will populate this score as endpoint integrations are enabled.</p></div></div><Link href="/endpoint-security" className="mt-4 inline-flex items-center gap-1 text-xs font-semibold text-indigo-600">Open Endpoint Security <ArrowRight size={13} /></Link></Card></div>
 
-        <div className="grid gap-6 xl:grid-cols-[1.6fr_.9fr]">
-          <Card title="Attention queue" icon={<AlertTriangle size={17} className="text-amber-600" />} action={<Link href="/alert-engine" className="text-xs font-semibold text-indigo-600">Open alert engine</Link>}>
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-              {[
-                ['Critical', stats.criticalTickets + stats.offline, 'Offline devices + urgent tickets', 'danger', '/alert-engine'],
-                ['High priority', stats.highTickets, 'Priority tickets', 'warning', '/itsm'],
-                ['Due today', stats.dueToday, 'SLA / due dates', 'info', '/itsm'],
-                ['Overdue', stats.overdue, 'Past due', 'danger', '/itsm'],
-              ].map(([label, value, description, tone, href]) => <Link key={label} href={href} className="rounded-xl border border-slate-100 bg-slate-50 p-4 hover:border-indigo-200 hover:bg-white"><div className="flex items-center justify-between"><span className="text-xs font-semibold text-slate-500">{label}</span><span className={`h-2 w-2 rounded-full ${toneMap[tone as Tone].dot}`} /></div><p className="mt-2 text-2xl font-bold text-slate-900 tabular-nums">{value}</p><p className="mt-1 text-[11px] leading-4 text-slate-500">{description}</p></Link>)}
-            </div>
-          </Card>
+    <div className="grid gap-6 xl:grid-cols-3"><Card title="Ticket workload" icon={<Ticket size={17} className="text-indigo-600" />} action={<Link href="/itsm" className="text-xs font-semibold text-indigo-600">View ITSM</Link>}><div className="space-y-4">{([['Open', stats.open, 'bg-indigo-500'], ['Pending', stats.pendingTickets, 'bg-amber-500'], ['Due today', stats.dueToday, 'bg-sky-500'], ['Overdue', stats.overdue, 'bg-red-500']] as const).map(([label, value, color]) => <div key={label}><div className="mb-1.5 flex justify-between text-xs"><span className="font-medium text-slate-600">{label}</span><span className="font-semibold text-slate-900">{value}</span></div><div className="h-2 overflow-hidden rounded-full bg-slate-100"><div className={`h-full rounded-full ${color}`} style={{ width: `${stats.activeTickets ? Math.min(100, (value / stats.activeTickets) * 100) : 0}%` }} /></div></div>)}</div></Card><Card className="xl:col-span-2" title="Recent ticket activity" icon={<Activity size={17} className="text-indigo-600" />} action={<Link href="/itsm" className="text-xs font-semibold text-indigo-600">View all</Link>}>{recentTickets.length === 0 ? <div className="flex min-h-32 items-center justify-center text-sm text-slate-500">No ticket activity yet.</div> : <div className="overflow-x-auto"><table className="w-full min-w-[560px] text-left text-sm"><thead><tr className="border-b border-slate-100 text-[11px] uppercase tracking-wide text-slate-400"><th className="pb-3 font-medium">Ticket</th><th className="pb-3 font-medium">Status</th><th className="pb-3 font-medium">Priority</th><th className="pb-3 text-right font-medium">Action</th></tr></thead><tbody className="divide-y divide-slate-50">{recentTickets.map((t) => <tr key={t.id}><td className="py-3 pr-3"><p className="max-w-[300px] truncate font-medium text-slate-900">{(t as any).number ? `${(t as any).number} · ` : ''}{t.title || 'Untitled ticket'}</p><p className="mt-0.5 text-xs text-slate-400">{(t as any).customer_name || 'Workspace'}</p></td><td className="py-3 pr-3"><span className="rounded-full bg-slate-100 px-2 py-1 text-xs text-slate-700">{(t.status || 'unknown').replace(/_/g, ' ')}</span></td><td className="py-3 pr-3 text-xs font-medium text-slate-600">{t.priority || '—'}</td><td className="py-3 text-right"><Link href="/itsm" className="text-xs font-semibold text-indigo-600">Open</Link></td></tr>)}</tbody></table></div>}</Card></div>
 
-          <Card title="Security posture" icon={<ShieldCheck size={17} className="text-emerald-600" />}>
-            <div className="flex items-center gap-4"><div className="relative flex h-20 w-20 items-center justify-center rounded-full border-8 border-emerald-100"><span className="text-xl font-bold text-slate-900">—</span></div><div><p className="font-semibold text-slate-900">Security score</p><p className="mt-1 text-xs leading-5 text-slate-500">Vendor security telemetry will populate this score as endpoint integrations are enabled.</p></div></div>
-            <Link href="/endpoint-security" className="mt-4 inline-flex items-center gap-1 text-xs font-semibold text-indigo-600">Open Endpoint Security <ArrowRight size={13} /></Link>
-          </Card>
-        </div>
+    <div className="grid gap-6 xl:grid-cols-3"><Card className="xl:col-span-2" title="Device health" icon={<Monitor size={17} className="text-indigo-600" />} action={<Link href="/assets" className="text-xs font-semibold text-indigo-600">Manage devices</Link>}><div className="mb-4 flex flex-wrap gap-2"><span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700">{stats.online} online</span><span className="rounded-full bg-red-50 px-3 py-1 text-xs font-medium text-red-700">{stats.offline} offline</span><span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600">{stats.total} total</span></div>{recentDevices.length === 0 ? <div className="flex min-h-24 items-center justify-center text-sm text-slate-500">No managed devices are reporting.</div> : <div className="grid gap-2 sm:grid-cols-2">{recentDevices.map((d) => { const online = d.online === true || d.status?.toLowerCase() === 'online'; return <div key={d.id} className="flex items-center justify-between rounded-xl border border-slate-100 p-3"><div className="flex min-w-0 items-center gap-3"><span className={`h-2.5 w-2.5 shrink-0 rounded-full ${online ? 'bg-emerald-500' : 'bg-red-500'}`} /><div className="min-w-0"><p className="truncate text-sm font-medium text-slate-800">{d.hostname || d.name || d.id.slice(0, 8)}</p><p className="text-[11px] text-slate-400">{d.status || (online ? 'online' : 'offline')}</p></div></div><span className={`text-[11px] font-semibold ${online ? 'text-emerald-600' : 'text-red-600'}`}>{online ? 'Healthy' : 'Offline'}</span></div>; })}</div>}</Card><Card title="Operations shortcuts" icon={<Zap size={17} className="text-indigo-600" />}><div className="grid grid-cols-2 gap-2">{([['Devices', '/assets', Monitor], ['Tickets', '/itsm', Ticket], ['Alerts', '/alert-engine', Bell], ['Security', '/endpoint-security', ShieldCheck], ['Commands', '/commands', Zap], ['Reports', '/reporting', Gauge] ] as const).map(([label, href, Icon]) => <Link key={label} href={href} className="flex items-center gap-2 rounded-xl border border-slate-200 p-3 text-xs font-semibold text-slate-700 hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700"><Icon size={15} />{label}</Link>)}</div><div className="mt-4 rounded-xl bg-slate-50 p-3"><p className="text-xs font-semibold text-slate-700">Technician workflow</p><p className="mt-1 text-[11px] leading-5 text-slate-500">Open alerts → investigate device → run command → resolve ticket.</p></div></Card></div>
 
-        <div className="grid gap-6 xl:grid-cols-3">
-          <Card title="Ticket workload" icon={<Ticket size={17} className="text-indigo-600" />} action={<Link href="/itsm" className="text-xs font-semibold text-indigo-600">View ITSM</Link>}>
-            <div className="space-y-4">
-              {[['Open', stats.open, 'bg-indigo-500'], ['Pending', stats.pendingTickets, 'bg-amber-500'], ['Due today', stats.dueToday, 'bg-sky-500'], ['Overdue', stats.overdue, 'bg-red-500']].map(([label, value, color]) => <div key={label}><div className="mb-1.5 flex justify-between text-xs"><span className="font-medium text-slate-600">{label}</span><span className="font-semibold text-slate-900">{value}</span></div><div className="h-2 overflow-hidden rounded-full bg-slate-100"><div className={`h-full rounded-full ${color}`} style={{ width: `${stats.activeTickets ? Math.min(100, (Number(value) / stats.activeTickets) * 100) : 0}%` }} /></div></div>)}
-            </div>
-          </Card>
+    <Card title="Agent deployment" icon={<Server size={17} className="text-indigo-600" />} action={<Link href="/assets" className="text-xs font-semibold text-indigo-600">Manage agents</Link>}><div className="grid gap-4 lg:grid-cols-[1fr_auto] lg:items-center"><div><p className="text-sm font-medium text-slate-800">Connect a Windows endpoint to start collecting live operational data.</p><p className="mt-1 text-xs text-slate-500">Existing deployment workflow preserved; Phase 2B changes only the command-center presentation.</p><pre className="mt-3 max-h-28 overflow-auto rounded-xl bg-slate-950 p-3 text-[11px] leading-5 text-slate-200">{agentStartCommand}</pre></div><button type="button" onClick={copyCommand} className="inline-flex items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-xs font-semibold text-white hover:bg-indigo-500"><Copy size={14} />{copied ? 'Copied' : 'Copy command'}</button></div></Card>
 
-          <Card className="xl:col-span-2" title="Recent ticket activity" icon={<Activity size={17} className="text-indigo-600" />} action={<Link href="/itsm" className="text-xs font-semibold text-indigo-600">View all</Link>}>
-            {recentTickets.length === 0 ? <div className="flex min-h-32 items-center justify-center text-sm text-slate-500">No ticket activity yet.</div> : <div className="overflow-x-auto"><table className="w-full min-w-[560px] text-left text-sm"><thead><tr className="border-b border-slate-100 text-[11px] uppercase tracking-wide text-slate-400"><th className="pb-3 font-medium">Ticket</th><th className="pb-3 font-medium">Status</th><th className="pb-3 font-medium">Priority</th><th className="pb-3 text-right font-medium">Action</th></tr></thead><tbody className="divide-y divide-slate-50">{recentTickets.map((t) => <tr key={t.id}><td className="py-3 pr-3"><p className="max-w-[300px] truncate font-medium text-slate-900">{(t as any).number ? `${(t as any).number} · ` : ''}{t.title || 'Untitled ticket'}</p><p className="mt-0.5 text-xs text-slate-400">{(t as any).customer_name || 'Workspace'}</p></td><td className="py-3 pr-3"><span className="rounded-full bg-slate-100 px-2 py-1 text-xs text-slate-700">{(t.status || 'unknown').replace(/_/g, ' ')}</span></td><td className="py-3 pr-3 text-xs font-medium text-slate-600">{t.priority || '—'}</td><td className="py-3 text-right"><Link href="/itsm" className="text-xs font-semibold text-indigo-600">Open</Link></td></tr>)}</tbody></table></div>}
-          </Card>
-        </div>
-
-        <div className="grid gap-6 xl:grid-cols-3">
-          <Card className="xl:col-span-2" title="Device health" icon={<Monitor size={17} className="text-indigo-600" />} action={<Link href="/assets" className="text-xs font-semibold text-indigo-600">Manage devices</Link>}>
-            <div className="mb-4 flex flex-wrap gap-2"><span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700">{stats.online} online</span><span className="rounded-full bg-red-50 px-3 py-1 text-xs font-medium text-red-700">{stats.offline} offline</span><span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600">{stats.total} total</span></div>
-            {recentDevices.length === 0 ? <div className="flex min-h-24 items-center justify-center text-sm text-slate-500">No managed devices are reporting.</div> : <div className="grid gap-2 sm:grid-cols-2">{recentDevices.map((d) => { const online = d.online === true || d.status?.toLowerCase() === 'online'; return <div key={d.id} className="flex items-center justify-between rounded-xl border border-slate-100 p-3"><div className="flex min-w-0 items-center gap-3"><span className={`h-2.5 w-2.5 shrink-0 rounded-full ${online ? 'bg-emerald-500' : 'bg-red-500'}`} /><div className="min-w-0"><p className="truncate text-sm font-medium text-slate-800">{d.hostname || d.name || d.id.slice(0, 8)}</p><p className="text-[11px] text-slate-400">{d.status || (online ? 'online' : 'offline')}</p></div></div><span className={`text-[11px] font-semibold ${online ? 'text-emerald-600' : 'text-red-600'}`}>{online ? 'Healthy' : 'Offline'}</span></div>; })}</div>}
-          </Card>
-
-          <Card title="Operations shortcuts" icon={<Zap size={17} className="text-indigo-600" />}>
-            <div className="grid grid-cols-2 gap-2">{[['Devices', '/assets', Monitor], ['Tickets', '/itsm', Ticket], ['Alerts', '/alert-engine', Bell], ['Security', '/endpoint-security', ShieldCheck], ['Commands', '/commands', Zap], ['Reports', '/reporting', Gauge]].map(([label, href, Icon]) => <Link key={label} href={href} className="flex items-center gap-2 rounded-xl border border-slate-200 p-3 text-xs font-semibold text-slate-700 hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700"><Icon size={15} />{label}</Link>)}</div>
-            <div className="mt-4 rounded-xl bg-slate-50 p-3"><p className="text-xs font-semibold text-slate-700">Technician workflow</p><p className="mt-1 text-[11px] leading-5 text-slate-500">Open alerts → investigate device → run command → resolve ticket.</p></div>
-          </Card>
-        </div>
-
-        <Card title="Agent deployment" icon={<Server size={17} className="text-indigo-600" />} action={<Link href="/assets" className="text-xs font-semibold text-indigo-600">Manage agents</Link>}>
-          <div className="grid gap-4 lg:grid-cols-[1fr_auto] lg:items-center"><div><p className="text-sm font-medium text-slate-800">Connect a Windows endpoint to start collecting live operational data.</p><p className="mt-1 text-xs text-slate-500">This is the existing deployment command; Phase 2B does not change agent enrollment behavior.</p><pre className="mt-3 max-h-28 overflow-auto rounded-xl bg-slate-950 p-3 text-[11px] leading-5 text-slate-200">{agentStartCommand}</pre></div><button type="button" onClick={copyCommand} className="inline-flex items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-xs font-semibold text-white hover:bg-indigo-500"><Copy size={14} />{copied ? 'Copied' : 'Copy command'}</button></div>
-        </Card>
-
-        <div className="grid gap-3 sm:grid-cols-3"><Link href="/itsm" className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm hover:border-indigo-200"><Clock3 size={16} className="text-indigo-600" /><p className="mt-3 text-sm font-semibold">Work queue</p><p className="mt-1 text-xs text-slate-500">{stats.activeTickets} active tickets</p></Link><Link href="/assets" className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm hover:border-indigo-200"><CheckCircle2 size={16} className="text-emerald-600" /><p className="mt-3 text-sm font-semibold">Estate availability</p><p className="mt-1 text-xs text-slate-500">{stats.online} of {stats.total} devices online</p></Link><Link href="/endpoint-security" className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm hover:border-indigo-200"><ShieldCheck size={16} className="text-indigo-600" /><p className="mt-3 text-sm font-semibold">Security operations</p><p className="mt-1 text-xs text-slate-500">Review endpoint integrations and posture</p></Link></div>
-      </div>
-    </ModuleShell>
-  );
+    <div className="grid gap-3 sm:grid-cols-3"><Link href="/itsm" className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm hover:border-indigo-200"><Clock3 size={16} className="text-indigo-600" /><p className="mt-3 text-sm font-semibold">Work queue</p><p className="mt-1 text-xs text-slate-500">{stats.activeTickets} active tickets</p></Link><Link href="/assets" className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm hover:border-indigo-200"><CheckCircle2 size={16} className="text-emerald-600" /><p className="mt-3 text-sm font-semibold">Estate availability</p><p className="mt-1 text-xs text-slate-500">{stats.online} of {stats.total} devices online</p></Link><Link href="/endpoint-security" className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm hover:border-indigo-200"><ShieldCheck size={16} className="text-indigo-600" /><p className="mt-3 text-sm font-semibold">Security operations</p><p className="mt-1 text-xs text-slate-500">Review endpoint integrations and posture</p></Link></div>
+  </div></ModuleShell>;
 }
