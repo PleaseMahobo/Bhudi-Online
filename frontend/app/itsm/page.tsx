@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useState } from 'react';
 import { useAuth } from '@/shared/auth/AuthContext';
+import ModuleShell from '@/shared/components/ModuleShell';
 import { useRouter } from 'next/navigation';
 import {
   listTickets,
@@ -200,13 +201,10 @@ export default function ItsmPage() {
       await linkTicketAsset(selected.id, linkAssetId, 'related');
       flash('Asset linked');
       setLinkAssetId('');
-      const refreshed = tickets.find((t) => t.id === selected.id);
       await loadData();
-      // re-select from updated list
       const list = await listTickets({});
       const t = list.find((x) => x.id === selected.id);
       if (t) await selectTicket(t);
-      else if (refreshed) await selectTicket(refreshed);
     } catch (e: any) {
       setError(e?.message || 'Failed to link asset');
     }
@@ -254,42 +252,26 @@ export default function ItsmPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#0a0f1c] flex items-center justify-center text-white">
-        Loading ITSM...
-      </div>
+      <ModuleShell title="ITSM">
+        <div className="text-slate-500">Loading…</div>
+      </ModuleShell>
     );
   }
 
   return (
-    <div className="min-h-screen bg-[#0a0f1c] text-white">
-      <div className="max-w-7xl mx-auto p-8">
-        <div className="flex items-center justify-between mb-8">
-          <div className="flex items-center gap-4">
-            <button
-              onClick={() => router.push('/dashboard')}
-              className="p-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 transition"
-            >
-              <ArrowLeft size={20} />
-            </button>
-            <div>
-              <h1 className="text-3xl font-bold tracking-tight flex items-center gap-3">
-                <Ticket className="text-sky-400" /> ITSM
-              </h1>
-              <p className="text-zinc-400 text-sm mt-1">
-                Service tickets, asset links, work notes & warranty automation
-              </p>
-            </div>
-          </div>
+    <ModuleShell title="ITSM" subtitle="Tickets, work notes & asset linkage">
+      <div className="space-y-6">
+        <div className="flex items-center justify-between mb-2">
           <div className="flex flex-wrap gap-2">
             <button
               onClick={onWarrantyJob}
-              className="flex items-center gap-2 bg-amber-900/50 hover:bg-amber-800/50 border border-amber-700/50 px-4 py-2.5 rounded-xl text-sm"
+              className="flex items-center gap-2 bg-amber-50 hover:bg-amber-100 border border-amber-200 text-amber-800 px-4 py-2.5 rounded-lg text-sm"
             >
               <AlertTriangle size={16} /> Warranty scan
             </button>
             <button
               onClick={loadData}
-              className="flex items-center gap-2 bg-zinc-800 hover:bg-zinc-700 px-4 py-2.5 rounded-xl text-sm"
+              className="flex items-center gap-2 bg-white hover:bg-slate-50 border border-slate-200 px-4 py-2.5 rounded-lg text-sm text-slate-700"
             >
               <RefreshCw size={16} /> Refresh
             </button>
@@ -298,7 +280,7 @@ export default function ItsmPage() {
                 setForm({ ...emptyTicket });
                 setShowForm(true);
               }}
-              className="flex items-center gap-2 bg-sky-600 hover:bg-sky-500 px-4 py-2.5 rounded-xl font-medium"
+              className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 px-4 py-2.5 rounded-lg font-medium text-white text-sm"
             >
               <Plus size={18} /> New Ticket
             </button>
@@ -306,19 +288,19 @@ export default function ItsmPage() {
         </div>
 
         {error && (
-          <div className="mb-4 p-4 rounded-2xl border border-red-500/40 bg-red-950/40 text-red-300 text-sm">
+          <div className="mb-4 p-4 rounded-xl border border-red-200 bg-red-50 text-red-700 text-sm">
             {error}
           </div>
         )}
         {success && (
-          <div className="mb-4 p-4 rounded-2xl border border-emerald-500/40 bg-emerald-950/40 text-emerald-300 text-sm">
+          <div className="mb-4 p-4 rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-700 text-sm">
             {success}
           </div>
         )}
 
-        <div className="flex flex-wrap gap-3 mb-6">
+        <div className="flex flex-wrap gap-3">
           <select
-            className="bg-zinc-800 border border-zinc-600 rounded-xl px-3 py-2 text-sm"
+            className="bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800"
             value={filterStatus}
             onChange={(e) => setFilterStatus(e.target.value)}
           >
@@ -330,7 +312,7 @@ export default function ItsmPage() {
             ))}
           </select>
           <select
-            className="bg-zinc-800 border border-zinc-600 rounded-xl px-3 py-2 text-sm"
+            className="bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800"
             value={filterType}
             onChange={(e) => setFilterType(e.target.value)}
           >
@@ -342,7 +324,7 @@ export default function ItsmPage() {
             ))}
           </select>
           <select
-            className="bg-zinc-800 border border-zinc-600 rounded-xl px-3 py-2 text-sm"
+            className="bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800"
             value={filterPriority}
             onChange={(e) => setFilterPriority(e.target.value)}
           >
@@ -358,7 +340,7 @@ export default function ItsmPage() {
         <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
           <div className="xl:col-span-2 space-y-4">
             {tickets.length === 0 && !busy && (
-              <div className="bg-zinc-900 border border-zinc-700 rounded-3xl p-10 text-center text-zinc-400">
+              <div className="bg-white border border-slate-200 rounded-xl p-10 text-center text-slate-500 shadow-sm">
                 No tickets match the current filters.
               </div>
             )}
@@ -366,17 +348,17 @@ export default function ItsmPage() {
               <div
                 key={ticket.id}
                 onClick={() => selectTicket(ticket)}
-                className={`bg-zinc-900 border rounded-3xl p-6 cursor-pointer transition ${
+                className={`bg-white border rounded-xl p-5 cursor-pointer transition shadow-sm ${
                   selected?.id === ticket.id
-                    ? 'border-sky-500'
-                    : 'border-zinc-700 hover:border-zinc-500'
+                    ? 'border-indigo-500 ring-1 ring-indigo-200'
+                    : 'border-slate-200 hover:border-slate-300'
                 }`}
               >
                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                   <div className="flex-1">
                     <div className="flex flex-wrap items-center gap-3 mb-1">
-                      <span className="text-sky-400 font-mono text-sm">{ticket.number}</span>
-                      <h3 className="text-lg font-semibold">{ticket.title}</h3>
+                      <span className="text-indigo-600 font-mono text-sm">{ticket.number}</span>
+                      <h3 className="text-base font-semibold text-slate-900">{ticket.title}</h3>
                       <span className={`text-xs px-2 py-0.5 rounded-full ${statusColor(ticket.status)}`}>
                         {ticket.status}
                       </span>
@@ -384,11 +366,11 @@ export default function ItsmPage() {
                         {ticket.priority}
                       </span>
                     </div>
-                    <div className="flex flex-wrap gap-3 text-xs text-zinc-400">
+                    <div className="flex flex-wrap gap-3 text-xs text-slate-500">
                       <span>{ticket.ticket_type}</span>
                       {ticket.assignee && <span>Assignee: {ticket.assignee}</span>}
                       {ticket.asset_links && ticket.asset_links.length > 0 && (
-                        <span className="text-sky-300">
+                        <span className="text-indigo-600">
                           {ticket.asset_links.length} asset link(s)
                         </span>
                       )}
@@ -396,7 +378,7 @@ export default function ItsmPage() {
                   </div>
                   <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
                     <select
-                      className="bg-zinc-800 border border-zinc-600 rounded-xl px-3 py-2 text-xs"
+                      className="bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-800"
                       value={ticket.status}
                       onChange={(e) => onStatus(ticket, e.target.value)}
                     >
@@ -408,7 +390,7 @@ export default function ItsmPage() {
                     </select>
                     <button
                       onClick={() => removeTicket(ticket.id)}
-                      className="p-2 rounded-xl bg-zinc-800 hover:bg-red-900/40 text-red-400"
+                      className="p-2 rounded-lg bg-slate-50 hover:bg-red-50 text-red-500 border border-slate-200"
                     >
                       <Trash2 size={18} />
                     </button>
@@ -419,43 +401,43 @@ export default function ItsmPage() {
           </div>
 
           <div className="xl:col-span-1">
-            <div className="bg-zinc-900 border border-zinc-700 rounded-3xl p-6 sticky top-8 space-y-5">
+            <div className="bg-white border border-slate-200 rounded-xl p-5 sticky top-4 space-y-5 shadow-sm">
               {!selected ? (
-                <p className="text-zinc-500 text-sm text-center py-10">
+                <p className="text-slate-500 text-sm text-center py-10">
                   Select a ticket to manage assets and work notes.
                 </p>
               ) : (
                 <>
                   <div>
-                    <div className="text-sky-400 font-mono text-sm">{selected.number}</div>
-                    <h3 className="text-lg font-semibold mt-1">{selected.title}</h3>
+                    <div className="text-indigo-600 font-mono text-sm">{selected.number}</div>
+                    <h3 className="text-base font-semibold mt-1 text-slate-900">{selected.title}</h3>
                     {selected.description && (
-                      <p className="text-xs text-zinc-400 mt-2">{selected.description}</p>
+                      <p className="text-xs text-slate-500 mt-2">{selected.description}</p>
                     )}
                   </div>
 
                   <div>
-                    <div className="flex items-center gap-2 font-medium text-sm mb-2">
+                    <div className="flex items-center gap-2 font-medium text-sm mb-2 text-slate-800">
                       <Link2 size={14} /> Linked assets
                     </div>
                     <div className="space-y-2 mb-3">
                       {(selected.asset_links || []).length === 0 && (
-                        <p className="text-xs text-zinc-500">No assets linked</p>
+                        <p className="text-xs text-slate-500">No assets linked</p>
                       )}
                       {(selected.asset_links || []).map((link) => (
                         <div
                           key={link.id}
-                          className="flex items-center justify-between text-xs bg-zinc-800/50 border border-zinc-700 rounded-xl px-3 py-2"
+                          className="flex items-center justify-between text-xs bg-slate-50 border border-slate-200 rounded-lg px-3 py-2"
                         >
-                          <span>
+                          <span className="text-slate-700">
                             {link.asset_name || link.asset_tag || link.asset_id.slice(0, 8)}
                             {link.asset_status && (
-                              <span className="text-zinc-500"> · {link.asset_status}</span>
+                              <span className="text-slate-500"> · {link.asset_status}</span>
                             )}
                           </span>
                           <button
                             onClick={() => onUnlink(link.asset_id)}
-                            className="text-red-400 hover:text-red-300"
+                            className="text-red-500 hover:text-red-600"
                           >
                             Unlink
                           </button>
@@ -464,7 +446,7 @@ export default function ItsmPage() {
                     </div>
                     <div className="flex gap-2">
                       <select
-                        className="flex-1 bg-zinc-800 border border-zinc-600 rounded-xl px-3 py-2 text-xs"
+                        className="flex-1 bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-800"
                         value={linkAssetId}
                         onChange={(e) => setLinkAssetId(e.target.value)}
                       >
@@ -478,7 +460,7 @@ export default function ItsmPage() {
                       <button
                         onClick={onLinkAsset}
                         disabled={!linkAssetId}
-                        className="px-3 py-2 rounded-xl bg-sky-600 text-xs font-medium disabled:opacity-40"
+                        className="px-3 py-2 rounded-lg bg-indigo-600 text-xs font-medium text-white disabled:opacity-40"
                       >
                         Link
                       </button>
@@ -486,27 +468,27 @@ export default function ItsmPage() {
                   </div>
 
                   <div>
-                    <div className="flex items-center gap-2 font-medium text-sm mb-2">
+                    <div className="flex items-center gap-2 font-medium text-sm mb-2 text-slate-800">
                       <MessageSquare size={14} /> Work notes
                     </div>
                     <div className="space-y-2 max-h-40 overflow-y-auto mb-3">
                       {notes.length === 0 && (
-                        <p className="text-xs text-zinc-500">No notes yet</p>
+                        <p className="text-xs text-slate-500">No notes yet</p>
                       )}
                       {notes.map((n) => (
                         <div
                           key={n.id}
-                          className="text-xs bg-zinc-800/50 border border-zinc-700 rounded-xl px-3 py-2"
+                          className="text-xs bg-slate-50 border border-slate-200 rounded-lg px-3 py-2"
                         >
-                          <div className="text-zinc-500 mb-0.5">
+                          <div className="text-slate-500 mb-0.5">
                             {n.author || 'system'} · {new Date(n.created_at).toLocaleString()}
                           </div>
-                          <div className="text-zinc-200">{n.body}</div>
+                          <div className="text-slate-800">{n.body}</div>
                         </div>
                       ))}
                     </div>
                     <textarea
-                      className="w-full bg-zinc-800 border border-zinc-600 rounded-xl px-3 py-2 text-sm min-h-[72px]"
+                      className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm min-h-[72px] text-slate-800"
                       placeholder="Add a work note…"
                       value={noteBody}
                       onChange={(e) => setNoteBody(e.target.value)}
@@ -514,7 +496,7 @@ export default function ItsmPage() {
                     <button
                       onClick={onAddNote}
                       disabled={!noteBody.trim()}
-                      className="mt-2 w-full px-3 py-2 rounded-xl bg-sky-600 text-sm font-medium disabled:opacity-40"
+                      className="mt-2 w-full px-3 py-2 rounded-lg bg-indigo-600 text-sm font-medium text-white disabled:opacity-40"
                     >
                       Add note
                     </button>
@@ -526,36 +508,36 @@ export default function ItsmPage() {
         </div>
 
         {showForm && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
-            <div className="bg-zinc-900 border border-zinc-700 rounded-3xl w-full max-w-xl max-h-[90vh] overflow-y-auto p-8">
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+            <div className="bg-white border border-slate-200 rounded-xl w-full max-w-xl max-h-[90vh] overflow-y-auto p-6 shadow-xl">
               <div className="flex items-center justify-between mb-6">
-                <h2 className="text-xl font-bold">Create Ticket</h2>
-                <button onClick={() => setShowForm(false)} className="p-2 hover:bg-zinc-800 rounded-xl">
-                  <X size={20} />
+                <h2 className="text-lg font-bold text-slate-900">Create Ticket</h2>
+                <button onClick={() => setShowForm(false)} className="p-2 hover:bg-slate-100 rounded-lg">
+                  <X size={20} className="text-slate-500" />
                 </button>
               </div>
               <div className="space-y-4">
                 <div>
-                  <label className="text-xs text-zinc-400">Title *</label>
+                  <label className="text-xs text-slate-500">Title *</label>
                   <input
-                    className="w-full mt-1 bg-zinc-800 border border-zinc-600 rounded-xl px-4 py-2.5 text-sm"
+                    className="w-full mt-1 bg-white border border-slate-200 rounded-lg px-4 py-2.5 text-sm text-slate-900"
                     value={form.title}
                     onChange={(e) => setForm({ ...form, title: e.target.value })}
                   />
                 </div>
                 <div>
-                  <label className="text-xs text-zinc-400">Description</label>
+                  <label className="text-xs text-slate-500">Description</label>
                   <textarea
-                    className="w-full mt-1 bg-zinc-800 border border-zinc-600 rounded-xl px-4 py-2.5 text-sm min-h-[80px]"
+                    className="w-full mt-1 bg-white border border-slate-200 rounded-lg px-4 py-2.5 text-sm min-h-[80px] text-slate-900"
                     value={form.description}
                     onChange={(e) => setForm({ ...form, description: e.target.value })}
                   />
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="text-xs text-zinc-400">Type</label>
+                    <label className="text-xs text-slate-500">Type</label>
                     <select
-                      className="w-full mt-1 bg-zinc-800 border border-zinc-600 rounded-xl px-4 py-2.5 text-sm"
+                      className="w-full mt-1 bg-white border border-slate-200 rounded-lg px-4 py-2.5 text-sm text-slate-900"
                       value={form.ticket_type}
                       onChange={(e) => setForm({ ...form, ticket_type: e.target.value })}
                     >
@@ -567,9 +549,9 @@ export default function ItsmPage() {
                     </select>
                   </div>
                   <div>
-                    <label className="text-xs text-zinc-400">Priority</label>
+                    <label className="text-xs text-slate-500">Priority</label>
                     <select
-                      className="w-full mt-1 bg-zinc-800 border border-zinc-600 rounded-xl px-4 py-2.5 text-sm"
+                      className="w-full mt-1 bg-white border border-slate-200 rounded-lg px-4 py-2.5 text-sm text-slate-900"
                       value={form.priority}
                       onChange={(e) => setForm({ ...form, priority: e.target.value })}
                     >
@@ -583,26 +565,26 @@ export default function ItsmPage() {
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="text-xs text-zinc-400">Requester</label>
+                    <label className="text-xs text-slate-500">Requester</label>
                     <input
-                      className="w-full mt-1 bg-zinc-800 border border-zinc-600 rounded-xl px-4 py-2.5 text-sm"
+                      className="w-full mt-1 bg-white border border-slate-200 rounded-lg px-4 py-2.5 text-sm text-slate-900"
                       value={form.requester}
                       onChange={(e) => setForm({ ...form, requester: e.target.value })}
                     />
                   </div>
                   <div>
-                    <label className="text-xs text-zinc-400">Assignee</label>
+                    <label className="text-xs text-slate-500">Assignee</label>
                     <input
-                      className="w-full mt-1 bg-zinc-800 border border-zinc-600 rounded-xl px-4 py-2.5 text-sm"
+                      className="w-full mt-1 bg-white border border-slate-200 rounded-lg px-4 py-2.5 text-sm text-slate-900"
                       value={form.assignee}
                       onChange={(e) => setForm({ ...form, assignee: e.target.value })}
                     />
                   </div>
                 </div>
                 <div>
-                  <label className="text-xs text-zinc-400">Link asset (optional)</label>
+                  <label className="text-xs text-slate-500">Link asset (optional)</label>
                   <select
-                    className="w-full mt-1 bg-zinc-800 border border-zinc-600 rounded-xl px-4 py-2.5 text-sm"
+                    className="w-full mt-1 bg-white border border-slate-200 rounded-lg px-4 py-2.5 text-sm text-slate-900"
                     value={form.asset_id}
                     onChange={(e) => setForm({ ...form, asset_id: e.target.value })}
                   >
@@ -618,14 +600,14 @@ export default function ItsmPage() {
               <div className="flex justify-end gap-3 mt-8">
                 <button
                   onClick={() => setShowForm(false)}
-                  className="px-4 py-2.5 rounded-xl bg-zinc-800 text-sm"
+                  className="px-4 py-2.5 rounded-lg bg-slate-100 text-sm text-slate-700"
                 >
                   Cancel
                 </button>
                 <button
                   onClick={saveTicket}
                   disabled={!form.title || busy}
-                  className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-sky-600 text-sm font-medium disabled:opacity-50"
+                  className="flex items-center gap-2 px-5 py-2.5 rounded-lg bg-indigo-600 text-sm font-medium text-white disabled:opacity-50"
                 >
                   <Save size={16} /> Create Ticket
                 </button>
@@ -634,6 +616,6 @@ export default function ItsmPage() {
           </div>
         )}
       </div>
-    </div>
+    </ModuleShell>
   );
 }
