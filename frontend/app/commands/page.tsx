@@ -1,11 +1,8 @@
 "use client";
 
 import { useState } from "react";
+import ModuleShell from "@/shared/components/ModuleShell";
 
-// Local fallback implementation for sending commands to the backend API.
-// The project previously attempted to import sendCommand from @/lib/api,
-// but that symbol is not exported. Keep a small client-side helper here
-// to avoid touching other files.
 async function sendCommand(deviceId: number, command: string) {
   try {
     await fetch(`/api/commands`, {
@@ -14,7 +11,6 @@ async function sendCommand(deviceId: number, command: string) {
       body: JSON.stringify({ deviceId, command }),
     });
   } catch (err) {
-    // noop - keep UI simple; errors could be surfaced later
     console.error(err);
   }
 }
@@ -24,29 +20,28 @@ export default function CommandsPage() {
   const [command, setCommand] = useState("");
 
   return (
-    <div className="p-6">
-      <h1 className="text-xl font-bold">Global Command Center</h1>
-
-      <input
-        placeholder="Device ID"
-        value={deviceId}
-        onChange={(e) => setDeviceId(e.target.value)}
-        className="border p-2 block mt-3"
-      />
-
-      <input
-        placeholder="Command"
-        value={command}
-        onChange={(e) => setCommand(e.target.value)}
-        className="border p-2 block mt-3"
-      />
-
-      <button
-        onClick={() => sendCommand(Number(deviceId), command)}
-        className="bg-green-600 text-white px-4 py-2 mt-3"
-      >
-        Execute
-      </button>
-    </div>
+    <ModuleShell title="Commands" subtitle="Global command center">
+      <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm max-w-lg space-y-4">
+        <input
+          placeholder="Device ID"
+          value={deviceId}
+          onChange={(e) => setDeviceId(e.target.value)}
+          className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+        />
+        <input
+          placeholder="Command"
+          value={command}
+          onChange={(e) => setCommand(e.target.value)}
+          className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+        />
+        <button
+          type="button"
+          onClick={() => sendCommand(Number(deviceId), command)}
+          className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg text-sm font-medium"
+        >
+          Execute
+        </button>
+      </div>
+    </ModuleShell>
   );
 }
