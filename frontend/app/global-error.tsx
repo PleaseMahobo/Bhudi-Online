@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect } from 'react';
+import { useRetryReset } from '@/shared/lib/useRetryReset';
 
 /**
  * Root-level error boundary for the App Router.
@@ -14,9 +15,21 @@ export default function GlobalError({
   error: Error & { digest?: string };
   reset: () => void;
 }) {
+  const { attempts, maxAttempts, isRetrying, exhausted, retry } = useRetryReset({
+    reset,
+    maxAttempts: 3,
+    autoRetry: true,
+  });
+
   useEffect(() => {
     console.error('[Bhudi] Global application error:', error);
   }, [error]);
+
+  const statusText = isRetrying
+    ? `Retrying… (attempt ${attempts} of ${maxAttempts})`
+    : exhausted
+      ? 'Automatic recovery failed. Go home or try again later.'
+      : 'A critical error stopped the application from loading. Retry the page or return home.';
 
   return (
     <html lang="en">
@@ -83,10 +96,14 @@ export default function GlobalError({
               color: '#64748b',
             }}
           >
-            A critical error stopped the application from loading. Retry the
-            page or return home. If this keeps happening, contact support with
-            the error ID below.
+            {statusText}
           </p>
+
+          {attempts > 0 && !exhausted && !isRetrying && (
+            <p style={{ margin: '8px 0 0', fontSize: 12, color: '#94a3b8' }}>
+              Attempts used: {attempts}/{maxAttempts}
+            </p>
+          )}
 
           {error?.digest && (
             <p
@@ -113,7 +130,8 @@ export default function GlobalError({
           >
             <button
               type="button"
-              onClick={() => reset()}
+              onClick={retry}
+              disabled={isRetrying || exhausted}
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
@@ -121,15 +139,16 @@ export default function GlobalError({
                 gap: 8,
                 border: 'none',
                 borderRadius: 12,
-                background: '#2563eb',
+                background: isRetrying || exhausted ? '#93c5fd' : '#2563eb',
                 color: '#ffffff',
                 fontSize: 14,
                 fontWeight: 500,
                 padding: '10px 20px',
-                cursor: 'pointer',
+                cursor: isRetrying || exhausted ? 'not-allowed' : 'pointer',
+                opacity: isRetrying || exhausted ? 0.7 : 1,
               }}
             >
-              Try again
+              {isRetrying ? 'Retrying…' : exhausted ? 'Retries exhausted' : 'Try again'}
             </button>
             <a
               href="/"

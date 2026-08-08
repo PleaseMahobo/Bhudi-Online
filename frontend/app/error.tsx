@@ -2,6 +2,7 @@
 
 import { useEffect } from 'react';
 import { AlertTriangle, Home, RefreshCw } from 'lucide-react';
+import { useRetryReset } from '@/shared/lib/useRetryReset';
 
 export default function Error({
   error,
@@ -10,8 +11,13 @@ export default function Error({
   error: Error & { digest?: string };
   reset: () => void;
 }) {
+  const { attempts, maxAttempts, isRetrying, exhausted, retry } = useRetryReset({
+    reset,
+    maxAttempts: 3,
+    autoRetry: true,
+  });
+
   useEffect(() => {
-    // Surface to console for ops / local debugging
     console.error('[Bhudi] Unhandled route error:', error);
   }, [error]);
 
@@ -26,9 +32,18 @@ export default function Error({
           Something went wrong
         </h1>
         <p className="mt-2 text-sm text-slate-500 leading-relaxed">
-          An unexpected error occurred while loading this page. You can try again
-          or return to the dashboard.
+          {isRetrying
+            ? `Retrying… (attempt ${attempts} of ${maxAttempts})`
+            : exhausted
+              ? 'Automatic recovery failed. Return to the dashboard or try again later.'
+              : 'An unexpected error occurred while loading this page. You can try again or return to the dashboard.'}
         </p>
+
+        {attempts > 0 && !exhausted && !isRetrying && (
+          <p className="mt-2 text-xs text-slate-400">
+            Attempts used: {attempts}/{maxAttempts}
+          </p>
+        )}
 
         {error?.digest && (
           <p className="mt-4 font-mono text-xs text-slate-400 break-all">
@@ -45,11 +60,12 @@ export default function Error({
         <div className="mt-8 flex flex-col sm:flex-row gap-3 justify-center">
           <button
             type="button"
-            onClick={() => reset()}
-            className="inline-flex items-center justify-center gap-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 px-5 py-2.5 text-sm font-medium text-white transition"
+            onClick={retry}
+            disabled={isRetrying || exhausted}
+            className="inline-flex items-center justify-center gap-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed px-5 py-2.5 text-sm font-medium text-white transition"
           >
-            <RefreshCw size={16} />
-            Try again
+            <RefreshCw size={16} className={isRetrying ? 'animate-spin' : undefined} />
+            {isRetrying ? 'Retrying…' : exhausted ? 'Retries exhausted' : 'Try again'}
           </button>
           <a
             href="/dashboard"
