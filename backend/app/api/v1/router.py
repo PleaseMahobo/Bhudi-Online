@@ -25,6 +25,7 @@ def _safe_include(mod_path: str, attr: str = "router", **kwargs):
 _safe_include("app.api.v1.endpoints.agents", tags=["agents"])
 _safe_include("app.api.v1.endpoints.auth", tags=["auth"])
 _safe_include("app.api.v1.endpoints.commands", tags=["commands"])
+_safe_include("app.api.v1.endpoints.command_catalog", tags=["command-catalog"])
 _safe_include("app.api.v1.endpoints.agent_commands", tags=["agent-commands"])
 _safe_include("app.api.v1.endpoints.rbac", tags=["rbac"])
 _safe_include("app.api.v1.endpoints.audit", tags=["audit"])

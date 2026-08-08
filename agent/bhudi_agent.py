@@ -1,5 +1,5 @@
 """
-Bhudi RMM — unified production agent (Phase B + Phase 11 Software Deployment)
+Bhudi RMM — unified production agent (Phase B + Phase 11 Software Deployment + Sprint 3 Real Command Framework)
 
 Loop:
   1. Enroll (or load saved identity)
@@ -7,13 +7,6 @@ Loop:
   3. Poll pending commands
   4. Poll pending software deployments
   5. Execute and post results
-
-Config (env overrides agent_config.json):
-  BHUDI_SERVER_URL   e.g. http://127.0.0.1:8000
-  BHUDI_AGENT_ID
-  BHUDI_AGENT_TOKEN
-  BHUDI_HOSTNAME
-  BHUDI_DEVICE_ID    optional — matches deployment targets by device_id
 """
 from __future__ import annotations
 
@@ -27,10 +20,12 @@ import time
 from pathlib import Path
 
 try:
+    from .command_framework import execute_named
     from .executor import execute_command_record
     from .streaming_session import streaming_session_coordinator
     from .software_deploy import execute_deployment
 except ImportError:
+    from command_framework import execute_named
     from executor import execute_command_record
     from streaming_session import streaming_session_coordinator
     from software_deploy import execute_deployment
@@ -75,13 +70,7 @@ def agent_hostname() -> str:
 
 
 def metrics() -> dict:
-    out = {
-        "cpu_percent": None,
-        "memory_percent": None,
-        "disk_percent": None,
-        "ip_address": None,
-        "hostname": agent_hostname(),
-    }
+    out = {"cpu_percent": None, "memory_percent": None, "disk_percent": None, "ip_address": None, "hostname": agent_hostname()}
     try:
         out["ip_address"] = socket.gethostbyname(socket.gethostname())
     except Exception:
@@ -97,12 +86,7 @@ def metrics() -> dict:
 
 
 def enroll() -> dict:
-    body = {
-        "hostname": agent_hostname(),
-        "agent_version": "1.1.0-phase-11",
-        "platform": platform.platform(),
-        "enrollment_secret": os.getenv("BHUDI_ENROLL_SECRET") or "phase-ab-test",
-    }
+    body = {"hostname": agent_hostname(), "agent_version": "1.2.0-sprint-3", "platform": platform.platform(), "enrollment_secret": os.getenv("BHUDI_ENROLL_SECRET") or "phase-ab-test"}
     r = requests.post(api("/runtime/enroll"), json=body, timeout=15)
     r.raise_for_status()
     data = r.json()
@@ -113,10 +97,7 @@ def enroll() -> dict:
 
 def load_identity() -> dict:
     if os.getenv("BHUDI_AGENT_ID") and os.getenv("BHUDI_AGENT_TOKEN"):
-        return {
-            "agent_id": os.getenv("BHUDI_AGENT_ID"),
-            "agent_token": os.getenv("BHUDI_AGENT_TOKEN"),
-        }
+        return {"agent_id": os.getenv("BHUDI_AGENT_ID"), "agent_token": os.getenv("BHUDI_AGENT_TOKEN")}
     data = load_json(IDENTITY_PATH)
     if data.get("agent_id") and data.get("agent_token"):
         return data
@@ -124,40 +105,25 @@ def load_identity() -> dict:
 
 
 def send_heartbeat(ident: dict) -> dict:
-    m = metrics()
-    body = {
-        "agent_id": ident["agent_id"],
-        "agent_token": ident["agent_token"],
-        "status": "online",
-        **m,
-    }
+    body = {"agent_id": ident["agent_id"], "agent_token": ident["agent_token"], "status": "online", **metrics()}
     r = requests.post(api("/runtime/heartbeat"), json=body, timeout=15)
     if r.status_code == 401:
         print("[heartbeat] unauthorized — re-enrolling")
         ident.update(enroll())
-        body["agent_id"] = ident["agent_id"]
-        body["agent_token"] = ident["agent_token"]
+        body["agent_id"], body["agent_token"] = ident["agent_id"], ident["agent_token"]
         r = requests.post(api("/runtime/heartbeat"), json=body, timeout=15)
     r.raise_for_status()
     return r.json()
 
 
 def poll_commands(ident: dict) -> list:
-    r = requests.get(
-        api(f"/runtime/agents/{ident['agent_id']}/commands/pending"),
-        params={"agent_token": ident["agent_token"]},
-        timeout=15,
-    )
+    r = requests.get(api(f"/runtime/agents/{ident['agent_id']}/commands/pending"), params={"agent_token": ident["agent_token"]}, timeout=15)
     r.raise_for_status()
     return r.json().get("commands") or []
 
 
 def poll_enterprise_commands(ident: dict) -> list:
-    agent_id = enterprise_agent_id(ident)
-    r = requests.get(
-        api(f"/agent/{agent_id}/commands"),
-        timeout=15,
-    )
+    r = requests.get(api(f"/agent/{enterprise_agent_id(ident)}/commands"), timeout=15)
     if r.status_code == 404:
         return []
     r.raise_for_status()
@@ -165,27 +131,15 @@ def poll_enterprise_commands(ident: dict) -> list:
 
 
 def mark_enterprise_command_sent(ident: dict, command_id: str) -> None:
-    agent_id = enterprise_agent_id(ident)
-    r = requests.post(
-        api(f"/agent/{agent_id}/commands/{command_id}/sent"),
-        timeout=15,
-    )
+    r = requests.post(api(f"/agent/{enterprise_agent_id(ident)}/commands/{command_id}/sent"), timeout=15)
     r.raise_for_status()
 
 
 def post_enterprise_result(ident: dict, command_id: str, result: dict) -> None:
     agent_id = enterprise_agent_id(ident)
     endpoint = "completed" if int(result.get("exit_code", 1)) == 0 else "failed"
-    payload = (
-        result
-        if endpoint == "completed"
-        else {"message": result.get("stderr") or result.get("stdout") or "remote command failed"}
-    )
-    r = requests.post(
-        api(f"/agent/{agent_id}/commands/{command_id}/{endpoint}"),
-        json=payload,
-        timeout=15,
-    )
+    payload = result if endpoint == "completed" else {"message": result.get("stderr") or result.get("stdout") or "remote command failed"}
+    r = requests.post(api(f"/agent/{agent_id}/commands/{command_id}/{endpoint}"), json=payload, timeout=15)
     r.raise_for_status()
 
 
@@ -196,27 +150,13 @@ def enterprise_agent_id(ident: dict) -> str:
 def is_interactive_remote_session(command: dict) -> bool:
     command_type = str(command.get("command_type") or "")
     payload = command.get("payload") or {}
-    if command_type == "remote.desktop.start":
-        return True
-    if command_type == "remote.terminal.start" and payload.get("interactive", True):
-        return True
-    return False
+    return command_type == "remote.desktop.start" or (command_type == "remote.terminal.start" and payload.get("interactive", True))
 
 
 def execute(command: str, shell: bool = True) -> dict:
     try:
-        completed = subprocess.run(
-            command,
-            shell=shell,
-            capture_output=True,
-            text=True,
-            timeout=120,
-        )
-        return {
-            "exit_code": completed.returncode,
-            "stdout": (completed.stdout or "")[:50_000],
-            "stderr": (completed.stderr or "")[:20_000],
-        }
+        completed = subprocess.run(command, shell=shell, capture_output=True, text=True, timeout=120)
+        return {"exit_code": completed.returncode, "stdout": (completed.stdout or "")[:50_000], "stderr": (completed.stderr or "")[:20_000]}
     except subprocess.TimeoutExpired:
         return {"exit_code": 124, "stdout": "", "stderr": "command timed out"}
     except Exception as e:
@@ -224,28 +164,18 @@ def execute(command: str, shell: bool = True) -> dict:
 
 
 def post_result(ident: dict, command_id: str, result: dict) -> None:
-    r = requests.post(
-        api(f"/runtime/agents/{ident['agent_id']}/commands/{command_id}/result"),
-        params={"agent_token": ident["agent_token"]},
-        json=result,
-        timeout=15,
-    )
+    r = requests.post(api(f"/runtime/agents/{ident['agent_id']}/commands/{command_id}/result"), params={"agent_token": ident["agent_token"]}, json=result, timeout=15)
     r.raise_for_status()
 
-
-# ---------- Phase 11: Software Deployment ----------
 
 def poll_deployments(ident: dict) -> list:
     params: dict = {"hostname": agent_hostname()}
     device_id = os.getenv("BHUDI_DEVICE_ID")
-    if device_id:
-        params["device_id"] = device_id
-    if ident.get("agent_id"):
-        params["agent_id"] = ident["agent_id"]
+    if device_id: params["device_id"] = device_id
+    if ident.get("agent_id"): params["agent_id"] = ident["agent_id"]
     try:
         r = requests.get(api("/software-deployment/agent/pending"), params=params, timeout=15)
-        if r.status_code == 404:
-            return []
+        if r.status_code == 404: return []
         r.raise_for_status()
         return r.json().get("deployments") or []
     except Exception as e:
@@ -254,78 +184,49 @@ def poll_deployments(ident: dict) -> list:
 
 
 def report_deployment(job_id: str, target_id: str, result: dict) -> None:
-    body = {
-        "status": result.get("status", "failed"),
-        "exit_code": result.get("exit_code"),
-        "stdout": result.get("stdout"),
-        "stderr": result.get("stderr"),
-        "error_message": result.get("error_message"),
-        "download_bytes": result.get("download_bytes"),
-        "duration_ms": result.get("duration_ms"),
-        "reboot_required": bool(result.get("reboot_required")),
-    }
-    r = requests.post(
-        api(f"/software-deployment/jobs/{job_id}/targets/{target_id}/report"),
-        json=body,
-        timeout=30,
-    )
+    body = {"status": result.get("status", "failed"), "exit_code": result.get("exit_code"), "stdout": result.get("stdout"), "stderr": result.get("stderr"), "error_message": result.get("error_message"), "download_bytes": result.get("download_bytes"), "duration_ms": result.get("duration_ms"), "reboot_required": bool(result.get("reboot_required"))}
+    r = requests.post(api(f"/software-deployment/jobs/{job_id}/targets/{target_id}/report"), json=body, timeout=30)
     r.raise_for_status()
 
 
 def process_deployments(ident: dict) -> None:
     deployments = poll_deployments(ident)
-    if not deployments:
-        return
-    print(f"[deploy] {len(deployments)} pending")
     for dep in deployments:
-        job_id = str(dep.get("job_id") or "")
-        target_id = str(dep.get("target_id") or "")
-        action = dep.get("action")
-        pkg = dep.get("package") or {}
-        print(
-            f"[deploy] job={job_id} target={target_id} "
-            f"action={action} type={pkg.get('package_type')} name={pkg.get('name')}"
-        )
-
+        job_id, target_id = str(dep.get("job_id") or ""), str(dep.get("target_id") or "")
         def _progress(partial: dict) -> None:
-            """Report intermediate statuses (downloading / installing)."""
-            try:
-                report_deployment(job_id, target_id, partial)
-            except Exception as e:
-                print(f"[deploy] progress report failed: {e}")
-
+            try: report_deployment(job_id, target_id, partial)
+            except Exception as e: print(f"[deploy] progress report failed: {e}")
         result = execute_deployment(dep, report=_progress)
-        try:
-            report_deployment(job_id, target_id, result)
-            print(
-                f"[deploy] done status={result.get('status')} exit={result.get('exit_code')} "
-                f"ms={result.get('duration_ms')}"
-            )
-        except Exception as e:
-            print(f"[deploy] final report failed: {e}")
+        try: report_deployment(job_id, target_id, result)
+        except Exception as e: print(f"[deploy] final report failed: {e}")
+
+
+def execute_enterprise_command(command: dict) -> dict:
+    command_type = str(command.get("command_type") or "")
+    payload = command.get("payload") or {}
+    if command_type in {"inventory", "processes", "services", "software", "windows_updates", "event_logs", "network", "disks", "printers", "remote_script", "remote_powershell"}:
+        return execute_named(command_type, payload)
+    if is_interactive_remote_session(command):
+        return streaming_session_coordinator.start(server_url=server_url(), agent_id=enterprise_agent_id(_CURRENT_IDENTITY), command=command)
+    return execute_command_record(command)
+
+_CURRENT_IDENTITY: dict = {}
 
 
 def run_once(ident: dict) -> None:
+    global _CURRENT_IDENTITY
+    _CURRENT_IDENTITY = ident
     hb = send_heartbeat(ident)
     print(f"[heartbeat] ok pending={hb.get('pending_commands', 0)}")
 
-    enterprise_commands = poll_enterprise_commands(ident)
-    for command in enterprise_commands:
+    for command in poll_enterprise_commands(ident):
         command_id = command.get("command_id") or command.get("id")
-        if not command_id:
-            continue
+        if not command_id: continue
         print(f"[enterprise-command] {command_id}: {command.get('command_type')}")
         mark_enterprise_command_sent(ident, str(command_id))
-        if is_interactive_remote_session(command):
-            result = streaming_session_coordinator.start(
-                server_url=server_url(),
-                agent_id=enterprise_agent_id(ident),
-                command=command,
-            )
-        else:
-            result = execute_command_record(command)
+        result = execute_enterprise_command(command)
         post_enterprise_result(ident, str(command_id), result)
-        print(f"[enterprise-result] exit={result['exit_code']}")
+        print(f"[enterprise-result] exit={result.get('exit_code')}")
 
     for cmd in poll_commands(ident):
         print(f"[command] {cmd['command_id']}: {cmd['command']}")
@@ -333,7 +234,6 @@ def run_once(ident: dict) -> None:
         post_result(ident, cmd["command_id"], result)
         print(f"[result] exit={result['exit_code']}")
 
-    # Phase 11 software deployment
     process_deployments(ident)
 
 
@@ -343,10 +243,8 @@ def main() -> None:
     print(f"[bhudi-agent] agent_id={ident['agent_id']} host={agent_hostname()}")
     interval = int(os.getenv("BHUDI_HEARTBEAT_INTERVAL", "10"))
     while True:
-        try:
-            run_once(ident)
-        except Exception as e:
-            print(f"[error] {e}")
+        try: run_once(ident)
+        except Exception as e: print(f"[error] {e}")
         time.sleep(interval)
 
 
