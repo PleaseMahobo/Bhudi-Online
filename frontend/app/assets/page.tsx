@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useState } from 'react';
 import { useAuth } from '@/shared/auth/AuthContext';
+import ModuleShell from '@/shared/components/ModuleShell';
 import { useRouter } from 'next/navigation';
 import {
   listAssets,
@@ -380,15 +381,15 @@ export default function AssetsPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#0a0f1c] flex items-center justify-center text-white">
-        Loading Asset Management...
-      </div>
+      <ModuleShell title="Assets">
+        <div className="text-slate-500">Loading…</div>
+      </ModuleShell>
     );
   }
 
   return (
-    <div className="min-h-screen bg-[#0a0f1c] text-white">
-      <div className="max-w-7xl mx-auto p-8">
+    <ModuleShell title="Assets" subtitle="Inventory, vendors, licenses & contracts">
+      <div className="space-y-6">
         <div className="flex items-center justify-between mb-8">
           <div className="flex items-center gap-4">
             <button
@@ -666,7 +667,6 @@ export default function AssetsPage() {
             )}
           </div>
 
-          {/* Detail panel */}
           <div className="xl:col-span-1">
             <div className="bg-zinc-900 border border-zinc-700 rounded-3xl p-6 sticky top-8">
               {!selectedAsset ? (
@@ -759,7 +759,6 @@ export default function AssetsPage() {
           </div>
         </div>
 
-        {/* Asset form modal */}
         {showAssetForm && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
             <div className="bg-zinc-900 border border-zinc-700 rounded-3xl w-full max-w-2xl max-h-[90vh] overflow-y-auto p-8">
@@ -989,7 +988,7 @@ export default function AssetsPage() {
           </Modal>
         )}
       </div>
-    </div>
+    </ModuleShell>
   );
 }
 
