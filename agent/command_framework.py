@@ -1,4 +1,4 @@
-"""Dispatch named Bhudi commands to safe, explicit agent capabilities."""
+"""Dispatch named Bhudi commands to explicit agent capabilities."""
 from __future__ import annotations
 
 import json
@@ -8,7 +8,10 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from inventory import event_logs, inventory, network, printers, processes, services, software, updates
+try:
+    from .inventory import event_logs, inventory, network, printers, processes, services, software, updates
+except ImportError:
+    from inventory import event_logs, inventory, network, printers, processes, services, software, updates
 
 
 def _result(exit_code: int, stdout: str = "", stderr: str = "", **metadata: Any) -> dict[str, Any]:
