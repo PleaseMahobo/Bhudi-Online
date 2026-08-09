@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-const agentVersion = "2.1.0-native-terminal"
+const agentVersion = "2.2.0-native-desktop"
 
 func main() {
 	if len(os.Args) < 2 {
@@ -57,7 +57,7 @@ func printHelp() {
   bhudi-agent uninstall                           Remove service / startup task
   bhudi-agent version
 
-Supports interactive remote terminal sessions via WebSocket.
+Supports interactive remote terminal and screen sharing (desktop) sessions.
 
 Environment:
   BHUDI_SERVER_URL    Backend base URL
