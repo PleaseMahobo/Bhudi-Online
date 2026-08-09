@@ -1,26 +1,25 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import {
-  Check,
-  Copy,
-  Download,
-  Monitor,
-  Server,
-  Terminal,
-} from 'lucide-react';
+import { Check, Copy, Download, Monitor, Server, Terminal } from 'lucide-react';
 
 const DEFAULT_SERVER =
-  process.env.NEXT_PUBLIC_API_URL?.replace(/\/api\/v1\/?$/, '') ||
+  (typeof process !== 'undefined' &&
+    process.env.NEXT_PUBLIC_API_URL?.replace(/\/api\/v1\/?$/, '')) ||
   'https://bhudi-online-production.up.railway.app';
 
 type OsKey = 'windows' | 'linux' | 'macos';
 
-const OS_OPTIONS: { key: OsKey; label: string; file: string }[] = [
-  { key: 'windows', label: 'Windows (.ps1)', file: 'bhudi-agent-install.ps1' },
-  { key: 'linux', label: 'Linux (.sh)', file: 'bhudi-agent-install.sh' },
-  { key: 'macos', label: 'macOS (.sh)', file: 'bhudi-agent-install.sh' },
+const OS_OPTIONS: { key: OsKey; label: string }[] = [
+  { key: 'windows', label: 'Windows (.ps1)' },
+  { key: 'linux', label: 'Linux (.sh)' },
+  { key: 'macos', label: 'macOS (.sh)' },
 ];
+
+function origin(): string {
+  if (typeof window === 'undefined') return '';
+  return window.location.origin;
+}
 
 export default function AgentInstallerPanel({
   serverUrl = DEFAULT_SERVER,
@@ -35,16 +34,19 @@ export default function AgentInstallerPanel({
   const cleanServer = serverUrl.replace(/\/+$/, '').replace(/\/api\/v1$/i, '');
 
   const downloadHref = useMemo(() => {
-    const q = new URLSearchParams({ os, server: cleanServer });
-    return `/api/agent/download?${q.toString()}`;
+    const q = new URLSearchParams({ os: os, server: cleanServer });
+    return '/api/agent/download?' + q.toString();
   }, [os, cleanServer]);
 
   const oneLiner = useMemo(() => {
+    const url = origin() + downloadHref + '&inline=1';
     if (os === 'windows') {
-      return `irm "${typeof window !== 'undefined' ? window.location.origin : ''}${downloadHref}&inline=1" | iex`;
+      return 'irm "' + url + '" | iex';
     }
-    return `curl -fsSL "${typeof window !== 'undefined' ? window.location.origin : ''}${downloadHref}&inline=1" | bash`;
+    return 'curl -fsSL "' + url + '" | bash';
   }, [os, downloadHref]);
+
+  const fullDownloadUrl = origin() + downloadHref;
 
   const copy = async (kind: 'link' | 'cmd', text: string) => {
     try {
@@ -56,6 +58,8 @@ export default function AgentInstallerPanel({
     }
   };
 
+  const pad = compact ? 'p-4' : 'p-5';
+
   return (
     <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
       <header className="flex items-center justify-between gap-3 border-b border-slate-100 px-5 py-4">
@@ -66,28 +70,33 @@ export default function AgentInstallerPanel({
         <span className="text-xs text-slate-500">Windows · Linux · macOS</span>
       </header>
 
-      <div className={`space-y-4 ${compact ? 'p-4' : 'p-5'}`}>
+      <div className={'space-y-4 ' + pad}>
         <p className="text-sm text-slate-600 leading-relaxed">
-          Download an installer for the target OS, or copy a one-line install command.
-          The agent enrolls automatically and appears under Devices.
+          Download an installer for the target OS, or copy a one-line install command. The agent
+          enrolls automatically and appears under Devices.
         </p>
 
         <div className="flex flex-wrap gap-2">
-          {OS_OPTIONS.map((opt) => (
-            <button
-              key={opt.key}
-              type="button"
-              onClick={() => setOs(opt.key)}
-              className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition ${
-                os === opt.key
-                  ? 'border-indigo-300 bg-indigo-50 text-indigo-800'
-                  : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
-              }`}
-            >
-              <Monitor size={12} />
-              {opt.label}
-            </button>
-          ))}
+          {OS_OPTIONS.map((opt) => {
+            const active = os === opt.key;
+            const cls = active
+              ? 'border-indigo-300 bg-indigo-50 text-indigo-800'
+              : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50';
+            return (
+              <button
+                key={opt.key}
+                type="button"
+                onClick={() => setOs(opt.key)}
+                className={
+                  'inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition ' +
+                  cls
+                }
+              >
+                <Monitor size={12} />
+                {opt.label}
+              </button>
+            );
+          })}
         </div>
 
         <div className="flex flex-col gap-2 sm:flex-row">
@@ -100,14 +109,7 @@ export default function AgentInstallerPanel({
           </a>
           <button
             type="button"
-            onClick={() =>
-              copy(
-                'link',
-                typeof window !== 'undefined'
-                  ? `${window.location.origin}${downloadHref}`
-                  : downloadHref
-              )
-            }
+            onClick={() => copy('link', fullDownloadUrl || downloadHref)}
             className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
           >
             {copied === 'link' ? <Check size={16} /> : <Copy size={16} />}
