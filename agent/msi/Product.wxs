@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Bhudi Agent Windows MSI (WiX Toolset v4/v5)
+
+  Build (on Windows with WiX + the setup EXE next to this file):
+    wix build Product.wxs -d SetupExePath=bhudi-agent-setup.exe -o bhudi-agent-setup.msi
+
+  Or via GitHub Actions: .github/workflows/build-agent-setup.yml
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+
+  <Package
+      Name="Bhudi Agent"
+      Manufacturer="Bhudi"
+      Version="1.0.0"
+      UpgradeCode="6dcaacf5-f55a-49b5-8632-893587bd4ec3"
+      Scope="perMachine"
+      Language="1033">
+
+    <SummaryInformation
+        Description="Bhudi RMM agent installer — enrolls devices with the Bhudi platform"
+        Manufacturer="Bhudi" />
+
+    <MajorUpgrade
+        DowngradeErrorMessage="A newer version of Bhudi Agent is already installed."
+        Schedule="afterInstallInitialize" />
+
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+
+    <!-- Optional public property: msiexec /i bhudi-agent-setup.msi SERVERURL=https://api.example.com -->
+    <Property Id="SERVERURL" Value="https://bhudi-online-production.up.railway.app" />
+
+    <Feature Id="MainFeature" Title="Bhudi Agent" Level="1">
+      <ComponentGroupRef Id="ProductComponents" />
+    </Feature>
+
+    <ui:WixUI Id="WixUI_Minimal" />
+    <WixVariable Id="WixUILicenseRtf" Value="License.rtf" />
+
+    <!-- Launch setup EXE after files are installed (passes -server from SERVERURL) -->
+    <CustomAction
+        Id="LaunchBhudiSetup"
+        Directory="INSTALLFOLDER"
+        ExeCommand="[INSTALLFOLDER]bhudi-agent-setup.exe -server [SERVERURL]"
+        Execute="deferred"
+        Impersonate="no"
+        Return="asyncNoWait" />
+
+    <InstallExecuteSequence>
+      <Custom Action="LaunchBhudiSetup" After="InstallFiles" Condition="NOT REMOVE" />
+    </InstallExecuteSequence>
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="Bhudi Agent" />
+    </StandardDirectory>
+
+    <ComponentGroup Id="ProductComponents" Directory="INSTALLFOLDER">
+      <Component Id="SetupExeComponent" Guid="9eca2463-ce95-489e-bdf4-f435a5d9d969">
+        <File
+            Id="BhudiAgentSetupExe"
+            Source="!(bindpath.setup)bhudi-agent-setup.exe"
+            KeyPath="yes"
+            Checksum="yes" />
+        <Shortcut
+            Id="StartMenuShortcut"
+            Directory="ProgramMenuFolder"
+            Name="Bhudi Agent Setup"
+            Description="Run Bhudi Agent setup"
+            Target="[INSTALLFOLDER]bhudi-agent-setup.exe"
+            WorkingDirectory="INSTALLFOLDER" />
+        <RemoveFolder Id="RemoveInstallFolder" On="uninstall" />
+        <RegistryValue
+            Root="HKLM"
+            Key="Software\Bhudi\Agent"
+            Name="InstallPath"
+            Type="string"
+            Value="[INSTALLFOLDER]"
+            KeyPath="no" />
+      </Component>
+    </ComponentGroup>
+  </Package>
+</Wix>

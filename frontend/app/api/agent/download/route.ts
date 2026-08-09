@@ -8,9 +8,10 @@ const REPO_ZIP =
 const REPO_PS1 =
   'https://raw.githubusercontent.com/PleaseMahobo/Bhudi-Online/main/agent/install.ps1';
 
-/** Published by .github/workflows/build-agent-setup.yml */
 const EXE_RELEASE_URL =
   'https://github.com/PleaseMahobo/Bhudi-Online/releases/download/agent-setup-latest/bhudi-agent-setup.exe';
+const MSI_RELEASE_URL =
+  'https://github.com/PleaseMahobo/Bhudi-Online/releases/download/agent-setup-latest/bhudi-agent-setup.msi';
 
 type InstallerMeta = {
   file: string;
@@ -89,10 +90,10 @@ function buildFallbacks(): Record<string, string> {
     ]),
     'install.bat': lines([
       '@echo off',
-      'echo [Bhudi] Opening Windows EXE installer download...',
-      'start "" "' + EXE_RELEASE_URL + '"',
-      'echo If the browser download fails, get bhudi-agent-setup.exe from:',
-      'echo ' + EXE_RELEASE_URL,
+      'echo [Bhudi] Opening MSI installer download...',
+      'start "" "' + MSI_RELEASE_URL + '"',
+      'echo Direct MSI: ' + MSI_RELEASE_URL,
+      'echo Direct EXE: ' + EXE_RELEASE_URL,
       'pause',
       '',
     ]),
@@ -109,15 +110,49 @@ function bakeServer(script: string, cleanServer: string): string {
   return script.split(DEFAULT_SERVER).join(cleanServer);
 }
 
+async function tryServeLocalBinary(
+  names: string[],
+  contentType: string,
+  downloadName: string,
+  cleanServer: string
+): Promise<NextResponse | null> {
+  const roots = [
+    path.join(process.cwd(), 'public', 'downloads'),
+    path.join(process.cwd(), '..', 'agent', 'msi'),
+    path.join(process.cwd(), '..', 'agent', 'dist'),
+    path.join(process.cwd(), '..', 'agent', 'cmd', 'bhudi-agent-setup'),
+  ];
+  for (const root of roots) {
+    for (const name of names) {
+      try {
+        const buf = await readFile(path.join(root, name));
+        return new NextResponse(buf, {
+          status: 200,
+          headers: {
+            'Content-Type': contentType,
+            'Content-Disposition': 'attachment; filename="' + downloadName + '"',
+            'Cache-Control': 'no-store',
+            'X-Bhudi-Server': cleanServer,
+          },
+        });
+      } catch {
+        /* continue */
+      }
+    }
+  }
+  return null;
+}
+
 /**
  * Serves agent installers.
  *
- * os=exe|windows-exe  → redirect to published Windows setup EXE (preferred)
- * os=windows|ps1|bat|linux|macos → script download
+ * os=msi              → Windows MSI (enterprise)
+ * os=exe|windows-exe  → Windows setup EXE
+ * os=windows|ps1|...  → scripts
  */
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
-  const os = (searchParams.get('os') || 'exe').toLowerCase();
+  const os = (searchParams.get('os') || 'msi').toLowerCase();
   const server =
     searchParams.get('server') ||
     process.env.NEXT_PUBLIC_API_URL ||
@@ -125,33 +160,26 @@ export async function GET(req: NextRequest) {
     DEFAULT_SERVER;
   const cleanServer = normalizeServer(server);
 
-  // Prefer real Windows EXE installer
-  if (os === 'exe' || os === 'windows-exe' || os === 'msi') {
-    const localCandidates = [
-      path.join(process.cwd(), 'public', 'downloads', 'bhudi-agent-setup.exe'),
-      path.join(process.cwd(), '..', 'agent', 'dist', 'bhudi-agent-setup.exe'),
-      path.join(process.cwd(), '..', 'agent', 'cmd', 'bhudi-agent-setup', 'bhudi-agent-setup.exe'),
-    ];
-    for (const p of localCandidates) {
-      try {
-        const buf = await readFile(p);
-        return new NextResponse(buf, {
-          status: 200,
-          headers: {
-            'Content-Type': 'application/vnd.microsoft.portable-executable',
-            'Content-Disposition': 'attachment; filename="bhudi-agent-setup.exe"',
-            'Cache-Control': 'no-store',
-            'X-Bhudi-Server': cleanServer,
-          },
-        });
-      } catch {
-        /* try next / fall through to release URL */
-      }
-    }
+  if (os === 'msi') {
+    const local = await tryServeLocalBinary(
+      ['bhudi-agent-setup.msi'],
+      'application/x-msi',
+      'bhudi-agent-setup.msi',
+      cleanServer
+    );
+    if (local) return local;
+    return NextResponse.redirect(MSI_RELEASE_URL, 302);
+  }
 
-    // Published by GitHub Actions (tag: agent-setup-latest)
-    const url = new URL(EXE_RELEASE_URL);
-    return NextResponse.redirect(url.toString(), 302);
+  if (os === 'exe' || os === 'windows-exe') {
+    const local = await tryServeLocalBinary(
+      ['bhudi-agent-setup.exe'],
+      'application/vnd.microsoft.portable-executable',
+      'bhudi-agent-setup.exe',
+      cleanServer
+    );
+    if (local) return local;
+    return NextResponse.redirect(EXE_RELEASE_URL, 302);
   }
 
   const meta = CANDIDATES[os] || CANDIDATES.windows;

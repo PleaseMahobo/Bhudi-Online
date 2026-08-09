@@ -8,12 +8,15 @@ const DEFAULT_SERVER =
     process.env.NEXT_PUBLIC_API_URL?.replace(/\/api\/v1\/?$/, '')) ||
   'https://bhudi-online-production.up.railway.app';
 
+const MSI_RELEASE =
+  'https://github.com/PleaseMahobo/Bhudi-Online/releases/download/agent-setup-latest/bhudi-agent-setup.msi';
 const EXE_RELEASE =
   'https://github.com/PleaseMahobo/Bhudi-Online/releases/download/agent-setup-latest/bhudi-agent-setup.exe';
 
-type OsKey = 'exe' | 'windows' | 'linux' | 'macos';
+type OsKey = 'msi' | 'exe' | 'windows' | 'linux' | 'macos';
 
 const OS_OPTIONS: { key: OsKey; label: string }[] = [
+  { key: 'msi', label: 'Windows (.msi)' },
   { key: 'exe', label: 'Windows (.exe)' },
   { key: 'windows', label: 'Windows (.ps1)' },
   { key: 'linux', label: 'Linux (.sh)' },
@@ -32,33 +35,55 @@ export default function AgentInstallerPanel({
   serverUrl?: string;
   compact?: boolean;
 }) {
-  const [os, setOs] = useState<OsKey>('exe');
+  const [os, setOs] = useState<OsKey>('msi');
   const [copied, setCopied] = useState<'link' | 'cmd' | null>(null);
 
   const cleanServer = serverUrl.replace(/\/+$/, '').replace(/\/api\/v1$/i, '');
 
   const downloadHref = useMemo(() => {
-    if (os === 'exe') {
-      // Prefer app proxy (local file or redirect to GitHub release EXE)
-      return '/api/agent/download?os=exe&server=' + encodeURIComponent(cleanServer);
+    if (os === 'msi' || os === 'exe') {
+      return (
+        '/api/agent/download?os=' +
+        os +
+        '&server=' +
+        encodeURIComponent(cleanServer)
+      );
     }
     const q = new URLSearchParams({ os: os, server: cleanServer });
     return '/api/agent/download?' + q.toString();
   }, [os, cleanServer]);
 
+  const primaryLabel =
+    os === 'msi'
+      ? 'Download bhudi-agent-setup.msi'
+      : os === 'exe'
+        ? 'Download bhudi-agent-setup.exe'
+        : 'Download installer';
+
+  const releaseUrl = os === 'msi' ? MSI_RELEASE : os === 'exe' ? EXE_RELEASE : '';
+
   const oneLiner = useMemo(() => {
+    if (os === 'msi') {
+      return (
+        'msiexec /i bhudi-agent-setup.msi SERVERURL=' +
+        cleanServer +
+        ' /qb'
+      );
+    }
     if (os === 'exe') {
-      return 'Download bhudi-agent-setup.exe and run as Administrator';
+      return 'Run bhudi-agent-setup.exe as Administrator';
     }
     const url = origin() + downloadHref + '&inline=1';
     if (os === 'windows') {
       return 'irm "' + url + '" | iex';
     }
     return 'curl -fsSL "' + url + '" | bash';
-  }, [os, downloadHref]);
+  }, [os, downloadHref, cleanServer]);
 
   const fullDownloadUrl =
-    os === 'exe' ? origin() + downloadHref || EXE_RELEASE : origin() + downloadHref;
+    os === 'msi' || os === 'exe'
+      ? origin() + downloadHref || releaseUrl
+      : origin() + downloadHref;
 
   const copy = async (kind: 'link' | 'cmd', text: string) => {
     try {
@@ -79,13 +104,14 @@ export default function AgentInstallerPanel({
           <Server size={16} className="text-indigo-600" />
           Install agent
         </div>
-        <span className="text-xs text-slate-500">EXE · Scripts</span>
+        <span className="text-xs text-slate-500">MSI · EXE · Scripts</span>
       </header>
 
       <div className={'space-y-4 ' + pad}>
         <p className="text-sm text-slate-600 leading-relaxed">
-          <strong>Recommended:</strong> download the Windows <span className="font-mono text-xs">.exe</span> setup,
-          run it as Administrator, and the agent installs and enrolls automatically.
+          <strong>Recommended for IT:</strong> Windows{' '}
+          <span className="font-mono text-xs">.msi</span> for Intune, GPO, or interactive install.
+          The MSI deploys the setup engine and enrolls the agent with your Bhudi server.
         </p>
 
         <div className="flex flex-wrap gap-2">
@@ -117,11 +143,11 @@ export default function AgentInstallerPanel({
             className="inline-flex flex-1 items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-indigo-500"
           >
             <Download size={16} />
-            {os === 'exe' ? 'Download bhudi-agent-setup.exe' : 'Download installer'}
+            {primaryLabel}
           </a>
           <button
             type="button"
-            onClick={() => copy('link', fullDownloadUrl || EXE_RELEASE)}
+            onClick={() => copy('link', fullDownloadUrl || releaseUrl)}
             className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
           >
             {copied === 'link' ? <Check size={16} /> : <Copy size={16} />}
@@ -129,43 +155,57 @@ export default function AgentInstallerPanel({
           </button>
         </div>
 
-        {os === 'exe' ? (
+        {(os === 'msi' || os === 'exe') && (
           <div className="rounded-xl border border-slate-100 bg-slate-50 px-4 py-3 text-xs text-slate-600 leading-relaxed">
-            <p className="font-semibold text-slate-800">After download</p>
-            <ol className="mt-2 list-decimal space-y-1 pl-4">
-              <li>Right-click <span className="font-mono">bhudi-agent-setup.exe</span> → Run as administrator</li>
-              <li>Allow the installer to download the agent package and create the startup task</li>
-              <li>Confirm the device appears under Devices / Assets</li>
-            </ol>
+            {os === 'msi' ? (
+              <>
+                <p className="font-semibold text-slate-800">MSI install</p>
+                <ol className="mt-2 list-decimal space-y-1 pl-4">
+                  <li>Download <span className="font-mono">bhudi-agent-setup.msi</span></li>
+                  <li>Double-click, or deploy with Intune / GPO</li>
+                  <li>Silent: <span className="font-mono">msiexec /i bhudi-agent-setup.msi /qn</span></li>
+                </ol>
+              </>
+            ) : (
+              <>
+                <p className="font-semibold text-slate-800">EXE install</p>
+                <ol className="mt-2 list-decimal space-y-1 pl-4">
+                  <li>Right-click → Run as administrator</li>
+                  <li>Setup downloads the agent, creates a startup task, and enrolls</li>
+                </ol>
+              </>
+            )}
             <p className="mt-2 text-slate-500">Requires Python 3.10+ on the PC (python.org, Add to PATH).</p>
-            <p className="mt-1">
-              Direct release link:{' '}
-              <a className="text-indigo-600 hover:underline break-all" href={EXE_RELEASE}>
-                {EXE_RELEASE}
-              </a>
-            </p>
-          </div>
-        ) : (
-          <div>
-            <div className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-slate-500">
-              <Terminal size={12} />
-              One-line install
-            </div>
-            <div className="flex gap-2">
-              <pre className="flex-1 overflow-x-auto rounded-xl bg-slate-900 px-3 py-2.5 text-[11px] leading-relaxed text-slate-200">
-                {oneLiner}
-              </pre>
-              <button
-                type="button"
-                onClick={() => copy('cmd', oneLiner)}
-                className="shrink-0 rounded-xl border border-slate-200 px-3 text-slate-600 hover:bg-slate-50"
-                title="Copy command"
-              >
-                {copied === 'cmd' ? <Check size={16} /> : <Copy size={16} />}
-              </button>
-            </div>
+            {releaseUrl && (
+              <p className="mt-1">
+                Direct link:{' '}
+                <a className="text-indigo-600 hover:underline break-all" href={releaseUrl}>
+                  {releaseUrl}
+                </a>
+              </p>
+            )}
           </div>
         )}
+
+        <div>
+          <div className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-slate-500">
+            <Terminal size={12} />
+            {os === 'msi' ? 'msiexec command' : os === 'exe' ? 'Notes' : 'One-line install'}
+          </div>
+          <div className="flex gap-2">
+            <pre className="flex-1 overflow-x-auto rounded-xl bg-slate-900 px-3 py-2.5 text-[11px] leading-relaxed text-slate-200">
+              {oneLiner}
+            </pre>
+            <button
+              type="button"
+              onClick={() => copy('cmd', oneLiner)}
+              className="shrink-0 rounded-xl border border-slate-200 px-3 text-slate-600 hover:bg-slate-50"
+              title="Copy"
+            >
+              {copied === 'cmd' ? <Check size={16} /> : <Copy size={16} />}
+            </button>
+          </div>
+        </div>
 
         <p className="text-[11px] text-slate-400">
           Server: <span className="font-mono text-slate-500">{cleanServer}</span>

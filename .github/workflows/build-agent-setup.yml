@@ -1,10 +1,11 @@
-name: Build Windows Agent Setup EXE
+name: Build Windows Agent Setup (EXE + MSI)
 
 on:
   push:
     branches: [main]
     paths:
       - "agent/cmd/bhudi-agent-setup/**"
+      - "agent/msi/**"
       - ".github/workflows/build-agent-setup.yml"
   workflow_dispatch:
 
@@ -13,7 +14,7 @@ permissions:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -21,39 +22,67 @@ jobs:
         with:
           go-version: "1.22"
 
-      - name: Build Windows EXE
+      - name: Build setup EXE
         working-directory: agent/cmd/bhudi-agent-setup
         env:
           GOOS: windows
           GOARCH: amd64
           CGO_ENABLED: "0"
-        run: go build -ldflags="-s -w" -o bhudi-agent-setup.exe .
+        run: go build -ldflags="-s -w" -o ..\..\msi\bhudi-agent-setup.exe .
 
-      - name: Upload artifact
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Install WiX
+        run: |
+          dotnet tool install --global wix --version 5.0.2
+          wix --version
+          wix extension add -g WixToolset.UI.wixext/5.0.2
+
+      - name: Build MSI
+        working-directory: agent/msi
+        run: |
+          wix build Product.wxs `
+            -ext WixToolset.UI.wixext `
+            -bindpath:setup=. `
+            -o bhudi-agent-setup.msi
+
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: bhudi-agent-setup-windows
-          path: agent/cmd/bhudi-agent-setup/bhudi-agent-setup.exe
+          name: bhudi-agent-windows-installers
+          path: |
+            agent/msi/bhudi-agent-setup.exe
+            agent/msi/bhudi-agent-setup.msi
 
-      - name: Publish release asset
+      - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: agent-setup-latest
-          name: Bhudi Agent Setup (Windows EXE)
+          name: Bhudi Agent Setup (Windows EXE + MSI)
           body: |
-            Windows installer for the Bhudi RMM agent.
+            ## Windows installers
 
-            1. Download **bhudi-agent-setup.exe**
-            2. Right-click → **Run as administrator** (recommended)
-            3. Agent installs, enrolls, and starts automatically
+            | File | Use |
+            |------|-----|
+            | **bhudi-agent-setup.msi** | Enterprise / Intune / GPO (recommended) |
+            | **bhudi-agent-setup.exe** | Interactive double-click setup |
 
-            Optional CLI:
+            ### MSI
+            ```bat
+            msiexec /i bhudi-agent-setup.msi /qb
+            msiexec /i bhudi-agent-setup.msi SERVERURL=https://your-backend.example.com /qn
             ```
-            bhudi-agent-setup.exe -server https://your-backend.example.com
-            ```
 
-            Requires **Python 3.10+** on the target machine (python.org, Add to PATH).
-          files: agent/cmd/bhudi-agent-setup/bhudi-agent-setup.exe
+            ### EXE
+            Run as Administrator. Optional: `bhudi-agent-setup.exe -server https://your-backend.example.com`
+
+            **Requirement:** Python 3.10+ on the target device (Add to PATH).
+          files: |
+            agent/msi/bhudi-agent-setup.exe
+            agent/msi/bhudi-agent-setup.msi
           make_latest: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
