@@ -53,9 +53,11 @@ type heartbeatReq struct {
 }
 
 type commandItem struct {
-	CommandID string `json:"command_id"`
-	Command   string `json:"command"`
-	Shell     bool   `json:"shell"`
+	CommandID   string         `json:"command_id"`
+	Command     string         `json:"command"`
+	Shell       bool           `json:"shell"`
+	CommandType string         `json:"command_type"`
+	Payload     map[string]any `json:"payload"`
 }
 
 func runAgent(cfg runConfig) {
@@ -102,7 +104,26 @@ func cycle(client *http.Client, server string, ident identity) error {
 		return err
 	}
 	for _, c := range cmds {
-		fmt.Printf("[command] %s: %s\n", c.CommandID, c.Command)
+		fmt.Printf("[command] %s type=%s cmd=%s\n", c.CommandID, c.CommandType, c.Command)
+		if c.CommandType == "remote.desktop.start" || c.CommandType == "remote.terminal.start" {
+			cmdMap := map[string]any{
+				"command_id":   c.CommandID,
+				"command_type": c.CommandType,
+				"payload":      c.Payload,
+			}
+			result := executeEnterpriseCommand(server, ident, cmdMap)
+			exitCode := 0
+			if v, ok := result["exit_code"].(int); ok {
+				exitCode = v
+			} else if v, ok := result["exit_code"].(float64); ok {
+				exitCode = int(v)
+			}
+			stdout, _ := result["stdout"].(string)
+			stderr, _ := result["stderr"].(string)
+			_ = postResult(client, server, ident, c.CommandID, exitCode, stdout, stderr)
+			fmt.Printf("[result] remote session exit=%d\n", exitCode)
+			continue
+		}
 		exitCode, stdout, stderr := runCommand(c.Command, c.Shell)
 		if err := postResult(client, server, ident, c.CommandID, exitCode, stdout, stderr); err != nil {
 			fmt.Println("[result-error]", err)
