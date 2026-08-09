@@ -38,7 +38,7 @@ const NAV_ITEMS: NavItem[] = [
   { label: 'Tickets', href: '/itsm', icon: Ticket, badge: '3' },
   { label: 'Alerts', href: '/alert-engine', icon: Activity },
   { label: 'Automation', href: '/commands', icon: Zap },
-  { label: 'Remote Access', href: '/commands', icon: ScreenShare },
+  { label: 'Remote Access', href: '/remote', icon: ScreenShare },
   { label: 'Endpoint Security', href: '/endpoint-security', icon: Shield },
   { label: 'Patch Management', href: '/software-deployment', icon: Package },
   { label: 'Software', href: '/software-deployment', icon: Boxes },
