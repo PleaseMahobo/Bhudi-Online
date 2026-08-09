@@ -121,6 +121,9 @@ func executeEnterpriseCommand(server string, ident identity, cmd map[string]any)
 	}
 
 	switch cmdType {
+	case "remote.desktop.start":
+		return startRemoteDesktop(server, ident.AgentID, cmd)
+
 	case "remote.terminal.start":
 		interactive := true
 		if v, ok := payload["interactive"]; ok {
