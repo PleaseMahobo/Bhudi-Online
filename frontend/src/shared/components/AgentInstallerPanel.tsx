@@ -8,20 +8,22 @@ const DEFAULT_SERVER =
     process.env.NEXT_PUBLIC_API_URL?.replace(/\/api\/v1\/?$/, '')) ||
   'https://bhudi-online-production.up.railway.app';
 
-const RELEASE =
-  'https://github.com/PleaseMahobo/Bhudi-Online/releases/download/agent-native-latest';
-
 type OsKey =
-  | 'msi'
   | 'exe'
+  | 'msi'
   | 'linux'
   | 'linux-arm64'
   | 'macos'
   | 'macos-intel';
 
-const OS_OPTIONS: { key: OsKey; label: string; file: string }[] = [
-  { key: 'msi', label: 'Windows (.msi)', file: 'bhudi-agent-setup.msi' },
-  { key: 'exe', label: 'Windows (.exe)', file: 'bhudi-agent.exe' },
+const OS_OPTIONS: { key: OsKey; label: string; file: string; hint?: string }[] = [
+  { key: 'exe', label: 'Windows (.exe)', file: 'bhudi-agent.exe', hint: 'Recommended' },
+  {
+    key: 'msi',
+    label: 'Windows (.msi)',
+    file: 'bhudi-agent-setup.msi',
+    hint: 'Falls back to .exe if MSI not published yet',
+  },
   { key: 'linux', label: 'Linux x64', file: 'bhudi-agent-linux-amd64' },
   { key: 'linux-arm64', label: 'Linux ARM64', file: 'bhudi-agent-linux-arm64' },
   { key: 'macos', label: 'macOS Apple Silicon', file: 'bhudi-agent-darwin-arm64' },
@@ -35,87 +37,90 @@ export default function AgentInstallerPanel({
   serverUrl?: string;
   compact?: boolean;
 }) {
-  const [os, setOs] = useState<OsKey>('msi');
-  const [copied, setCopied] = useState<'link' | 'cmd' | null>(null);
+  const [os, setOs] = useState<OsKey>('exe');
+  const [copied, setCopied] = useState('');
 
-  const cleanServer = serverUrl.replace(/\/+$/, '').replace(/\/api\/v1$/i, '');
+  const cleanServer = (serverUrl || DEFAULT_SERVER).replace(/\/$/, '');
   const meta = OS_OPTIONS.find((o) => o.key === os) || OS_OPTIONS[0];
   const downloadHref = '/api/agent/download?os=' + os;
-  const directUrl = RELEASE + '/' + meta.file;
 
   const installCmd = useMemo(() => {
-    if (os === 'msi') {
-      return 'msiexec /i bhudi-agent-setup.msi SERVERURL=' + cleanServer + ' /qb';
+    switch (os) {
+      case 'msi':
+        return `msiexec /i bhudi-agent-setup.msi /qn SERVERURL="${cleanServer}"\n# If MSI is unavailable, use the .exe installer instead.`;
+      case 'exe':
+        return `bhudi-agent.exe install -server ${cleanServer}`;
+      case 'linux':
+        return `chmod +x bhudi-agent-linux-amd64\nsudo ./bhudi-agent-linux-amd64 install -server ${cleanServer}`;
+      case 'linux-arm64':
+        return `chmod +x bhudi-agent-linux-arm64\nsudo ./bhudi-agent-linux-arm64 install -server ${cleanServer}`;
+      case 'macos':
+        return `chmod +x bhudi-agent-darwin-arm64\n./bhudi-agent-darwin-arm64 install -server ${cleanServer}`;
+      case 'macos-intel':
+        return `chmod +x bhudi-agent-darwin-amd64\n./bhudi-agent-darwin-amd64 install -server ${cleanServer}`;
+      default:
+        return '';
     }
-    if (os === 'exe') {
-      return 'bhudi-agent.exe install -server ' + cleanServer;
-    }
-    if (os.startsWith('linux')) {
-      return (
-        'chmod +x ' +
-        meta.file +
-        ' && sudo ./' +
-        meta.file +
-        ' install -server ' +
-        cleanServer
-      );
-    }
-    return 'chmod +x ' + meta.file + ' && ./' + meta.file + ' install -server ' + cleanServer;
-  }, [os, cleanServer, meta.file]);
+  }, [os, cleanServer]);
 
-  const copy = async (kind: 'link' | 'cmd', text: string) => {
-    try {
-      await navigator.clipboard.writeText(text);
+  function copy(kind: string, text: string) {
+    void navigator.clipboard.writeText(text).then(() => {
       setCopied(kind);
-      window.setTimeout(() => setCopied(null), 1600);
-    } catch {
-      setCopied(null);
-    }
-  };
-
-  const pad = compact ? 'p-4' : 'p-5';
+      setTimeout(() => setCopied(''), 2000);
+    });
+  }
 
   return (
-    <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
-      <header className="flex items-center justify-between gap-3 border-b border-slate-100 px-5 py-4">
-        <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
-          <Server size={16} className="text-indigo-600" />
-          Install agent
+    <section
+      className={
+        compact
+          ? 'rounded-2xl border border-slate-200 bg-white p-4 shadow-sm'
+          : 'rounded-2xl border border-slate-200 bg-white p-6 shadow-sm'
+      }
+    >
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="flex items-center gap-2 text-lg font-bold text-slate-900">
+            <Server size={20} className="text-indigo-600" />
+            Download agent
+          </h2>
+          <p className="mt-1 text-sm text-slate-500">
+            Native agent for Windows, Linux, and macOS — no Python required.
+          </p>
         </div>
-        <span className="rounded-full bg-emerald-50 px-2.5 py-0.5 text-[11px] font-medium text-emerald-700">
-          No Python required
-        </span>
-      </header>
+        <Monitor size={18} className="text-slate-300" />
+      </div>
 
-      <div className={'space-y-4 ' + pad}>
-        <p className="text-sm text-slate-600 leading-relaxed">
-          Native standalone agent for ordinary Windows, Linux, and macOS endpoints. One binary — no
-          runtime to pre-install on user machines.
-        </p>
-
-        <div className="flex flex-wrap gap-2">
-          {OS_OPTIONS.map((opt) => {
-            const active = os === opt.key;
-            return (
+      <div className="mt-5 space-y-4">
+        <div>
+          <p className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-500">
+            Platform
+          </p>
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            {OS_OPTIONS.map((o) => (
               <button
-                key={opt.key}
+                key={o.key}
                 type="button"
-                onClick={() => setOs(opt.key)}
+                onClick={() => setOs(o.key)}
                 className={
-                  'inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition ' +
-                  (active
-                    ? 'border-indigo-300 bg-indigo-50 text-indigo-800'
-                    : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50')
+                  'rounded-xl border px-3 py-2.5 text-left text-sm transition ' +
+                  (os === o.key
+                    ? 'border-indigo-300 bg-indigo-50 text-indigo-900'
+                    : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50')
                 }
               >
-                <Monitor size={12} />
-                {opt.label}
+                <span className="font-medium">{o.label}</span>
+                {o.hint && (
+                  <span className="mt-0.5 block text-[11px] font-normal text-slate-500">
+                    {o.hint}
+                  </span>
+                )}
               </button>
-            );
-          })}
+            ))}
+          </div>
         </div>
 
-        <div className="flex flex-col gap-2 sm:flex-row">
+        <div className="flex flex-wrap gap-2">
           <a
             href={downloadHref}
             className="inline-flex flex-1 items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-indigo-500"
@@ -125,7 +130,14 @@ export default function AgentInstallerPanel({
           </a>
           <button
             type="button"
-            onClick={() => copy('link', directUrl)}
+            onClick={() =>
+              copy(
+                'link',
+                typeof window !== 'undefined'
+                  ? window.location.origin + downloadHref
+                  : downloadHref
+              )
+            }
             className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
           >
             {copied === 'link' ? <Check size={16} /> : <Copy size={16} />}
@@ -133,13 +145,15 @@ export default function AgentInstallerPanel({
           </button>
         </div>
 
-        <div className="rounded-xl border border-slate-100 bg-slate-50 px-4 py-3 text-xs text-slate-600 leading-relaxed">
+        <div className="rounded-xl border border-slate-100 bg-slate-50 px-4 py-3 text-xs leading-relaxed text-slate-600">
           <p className="font-semibold text-slate-800">After download</p>
           <ol className="mt-2 list-decimal space-y-1 pl-4">
             {os === 'msi' && (
               <>
-                <li>Deploy with Intune / GPO or double-click the MSI</li>
-                <li>Agent installs and starts automatically (no Python)</li>
+                <li>Double-click the MSI or deploy with Intune / GPO</li>
+                <li>
+                  If the MSI link fails, use <strong>Windows (.exe)</strong> instead
+                </li>
               </>
             )}
             {os === 'exe' && (
@@ -154,10 +168,10 @@ export default function AgentInstallerPanel({
             {os.startsWith('linux') && (
               <>
                 <li>
-                  <span className="font-mono">chmod +x</span> the file, then run{' '}
-                  <span className="font-mono">install</span> (sudo recommended)
+                  <span className="font-mono">chmod +x</span> the binary, then run{' '}
+                  <span className="font-mono">install</span> with sudo
                 </li>
-                <li>Creates a systemd user service and starts the agent</li>
+                <li>Registers a systemd service and starts the agent</li>
               </>
             )}
             {os.startsWith('macos') && (
@@ -167,6 +181,7 @@ export default function AgentInstallerPanel({
                   <span className="font-mono">install</span>
                 </li>
                 <li>Creates a LaunchAgent and starts the agent</li>
+                <li>If Gatekeeper blocks it: System Settings → Privacy & Security → Allow</li>
               </>
             )}
           </ol>
@@ -193,7 +208,7 @@ export default function AgentInstallerPanel({
 
         <p className="text-[11px] text-slate-400">
           Server: <span className="font-mono text-slate-500">{cleanServer}</span>
-          {' · '}Native agent v2 — zero endpoint runtime dependencies
+          {' · '}Native agent — zero endpoint runtime dependencies
         </p>
       </div>
     </section>
