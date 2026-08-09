@@ -11,7 +11,6 @@ import {
   Monitor,
   RefreshCw,
   Server,
-  ShieldCheck,
   Ticket,
   Wifi,
 } from 'lucide-react';
@@ -112,12 +111,12 @@ export default function ContextAwareDashboard() {
   }, [authLoading, user, load]);
 
   const scopedDevices = useMemo(
-    () => devices.filter((d) => matchesScope(d, organizationId, siteId, user?.tenant_id)),
-    [devices, organizationId, siteId, user?.tenant_id]
+    () => devices.filter((d) => matchesScope(d, organizationId, siteId)),
+    [devices, organizationId, siteId]
   );
   const scopedTickets = useMemo(
-    () => tickets.filter((t) => matchesScope(t as Row, organizationId, siteId, user?.tenant_id)),
-    [tickets, organizationId, siteId, user?.tenant_id]
+    () => tickets.filter((t) => matchesScope(t as Row, organizationId, siteId)),
+    [tickets, organizationId, siteId]
   );
 
   const online = scopedDevices.filter((d) =>
@@ -129,11 +128,13 @@ export default function ContextAwareDashboard() {
     const open = scopedTickets.filter((t) => !resolved(t.status)).length;
     const pend = scopedTickets.filter((t) => pending(t.status)).length;
     const due = scopedTickets.filter((t) => {
-      const d = days(t.due_date || (t as any).due_at);
+      const row = t as Row;
+      const d = days(row.due_date || row.due_at || null);
       return d !== null && d === 0 && !resolved(t.status);
     }).length;
     const overdue = scopedTickets.filter((t) => {
-      const d = days(t.due_date || (t as any).due_at);
+      const row = t as Row;
+      const d = days(row.due_date || row.due_at || null);
       return d !== null && d < 0 && !resolved(t.status);
     }).length;
     return { open, pending: pend, due, overdue, active: open || 1 };
@@ -194,7 +195,6 @@ export default function ContextAwareDashboard() {
           </button>
         </div>
 
-        {/* Always-visible agent download entry */}
         <Link
           href="/agents"
           className="flex flex-col gap-3 rounded-2xl border border-indigo-200 bg-gradient-to-r from-indigo-50 to-white p-5 shadow-sm transition hover:border-indigo-300 hover:shadow-md sm:flex-row sm:items-center sm:justify-between"
