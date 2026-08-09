@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-const agentVersion = "2.2.3-webrtc-reenroll"
+const agentVersion = "2.2.4-capture-fix"
 
 func main() {
 	if len(os.Args) < 2 {
@@ -57,8 +57,8 @@ func printHelp() {
   bhudi-agent uninstall                           Remove service / startup task
   bhudi-agent version
 
-Supports remote terminal, screen share (JPEG), and WebRTC signaling spike.
-Auto re-enrolls if the backend rejects stored credentials (e.g. after restart).
+Supports remote terminal, screen share, and WebRTC signaling spike.
+Auto re-enrolls if the backend rejects stored credentials.
 
 Environment:
   BHUDI_SERVER_URL    Backend base URL
