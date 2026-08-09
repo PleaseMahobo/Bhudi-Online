@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-const agentVersion = "2.2.0-native-desktop"
+const agentVersion = "2.2.3-webrtc-reenroll"
 
 func main() {
 	if len(os.Args) < 2 {
@@ -57,7 +57,8 @@ func printHelp() {
   bhudi-agent uninstall                           Remove service / startup task
   bhudi-agent version
 
-Supports interactive remote terminal and screen sharing (desktop) sessions.
+Supports remote terminal, screen share (JPEG), and WebRTC signaling spike.
+Auto re-enrolls if the backend rejects stored credentials (e.g. after restart).
 
 Environment:
   BHUDI_SERVER_URL    Backend base URL
