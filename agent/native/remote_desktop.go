@@ -5,7 +5,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"image"
 	"image/jpeg"
 	"runtime"
 	"strings"
@@ -34,13 +33,22 @@ func startRemoteDesktop(serverURL, agentID string, command map[string]any) map[s
 	if displayProtocol == "" {
 		displayProtocol = "native"
 	}
+	monitorIndex := 0
+	if v, ok := payload["monitor_index"]; ok {
+		switch n := v.(type) {
+		case float64:
+			monitorIndex = int(n)
+		case int:
+			monitorIndex = n
+		}
+	}
 
 	wsURL, err := sessionWSURL(serverURL, sessionID, agentID)
 	if err != nil {
 		return resultErr(err.Error())
 	}
 
-	go runDesktopSession(wsURL, sessionID, sessionMode, displayProtocol)
+	go runDesktopSession(wsURL, sessionID, sessionMode, displayProtocol, monitorIndex)
 
 	return map[string]any{
 		"exit_code": 0,
@@ -53,12 +61,13 @@ func startRemoteDesktop(serverURL, agentID string, command map[string]any) map[s
 			"session_type":     "desktop",
 			"session_mode":     sessionMode,
 			"display_protocol": displayProtocol,
+			"monitor_index":    monitorIndex,
 		},
 	}
 }
 
-func runDesktopSession(wsURL, sessionID, sessionMode, displayProtocol string) {
-	fmt.Println("[remote-desktop] connecting", wsURL)
+func runDesktopSession(wsURL, sessionID, sessionMode, displayProtocol string, monitorIndex int) {
+	fmt.Println("[remote-desktop] connecting", wsURL, "monitor", monitorIndex)
 	dialer := websocket.Dialer{HandshakeTimeout: 20 * time.Second}
 	conn, resp, err := dialer.Dial(wsURL, nil)
 	if err != nil {
@@ -80,7 +89,7 @@ func runDesktopSession(wsURL, sessionID, sessionMode, displayProtocol string) {
 	fmt.Println("[remote-desktop] attached:", string(msg)[:min(120, len(msg))])
 	_ = conn.SetReadDeadline(time.Time{})
 
-	bounds, err := primaryDisplayBounds()
+	ox, oy, fw, fh, err := monitorRect(monitorIndex)
 	if err != nil {
 		_ = writeJSON(conn, map[string]any{
 			"type": "error", "session_id": sessionID,
@@ -89,6 +98,7 @@ func runDesktopSession(wsURL, sessionID, sessionMode, displayProtocol string) {
 		fmt.Println("[remote-desktop] capture unavailable:", err)
 		return
 	}
+	mons := listMonitors()
 
 	_ = writeJSON(conn, map[string]any{
 		"type":             "desktop_ready",
@@ -96,9 +106,13 @@ func runDesktopSession(wsURL, sessionID, sessionMode, displayProtocol string) {
 		"platform":         runtime.GOOS,
 		"display_protocol": displayProtocol,
 		"session_mode":     sessionMode,
-		"width":            bounds.Dx(),
-		"height":           bounds.Dy(),
+		"width":            fw,
+		"height":           fh,
+		"monitor_index":    monitorIndex,
+		"origin_x":         ox,
+		"origin_y":         oy,
 		"encoding":         "jpeg",
+		"monitors":         mons,
 	})
 
 	stop := make(chan struct{})
@@ -135,15 +149,10 @@ func runDesktopSession(wsURL, sessionID, sessionMode, displayProtocol string) {
 				case "mouse", "mousemove", "mousedown", "mouseup", "click", "wheel",
 					"keydown", "keyup", "keypress", "keyboard":
 					if sessionMode == "control" {
-						applyDesktopInput(inner, bounds)
+						applyDesktopInputAt(inner, fw, fh, ox, oy)
 					}
-					_ = writeJSON(conn, map[string]any{
-						"type": "desktop_event_ack", "session_id": sessionID, "event": ev,
-					})
 				default:
-					_ = writeJSON(conn, map[string]any{
-						"type": "desktop_event_ack", "session_id": sessionID, "event": ev,
-					})
+					// ignore unknown
 				}
 			}
 			if msgType == "close" {
@@ -161,7 +170,7 @@ func runDesktopSession(wsURL, sessionID, sessionMode, displayProtocol string) {
 			fmt.Println("[remote-desktop] session ended", sessionID)
 			return
 		case <-ticker.C:
-			img, err := capturePrimaryScreen()
+			img, err := captureScreenRegion(monitorIndex)
 			if err != nil {
 				fmt.Println("[remote-desktop] capture:", err)
 				continue
@@ -185,21 +194,6 @@ func runDesktopSession(wsURL, sessionID, sessionMode, displayProtocol string) {
 	}
 }
 
-func maybeScale(img image.Image, maxWidth int) image.Image {
-	b := img.Bounds()
-	w, h := b.Dx(), b.Dy()
-	if w <= maxWidth {
-		return img
-	}
-	nw := maxWidth
-	nh := h * maxWidth / w
-	dst := image.NewRGBA(image.Rect(0, 0, nw, nh))
-	for y := 0; y < nh; y++ {
-		sy := y * h / nh
-		for x := 0; x < nw; x++ {
-			sx := x * w / nw
-			dst.Set(x, y, img.At(b.Min.X+sx, b.Min.Y+sy))
-		}
-	}
-	return dst
+func maybeScale(img interface{ Bounds() interface{ Dx() int; Dy() int } }, maxWidth int) interface{} {
+	return maybeScaleImg(img, maxWidth)
 }

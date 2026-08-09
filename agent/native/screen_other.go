@@ -9,11 +9,23 @@ import (
 	"runtime"
 )
 
+func listMonitors() []MonitorInfo {
+	return []MonitorInfo{{Index: 0, Name: "Primary", Width: 1280, Height: 720, Primary: true}}
+}
+
 func primaryDisplayBounds() (image.Rectangle, error) {
 	return image.Rect(0, 0, 1280, 720), nil
 }
 
+func monitorRect(index int) (x, y, w, h int, err error) {
+	return 0, 0, 1280, 720, nil
+}
+
 func capturePrimaryScreen() (image.Image, error) {
+	return captureScreenRegion(0)
+}
+
+func captureScreenRegion(monitorIndex int) (image.Image, error) {
 	tmp := "/tmp/bhudi-screen.png"
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
@@ -36,6 +48,6 @@ func capturePrimaryScreen() (image.Image, error) {
 	return loadImageFile(tmp)
 }
 
-func applyDesktopInput(ev map[string]any, bounds image.Rectangle) {
-	// Input injection on non-Windows is not implemented in this build.
-}
+func applyDesktopInput(ev map[string]any, bounds image.Rectangle) {}
+
+func applyDesktopInputAt(ev map[string]any, frameW, frameH, originX, originY int) {}
