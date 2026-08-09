@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"image"
 	"image/jpeg"
 	"runtime"
 	"strings"
@@ -152,7 +153,6 @@ func runDesktopSession(wsURL, sessionID, sessionMode, displayProtocol string, mo
 						applyDesktopInputAt(inner, fw, fh, ox, oy)
 					}
 				default:
-					// ignore unknown
 				}
 			}
 			if msgType == "close" {
@@ -194,6 +194,21 @@ func runDesktopSession(wsURL, sessionID, sessionMode, displayProtocol string, mo
 	}
 }
 
-func maybeScale(img interface{ Bounds() interface{ Dx() int; Dy() int } }, maxWidth int) interface{} {
-	return maybeScaleImg(img, maxWidth)
+func maybeScale(img image.Image, maxWidth int) image.Image {
+	b := img.Bounds()
+	w, h := b.Dx(), b.Dy()
+	if w <= maxWidth {
+		return img
+	}
+	nw := maxWidth
+	nh := h * maxWidth / w
+	dst := image.NewRGBA(image.Rect(0, 0, nw, nh))
+	for y := 0; y < nh; y++ {
+		sy := y * h / nh
+		for x := 0; x < nw; x++ {
+			sx := x * w / nw
+			dst.Set(x, y, img.At(b.Min.X+sx, b.Min.Y+sy))
+		}
+	}
+	return dst
 }
