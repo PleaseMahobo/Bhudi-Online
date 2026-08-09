@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-const agentVersion = "2.2.6-multimon-input"
+const agentVersion = "2.2.7-display-fix"
 
 func main() {
 	if len(os.Args) < 2 {
@@ -56,6 +56,8 @@ func printHelp() {
   bhudi-agent uninstall
   bhudi-agent run [-server URL]
   bhudi-agent version
+
+Screen share requires an interactive desktop session (logged-in user).
 `)
 }
 
