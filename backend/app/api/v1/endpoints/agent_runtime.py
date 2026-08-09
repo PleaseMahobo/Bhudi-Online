@@ -8,6 +8,8 @@ Endpoints (under /api/v1):
   POST /runtime/agents/{agent_id}/commands
   GET  /runtime/agents/{agent_id}/commands/pending
   POST /runtime/agents/{agent_id}/commands/{command_id}/result
+  POST /runtime/remote/terminal
+  POST /runtime/remote/desktop
 
 This store is process-local so the agent loop works even when Postgres
 models/services are partially incomplete. Production will persist to DB.
@@ -22,6 +24,7 @@ from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
 
 from app.state import device_state
+from app.services.remote_session_manager import remote_session_manager
 
 router = APIRouter(prefix="/runtime")
 
@@ -118,26 +121,17 @@ def heartbeat(req: HeartbeatRequest):
 
     device_state.heartbeat(req.agent_id)
     if req.agent_id in device_state.devices:
-        device_state.devices[req.agent_id].update(
-            {
-                "hostname": agent.get("hostname"),
-                "cpu_percent": agent.get("cpu_percent"),
-                "memory_percent": agent.get("memory_percent"),
-                "disk_percent": agent.get("disk_percent"),
-                "status": "online",
-            }
-        )
+        if req.hostname:
+            device_state.devices[req.agent_id]["hostname"] = req.hostname
+        if req.ip_address:
+            device_state.devices[req.agent_id]["ip_address"] = req.ip_address
 
-    pending = [
-        c
-        for c in _commands.get(req.agent_id, [])
-        if c["status"] in ("pending", "dispatched")
-    ]
+    pending = sum(
+        1 for c in _commands.get(req.agent_id, []) if c["status"] in ("pending", "dispatched")
+    )
     return {
-        "status": "ok",
-        "server_time": datetime.now(timezone.utc).isoformat(),
-        "pending_commands": len(pending),
-        "poll_interval": 5,
+        "ok": True,
+        "pending_commands": pending,
         "heartbeat_interval": 30,
     }
 
@@ -149,27 +143,16 @@ def list_runtime_agents():
 
 def _translate_package_command(platform_name: str, command: str) -> str | None:
     normalized = command.strip().lower()
-    if not normalized:
-        return None
-    if platform_name.startswith("darwin") or platform_name == "macos":
-        if normalized.startswith("install "):
-            package = command.strip().split(maxsplit=1)[1]
-            return f"brew update && brew install {package}"
-        if normalized.startswith("update "):
-            package = command.strip().split(maxsplit=1)[1]
-            return f"brew update && brew upgrade {package}"
-        if normalized.startswith("uninstall "):
-            package = command.strip().split(maxsplit=1)[1]
+    package = command.strip().split(" ", 1)[-1] if " " in command.strip() else ""
+    if normalized.startswith("install ") and package:
+        if "darwin" in platform_name or platform_name == "macos":
+            return f"brew install {package}"
+        if "linux" in platform_name:
+            return f"sudo apt-get install -y {package}"
+    if normalized.startswith("uninstall ") and package:
+        if "darwin" in platform_name or platform_name == "macos":
             return f"brew uninstall {package}"
-    if platform_name.startswith("linux") or platform_name == "linux":
-        if normalized.startswith("install "):
-            package = command.strip().split(maxsplit=1)[1]
-            return f"sudo apt-get update && sudo apt-get install -y {package}"
-        if normalized.startswith("update "):
-            package = command.strip().split(maxsplit=1)[1]
-            return f"sudo apt-get update && sudo apt-get install -y {package}"
-        if normalized.startswith("uninstall "):
-            package = command.strip().split(maxsplit=1)[1]
+        if "linux" in platform_name:
             return f"sudo apt-get remove -y {package}"
     return None
 
@@ -235,8 +218,10 @@ def pending_commands(agent_id: str, agent_token: str):
             out.append(
                 {
                     "command_id": c["command_id"],
-                    "command": c["command"],
+                    "command": c.get("command") or "",
                     "shell": c.get("shell", True),
+                    "command_type": c.get("command_type"),
+                    "payload": c.get("payload") or {},
                 }
             )
     return {"commands": out}
@@ -253,10 +238,6 @@ def post_result(agent_id: str, command_id: str, body: CommandResult, agent_token
             c["result"] = body.model_dump()
             c["finished_at"] = datetime.now(timezone.utc).isoformat()
             if body.exit_code == 0:
-                c["retry_count"] = c.get("retry_count", 0)
-            else:
-                c["retry_count"] = c.get("retry_count", 0) + 1
-            if c["status"] == "completed":
                 agent["commands_completed"] = agent.get("commands_completed", 0) + 1
             else:
                 agent["commands_failed"] = agent.get("commands_failed", 0) + 1
@@ -315,51 +296,96 @@ def list_agent_commands(agent_id: str):
         "commands": [
             {
                 "command_id": item["command_id"],
-                "command": item["command"],
+                "command": item.get("command"),
                 "shell": item.get("shell", True),
                 "status": item["status"],
-                "created_at": item.get("created_at"),
-                "result": item.get("result"),
-                "finished_at": item.get("finished_at"),
-                "retry_count": item.get("retry_count", 0),
-                "acknowledged": item.get("acknowledged", False),
-                "execution_profile": item.get("execution_profile"),
+                "command_type": item.get("command_type"),
             }
             for item in _commands.get(agent_id, [])
         ],
     }
 
 
-@router.post("/agents/{agent_id}/commands/{command_id}/ack")
-def acknowledge_command(agent_id: str, command_id: str, body: CommandAck, agent_token: str):
-    agent = _agents.get(agent_id)
-    if not agent or agent["agent_token"] != agent_token:
-        raise HTTPException(status_code=401, detail="Invalid agent credentials")
-    for c in _commands.get(agent_id, []):
-        if c["command_id"] == command_id:
-            c["acknowledged"] = True
-            c["status"] = body.status
-            return {"status": "acknowledged", "command_id": command_id, "acknowledged": True}
-    raise HTTPException(status_code=404, detail="Command not found")
+class RuntimeRemoteTerminalRequest(BaseModel):
+    agent_id: str
+    shell: str = "powershell"
+    working_directory: str | None = None
+    interactive: bool = True
 
 
-@router.websocket("/agents/{agent_id}/stream")
-async def stream_agent_output(websocket: WebSocket, agent_id: str):
+class RuntimeRemoteDesktopRequest(BaseModel):
+    agent_id: str
+    session_mode: str = "control"
+    display_protocol: str = "native"
+
+
+def _queue_structured(agent_id: str, command_type: str, payload: dict) -> dict:
     if agent_id not in _agents:
-        await websocket.close(code=1008)
-        return
-    await websocket.accept()
-    await websocket.send_json({"event": "connected", "agent_id": agent_id})
-    try:
-        while True:
-            await websocket.receive_text()
-    except WebSocketDisconnect:
-        await websocket.close()
+        raise HTTPException(
+            status_code=404,
+            detail="Agent not found — is the native agent online and enrolled against this backend?",
+        )
+    cmd_id = str(uuid.uuid4())
+    item = {
+        "command_id": cmd_id,
+        "command": "",
+        "shell": False,
+        "command_type": command_type,
+        "payload": payload,
+        "status": "pending",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "result": None,
+    }
+    _commands.setdefault(agent_id, []).append(item)
+    return {"command_id": cmd_id, "agent_id": agent_id, "command_type": command_type, "payload": payload}
 
 
-@router.get("/agents/{agent_id}/commands/{command_id}")
-def get_command(agent_id: str, command_id: str):
-    for c in _commands.get(agent_id, []):
-        if c["command_id"] == command_id:
-            return c
-    raise HTTPException(status_code=404, detail="Command not found")
+@router.post("/remote/terminal")
+def runtime_remote_terminal(body: RuntimeRemoteTerminalRequest):
+    """Start interactive remote terminal for a runtime-enrolled native agent."""
+    session = remote_session_manager.create_session(
+        agent_id=body.agent_id,
+        session_type="terminal",
+        metadata={"shell": body.shell, "working_directory": body.working_directory},
+    )
+    payload = {
+        "session_id": session.session_id,
+        "shell": body.shell,
+        "working_directory": body.working_directory,
+        "interactive": body.interactive,
+        "session_type": "terminal",
+    }
+    queued = _queue_structured(body.agent_id, "remote.terminal.start", payload)
+    remote_session_manager.attach_command(session.session_id, queued["command_id"])
+    return {
+        **queued,
+        "session_id": session.session_id,
+        "session_status": session.status,
+        "stream_path": f"/api/v1/remote-access/sessions/{session.session_id}/dashboard",
+        "operation": "remote_terminal",
+    }
+
+
+@router.post("/remote/desktop")
+def runtime_remote_desktop(body: RuntimeRemoteDesktopRequest):
+    """Start screen-sharing session for a runtime-enrolled native agent."""
+    session = remote_session_manager.create_session(
+        agent_id=body.agent_id,
+        session_type="desktop",
+        metadata={"session_mode": body.session_mode, "display_protocol": body.display_protocol},
+    )
+    payload = {
+        "session_id": session.session_id,
+        "session_mode": body.session_mode,
+        "display_protocol": body.display_protocol,
+        "session_type": "desktop",
+    }
+    queued = _queue_structured(body.agent_id, "remote.desktop.start", payload)
+    remote_session_manager.attach_command(session.session_id, queued["command_id"])
+    return {
+        **queued,
+        "session_id": session.session_id,
+        "session_status": session.status,
+        "stream_path": f"/api/v1/remote-access/sessions/{session.session_id}/dashboard",
+        "operation": "remote_desktop",
+    }
