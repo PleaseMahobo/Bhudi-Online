@@ -8,6 +8,10 @@ const REPO_ZIP =
 const REPO_PS1 =
   'https://raw.githubusercontent.com/PleaseMahobo/Bhudi-Online/main/agent/install.ps1';
 
+/** Published by .github/workflows/build-agent-setup.yml */
+const EXE_RELEASE_URL =
+  'https://github.com/PleaseMahobo/Bhudi-Online/releases/download/agent-setup-latest/bhudi-agent-setup.exe';
+
 type InstallerMeta = {
   file: string;
   filename: string;
@@ -51,13 +55,10 @@ function lines(parts: string[]): string {
   return parts.join('\n');
 }
 
-/** Embedded fallbacks when agent/ is not on the deploy filesystem (e.g. Vercel). */
 function buildFallbacks(): Record<string, string> {
-  // Use array joins only — never nest shell ${...} inside JS template literals.
   return {
     'install.ps1': lines([
       '# Bhudi Agent Windows installer (embedded fallback)',
-      '# Bootstraps full agent/install.ps1 from GitHub main.',
       '$ErrorActionPreference = "Stop"',
       '$ServerUrl = $env:BHUDI_SERVER_URL',
       'if (-not $ServerUrl) { $ServerUrl = "' + DEFAULT_SERVER + '" }',
@@ -65,9 +66,7 @@ function buildFallbacks(): Record<string, string> {
       '$zip = "$env:TEMP\\bhudi-main.zip"',
       '$dest = "$env:TEMP\\bhudi-src"',
       'Write-Host "[Bhudi] Downloading installer sources..." -ForegroundColor Cyan',
-      'Invoke-WebRequest -Uri "' +
-        REPO_ZIP +
-        '" -OutFile $zip -UseBasicParsing',
+      'Invoke-WebRequest -Uri "' + REPO_ZIP + '" -OutFile $zip -UseBasicParsing',
       'if (Test-Path $dest) { Remove-Item $dest -Recurse -Force }',
       'Expand-Archive $zip $dest -Force',
       '$ps1 = Get-ChildItem -Path $dest -Recurse -Filter install.ps1 | Where-Object { $_.Directory.Name -eq "agent" } | Select-Object -First 1',
@@ -75,11 +74,9 @@ function buildFallbacks(): Record<string, string> {
       '& $ps1.FullName -ServerUrl $ServerUrl -StartNow',
       '',
     ]),
-
     'install.sh': lines([
       '#!/usr/bin/env bash',
       'set -euo pipefail',
-      // Shell parameter expansion written as plain text (no JS `...${...}...)`
       'SERVER_URL="${BHUDI_SERVER_URL:-' + DEFAULT_SERVER + '}"',
       'SERVER_URL="${SERVER_URL%/}"',
       'TMP="$(mktemp -d)"',
@@ -90,13 +87,12 @@ function buildFallbacks(): Record<string, string> {
       'exec "$PS1" --server-url "$SERVER_URL"',
       '',
     ]),
-
     'install.bat': lines([
       '@echo off',
-      'echo [Bhudi] Fetching install.ps1...',
-      'powershell -NoProfile -ExecutionPolicy Bypass -Command "irm \'' +
-        REPO_PS1 +
-        '\' -OutFile \'%TEMP%\\bhudi-install.ps1\'; & \'%TEMP%\\bhudi-install.ps1\'"',
+      'echo [Bhudi] Opening Windows EXE installer download...',
+      'start "" "' + EXE_RELEASE_URL + '"',
+      'echo If the browser download fails, get bhudi-agent-setup.exe from:',
+      'echo ' + EXE_RELEASE_URL,
       'pause',
       '',
     ]),
@@ -114,25 +110,51 @@ function bakeServer(script: string, cleanServer: string): string {
 }
 
 /**
- * Serves Bhudi agent installers as downloadable attachments.
+ * Serves agent installers.
  *
- * Query:
- *   os=windows|linux|macos|bat  (default windows)
- *   server=<backend base URL>   optional — baked into the script
- *   inline=1                    return body without Content-Disposition attachment
+ * os=exe|windows-exe  → redirect to published Windows setup EXE (preferred)
+ * os=windows|ps1|bat|linux|macos → script download
  */
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
-  const os = (searchParams.get('os') || 'windows').toLowerCase();
+  const os = (searchParams.get('os') || 'exe').toLowerCase();
   const server =
     searchParams.get('server') ||
     process.env.NEXT_PUBLIC_API_URL ||
     process.env.BHUDI_SERVER_URL ||
     DEFAULT_SERVER;
-
   const cleanServer = normalizeServer(server);
-  const meta = CANDIDATES[os] || CANDIDATES.windows;
 
+  // Prefer real Windows EXE installer
+  if (os === 'exe' || os === 'windows-exe' || os === 'msi') {
+    const localCandidates = [
+      path.join(process.cwd(), 'public', 'downloads', 'bhudi-agent-setup.exe'),
+      path.join(process.cwd(), '..', 'agent', 'dist', 'bhudi-agent-setup.exe'),
+      path.join(process.cwd(), '..', 'agent', 'cmd', 'bhudi-agent-setup', 'bhudi-agent-setup.exe'),
+    ];
+    for (const p of localCandidates) {
+      try {
+        const buf = await readFile(p);
+        return new NextResponse(buf, {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/vnd.microsoft.portable-executable',
+            'Content-Disposition': 'attachment; filename="bhudi-agent-setup.exe"',
+            'Cache-Control': 'no-store',
+            'X-Bhudi-Server': cleanServer,
+          },
+        });
+      } catch {
+        /* try next / fall through to release URL */
+      }
+    }
+
+    // Published by GitHub Actions (tag: agent-setup-latest)
+    const url = new URL(EXE_RELEASE_URL);
+    return NextResponse.redirect(url.toString(), 302);
+  }
+
+  const meta = CANDIDATES[os] || CANDIDATES.windows;
   let body: string | null = null;
   const roots = [
     path.join(process.cwd(), '..', 'agent'),
@@ -152,7 +174,6 @@ export async function GET(req: NextRequest) {
   if (!body) {
     body = FALLBACK[meta.file] || FALLBACK['install.ps1'];
   }
-
   body = bakeServer(body, cleanServer);
 
   const inline = searchParams.get('inline') === '1';
@@ -161,10 +182,8 @@ export async function GET(req: NextRequest) {
     'Cache-Control': 'no-store',
     'X-Bhudi-Server': cleanServer,
   };
-
   if (!inline) {
-    headers['Content-Disposition'] =
-      'attachment; filename="' + meta.filename + '"';
+    headers['Content-Disposition'] = 'attachment; filename="' + meta.filename + '"';
   }
 
   return new NextResponse(body, { status: 200, headers });

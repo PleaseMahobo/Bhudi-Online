@@ -8,9 +8,13 @@ const DEFAULT_SERVER =
     process.env.NEXT_PUBLIC_API_URL?.replace(/\/api\/v1\/?$/, '')) ||
   'https://bhudi-online-production.up.railway.app';
 
-type OsKey = 'windows' | 'linux' | 'macos';
+const EXE_RELEASE =
+  'https://github.com/PleaseMahobo/Bhudi-Online/releases/download/agent-setup-latest/bhudi-agent-setup.exe';
+
+type OsKey = 'exe' | 'windows' | 'linux' | 'macos';
 
 const OS_OPTIONS: { key: OsKey; label: string }[] = [
+  { key: 'exe', label: 'Windows (.exe)' },
   { key: 'windows', label: 'Windows (.ps1)' },
   { key: 'linux', label: 'Linux (.sh)' },
   { key: 'macos', label: 'macOS (.sh)' },
@@ -28,17 +32,24 @@ export default function AgentInstallerPanel({
   serverUrl?: string;
   compact?: boolean;
 }) {
-  const [os, setOs] = useState<OsKey>('windows');
+  const [os, setOs] = useState<OsKey>('exe');
   const [copied, setCopied] = useState<'link' | 'cmd' | null>(null);
 
   const cleanServer = serverUrl.replace(/\/+$/, '').replace(/\/api\/v1$/i, '');
 
   const downloadHref = useMemo(() => {
+    if (os === 'exe') {
+      // Prefer app proxy (local file or redirect to GitHub release EXE)
+      return '/api/agent/download?os=exe&server=' + encodeURIComponent(cleanServer);
+    }
     const q = new URLSearchParams({ os: os, server: cleanServer });
     return '/api/agent/download?' + q.toString();
   }, [os, cleanServer]);
 
   const oneLiner = useMemo(() => {
+    if (os === 'exe') {
+      return 'Download bhudi-agent-setup.exe and run as Administrator';
+    }
     const url = origin() + downloadHref + '&inline=1';
     if (os === 'windows') {
       return 'irm "' + url + '" | iex';
@@ -46,7 +57,8 @@ export default function AgentInstallerPanel({
     return 'curl -fsSL "' + url + '" | bash';
   }, [os, downloadHref]);
 
-  const fullDownloadUrl = origin() + downloadHref;
+  const fullDownloadUrl =
+    os === 'exe' ? origin() + downloadHref || EXE_RELEASE : origin() + downloadHref;
 
   const copy = async (kind: 'link' | 'cmd', text: string) => {
     try {
@@ -67,13 +79,13 @@ export default function AgentInstallerPanel({
           <Server size={16} className="text-indigo-600" />
           Install agent
         </div>
-        <span className="text-xs text-slate-500">Windows · Linux · macOS</span>
+        <span className="text-xs text-slate-500">EXE · Scripts</span>
       </header>
 
       <div className={'space-y-4 ' + pad}>
         <p className="text-sm text-slate-600 leading-relaxed">
-          Download an installer for the target OS, or copy a one-line install command. The agent
-          enrolls automatically and appears under Devices.
+          <strong>Recommended:</strong> download the Windows <span className="font-mono text-xs">.exe</span> setup,
+          run it as Administrator, and the agent installs and enrolls automatically.
         </p>
 
         <div className="flex flex-wrap gap-2">
@@ -105,11 +117,11 @@ export default function AgentInstallerPanel({
             className="inline-flex flex-1 items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-indigo-500"
           >
             <Download size={16} />
-            Download installer
+            {os === 'exe' ? 'Download bhudi-agent-setup.exe' : 'Download installer'}
           </a>
           <button
             type="button"
-            onClick={() => copy('link', fullDownloadUrl || downloadHref)}
+            onClick={() => copy('link', fullDownloadUrl || EXE_RELEASE)}
             className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
           >
             {copied === 'link' ? <Check size={16} /> : <Copy size={16} />}
@@ -117,29 +129,46 @@ export default function AgentInstallerPanel({
           </button>
         </div>
 
-        <div>
-          <div className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-slate-500">
-            <Terminal size={12} />
-            One-line install {os === 'windows' ? '(PowerShell as Admin)' : '(terminal)'}
+        {os === 'exe' ? (
+          <div className="rounded-xl border border-slate-100 bg-slate-50 px-4 py-3 text-xs text-slate-600 leading-relaxed">
+            <p className="font-semibold text-slate-800">After download</p>
+            <ol className="mt-2 list-decimal space-y-1 pl-4">
+              <li>Right-click <span className="font-mono">bhudi-agent-setup.exe</span> → Run as administrator</li>
+              <li>Allow the installer to download the agent package and create the startup task</li>
+              <li>Confirm the device appears under Devices / Assets</li>
+            </ol>
+            <p className="mt-2 text-slate-500">Requires Python 3.10+ on the PC (python.org, Add to PATH).</p>
+            <p className="mt-1">
+              Direct release link:{' '}
+              <a className="text-indigo-600 hover:underline break-all" href={EXE_RELEASE}>
+                {EXE_RELEASE}
+              </a>
+            </p>
           </div>
-          <div className="flex gap-2">
-            <pre className="flex-1 overflow-x-auto rounded-xl bg-slate-900 px-3 py-2.5 text-[11px] leading-relaxed text-slate-200">
-              {oneLiner}
-            </pre>
-            <button
-              type="button"
-              onClick={() => copy('cmd', oneLiner)}
-              className="shrink-0 rounded-xl border border-slate-200 px-3 text-slate-600 hover:bg-slate-50"
-              title="Copy command"
-            >
-              {copied === 'cmd' ? <Check size={16} /> : <Copy size={16} />}
-            </button>
+        ) : (
+          <div>
+            <div className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-slate-500">
+              <Terminal size={12} />
+              One-line install
+            </div>
+            <div className="flex gap-2">
+              <pre className="flex-1 overflow-x-auto rounded-xl bg-slate-900 px-3 py-2.5 text-[11px] leading-relaxed text-slate-200">
+                {oneLiner}
+              </pre>
+              <button
+                type="button"
+                onClick={() => copy('cmd', oneLiner)}
+                className="shrink-0 rounded-xl border border-slate-200 px-3 text-slate-600 hover:bg-slate-50"
+                title="Copy command"
+              >
+                {copied === 'cmd' ? <Check size={16} /> : <Copy size={16} />}
+              </button>
+            </div>
           </div>
-        </div>
+        )}
 
         <p className="text-[11px] text-slate-400">
           Server: <span className="font-mono text-slate-500">{cleanServer}</span>
-          {' · '}Requires Python 3.10+ on the target device
         </p>
       </div>
     </section>

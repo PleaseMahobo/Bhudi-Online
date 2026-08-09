@@ -1,0 +1,59 @@
+name: Build Windows Agent Setup EXE
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "agent/cmd/bhudi-agent-setup/**"
+      - ".github/workflows/build-agent-setup.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
+      - name: Build Windows EXE
+        working-directory: agent/cmd/bhudi-agent-setup
+        env:
+          GOOS: windows
+          GOARCH: amd64
+          CGO_ENABLED: "0"
+        run: go build -ldflags="-s -w" -o bhudi-agent-setup.exe .
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bhudi-agent-setup-windows
+          path: agent/cmd/bhudi-agent-setup/bhudi-agent-setup.exe
+
+      - name: Publish release asset
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: agent-setup-latest
+          name: Bhudi Agent Setup (Windows EXE)
+          body: |
+            Windows installer for the Bhudi RMM agent.
+
+            1. Download **bhudi-agent-setup.exe**
+            2. Right-click → **Run as administrator** (recommended)
+            3. Agent installs, enrolls, and starts automatically
+
+            Optional CLI:
+            ```
+            bhudi-agent-setup.exe -server https://your-backend.example.com
+            ```
+
+            Requires **Python 3.10+** on the target machine (python.org, Add to PATH).
+          files: agent/cmd/bhudi-agent-setup/bhudi-agent-setup.exe
+          make_latest: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
