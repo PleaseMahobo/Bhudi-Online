@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 )
 
@@ -85,6 +86,17 @@ func cycle(client *http.Client, server string, ident identity) error {
 	if err := sendHeartbeat(client, server, ident); err != nil {
 		return err
 	}
+
+	for _, cmd := range pollEnterpriseCommands(client, server, ident) {
+		cmdID := firstString(cmd, "command_id", "id")
+		cmdType := firstString(cmd, "command_type")
+		fmt.Printf("[enterprise-command] %s type=%s\n", cmdID, cmdType)
+		_ = markEnterpriseSent(client, server, ident, cmdID)
+		result := executeEnterpriseCommand(server, ident, cmd)
+		_ = postEnterpriseResult(client, server, ident, cmdID, result)
+		fmt.Printf("[enterprise-result] exit=%v\n", result["exit_code"])
+	}
+
 	cmds, err := pollCommands(client, server, ident)
 	if err != nil {
 		return err
@@ -99,6 +111,139 @@ func cycle(client *http.Client, server string, ident identity) error {
 		fmt.Printf("[result] exit=%d\n", exitCode)
 	}
 	return nil
+}
+
+func executeEnterpriseCommand(server string, ident identity, cmd map[string]any) map[string]any {
+	cmdType := firstString(cmd, "command_type")
+	payload, _ := cmd["payload"].(map[string]any)
+	if payload == nil {
+		payload = map[string]any{}
+	}
+
+	switch cmdType {
+	case "remote.terminal.start":
+		interactive := true
+		if v, ok := payload["interactive"]; ok {
+			if b, ok := v.(bool); ok {
+				interactive = b
+			}
+		}
+		if interactive {
+			return startRemoteTerminal(server, ident.AgentID, cmd)
+		}
+		shellCmd := firstString(payload, "command", "script")
+		if shellCmd == "" {
+			return map[string]any{"exit_code": 1, "stdout": "", "stderr": "no command"}
+		}
+		code, out, errOut := runCommand(shellCmd, true)
+		return map[string]any{"exit_code": code, "stdout": out, "stderr": errOut}
+
+	case "remote.cmd", "remote.powershell", "remote_script", "remote_powershell":
+		shellCmd := firstString(payload, "command", "script")
+		if shellCmd == "" {
+			return map[string]any{"exit_code": 1, "stdout": "", "stderr": "no command"}
+		}
+		code, out, errOut := runCommand(shellCmd, true)
+		return map[string]any{"exit_code": code, "stdout": out, "stderr": errOut}
+
+	case "remote.reboot":
+		if runtime.GOOS == "windows" {
+			code, out, errOut := runCommand("shutdown /r /t 5", true)
+			return map[string]any{"exit_code": code, "stdout": out, "stderr": errOut}
+		}
+		code, out, errOut := runCommand("sudo reboot", true)
+		return map[string]any{"exit_code": code, "stdout": out, "stderr": errOut}
+
+	default:
+		if shellCmd := firstString(payload, "command", "script"); shellCmd != "" {
+			code, out, errOut := runCommand(shellCmd, true)
+			return map[string]any{"exit_code": code, "stdout": out, "stderr": errOut}
+		}
+		return map[string]any{"exit_code": 1, "stdout": "", "stderr": "unsupported command_type: " + cmdType}
+	}
+}
+
+func pollEnterpriseCommands(client *http.Client, server string, ident identity) []map[string]any {
+	url := server + "/api/v1/agent/" + ident.AgentID + "/commands"
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return nil
+	}
+	res, err := client.Do(req)
+	if err != nil {
+		return nil
+	}
+	defer res.Body.Close()
+	if res.StatusCode == 404 || res.StatusCode >= 300 {
+		return nil
+	}
+	body, _ := io.ReadAll(res.Body)
+	var list []map[string]any
+	if json.Unmarshal(body, &list) == nil {
+		return list
+	}
+	var wrap struct {
+		Commands []map[string]any `json:"commands"`
+	}
+	if json.Unmarshal(body, &wrap) == nil {
+		return wrap.Commands
+	}
+	return nil
+}
+
+func markEnterpriseSent(client *http.Client, server string, ident identity, commandID string) error {
+	if commandID == "" {
+		return nil
+	}
+	url := server + "/api/v1/agent/" + ident.AgentID + "/commands/" + commandID + "/sent"
+	req, err := http.NewRequest(http.MethodPost, url, nil)
+	if err != nil {
+		return err
+	}
+	res, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer res.Body.Close()
+	return nil
+}
+
+func postEnterpriseResult(client *http.Client, server string, ident identity, commandID string, result map[string]any) error {
+	if commandID == "" {
+		return nil
+	}
+	exitCode := 1
+	if v, ok := result["exit_code"].(int); ok {
+		exitCode = v
+	} else if v, ok := result["exit_code"].(float64); ok {
+		exitCode = int(v)
+	}
+	endpoint := "failed"
+	var body any
+	if exitCode == 0 {
+		endpoint = "completed"
+		body = result
+	} else {
+		msg := firstString(result, "stderr", "stdout")
+		if msg == "" {
+			msg = "remote command failed"
+		}
+		body = map[string]any{"message": msg}
+	}
+	url := server + "/api/v1/agent/" + ident.AgentID + "/commands/" + commandID + "/" + endpoint
+	return postJSONClient(client, url, body, nil)
+}
+
+func firstString(m map[string]any, keys ...string) string {
+	for _, k := range keys {
+		if v, ok := m[k]; ok && v != nil {
+			s := strings.TrimSpace(fmt.Sprint(v))
+			if s != "" && s != "<nil>" {
+				return s
+			}
+		}
+	}
+	return ""
 }
 
 func loadOrEnroll(server string) (identity, error) {
