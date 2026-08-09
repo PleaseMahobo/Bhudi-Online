@@ -55,6 +55,8 @@ export default function RemoteAccessConsole() {
   const [status, setStatus] = useState('Idle');
   const [termLog, setTermLog] = useState('');
   const [frameUrl, setFrameUrl] = useState<string | null>(null);
+  const [zoom, setZoom] = useState(100);
+  const [wide, setWide] = useState(true);
 
   const wsRef = useRef<WebSocket | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -349,19 +351,60 @@ export default function RemoteAccessConsole() {
       </section>
 
       <section className="overflow-hidden rounded-2xl border border-slate-200 bg-slate-950 shadow-sm">
-        <header className="border-b border-slate-800 px-4 py-3 text-sm font-semibold text-slate-200">
-          {mode === 'desktop' ? 'Live screen' : 'Live terminal'}
+        <header className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 px-4 py-3 text-sm font-semibold text-slate-200">
+          <span>{mode === 'desktop' ? 'Live screen' : 'Live terminal'}</span>
+          {mode === 'desktop' && (
+            <div className="flex flex-wrap items-center gap-3 text-xs font-normal text-slate-400">
+              <label className="flex items-center gap-2">
+                Zoom
+                <input
+                  type="range"
+                  min={50}
+                  max={200}
+                  step={10}
+                  value={zoom}
+                  onChange={(e) => setZoom(Number(e.target.value))}
+                  className="w-28"
+                />
+                <span className="w-10 tabular-nums text-slate-300">{zoom}%</span>
+              </label>
+              <button
+                type="button"
+                onClick={() => setWide((w) => !w)}
+                className="rounded-lg border border-slate-700 px-2 py-1 text-slate-300 hover:bg-slate-800"
+              >
+                {wide ? 'Fit width' : 'Contain'}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const el = canvasRef.current?.parentElement;
+                  if (el && el.requestFullscreen) void el.requestFullscreen();
+                }}
+                className="rounded-lg border border-slate-700 px-2 py-1 text-slate-300 hover:bg-slate-800"
+              >
+                Fullscreen
+              </button>
+            </div>
+          )}
         </header>
         {mode === 'desktop' ? (
-          <div className="relative flex min-h-[360px] items-center justify-center bg-black p-2">
+          <div className="relative flex min-h-[480px] items-start justify-center overflow-auto bg-black p-2">
             <canvas
               ref={canvasRef}
               onClick={onCanvasClick}
               onContextMenu={(e) => e.preventDefault()}
-              className="max-h-[70vh] max-w-full cursor-crosshair"
+              style={{
+                width: wide ? `${zoom}%` : undefined,
+                maxWidth: wide ? undefined : '100%',
+                height: 'auto',
+                maxHeight: wide ? undefined : '80vh',
+                imageRendering: 'auto',
+              }}
+              className="cursor-crosshair"
             />
             {!frameUrl && (
-              <p className="absolute text-sm text-slate-500">No frames yet — click Connect</p>
+              <p className="absolute top-1/2 text-sm text-slate-500">No frames yet — click Connect</p>
             )}
           </div>
         ) : (
