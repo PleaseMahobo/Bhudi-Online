@@ -1,10 +1,10 @@
-name: Build Windows Agent Setup (EXE + MSI)
+name: Build Native Agents (Windows / Linux / macOS)
 
 on:
   push:
     branches: [main]
     paths:
-      - "agent/cmd/bhudi-agent-setup/**"
+      - "agent/native/**"
       - "agent/msi/**"
       - ".github/workflows/build-agent-setup.yml"
   workflow_dispatch:
@@ -14,75 +14,104 @@ permissions:
 
 jobs:
   build:
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-go@v5
         with:
           go-version: "1.22"
 
-      - name: Build setup EXE
-        working-directory: agent/cmd/bhudi-agent-setup
+      - name: Build native binaries
+        working-directory: agent/native
+        run: |
+          mkdir -p dist
+          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o dist/bhudi-agent-windows-amd64.exe .
+          GOOS=linux   GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o dist/bhudi-agent-linux-amd64 .
+          GOOS=linux   GOARCH=arm64 CGO_ENABLED=0 go build -ldflags="-s -w" -o dist/bhudi-agent-linux-arm64 .
+          GOOS=darwin  GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o dist/bhudi-agent-darwin-amd64 .
+          GOOS=darwin  GOARCH=arm64 CGO_ENABLED=0 go build -ldflags="-s -w" -o dist/bhudi-agent-darwin-arm64 .
+          cp dist/bhudi-agent-windows-amd64.exe dist/bhudi-agent.exe
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bhudi-agent-native
+          path: agent/native/dist/*
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: agent-native-latest
+          name: Bhudi Native Agent (no Python)
+          body: |
+            ## Standalone agents — **no Python required**
+
+            | File | Platform |
+            |------|----------|
+            | `bhudi-agent.exe` | Windows x64 |
+            | `bhudi-agent-linux-amd64` | Linux x64 |
+            | `bhudi-agent-linux-arm64` | Linux ARM64 |
+            | `bhudi-agent-darwin-amd64` | macOS Intel |
+            | `bhudi-agent-darwin-arm64` | macOS Apple Silicon |
+            | `bhudi-agent-setup.msi` | Windows MSI (from MSI job) |
+
+            ### Windows
+            ```
+            bhudi-agent.exe install -server https://your-backend.example.com
+            ```
+
+            ### Linux
+            ```
+            chmod +x bhudi-agent-linux-amd64
+            sudo ./bhudi-agent-linux-amd64 install -server https://your-backend.example.com
+            ```
+
+            ### macOS
+            ```
+            chmod +x bhudi-agent-darwin-arm64
+            ./bhudi-agent-darwin-arm64 install -server https://your-backend.example.com
+            ```
+          files: |
+            agent/native/dist/bhudi-agent.exe
+            agent/native/dist/bhudi-agent-windows-amd64.exe
+            agent/native/dist/bhudi-agent-linux-amd64
+            agent/native/dist/bhudi-agent-linux-arm64
+            agent/native/dist/bhudi-agent-darwin-amd64
+            agent/native/dist/bhudi-agent-darwin-arm64
+          make_latest: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  msi:
+    needs: build
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+      - name: Build Windows agent
+        working-directory: agent/native
         env:
           GOOS: windows
           GOARCH: amd64
           CGO_ENABLED: "0"
-        run: go build -ldflags="-s -w" -o ..\..\msi\bhudi-agent-setup.exe .
-
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+        run: go build -ldflags="-s -w" -o ..\msi\bhudi-agent.exe .
+      - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: "8.0.x"
-
       - name: Install WiX
         run: |
           dotnet tool install --global wix --version 5.0.2
-          wix --version
           wix extension add -g WixToolset.UI.wixext/5.0.2
-
       - name: Build MSI
         working-directory: agent/msi
-        run: |
-          wix build Product.wxs `
-            -ext WixToolset.UI.wixext `
-            -bindpath:setup=. `
-            -o bhudi-agent-setup.msi
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        run: wix build Product.wxs -ext WixToolset.UI.wixext -bindpath:agent=. -o bhudi-agent-setup.msi
+      - uses: actions/upload-artifact@v4
         with:
-          name: bhudi-agent-windows-installers
-          path: |
-            agent/msi/bhudi-agent-setup.exe
-            agent/msi/bhudi-agent-setup.msi
-
-      - name: Publish GitHub Release
-        uses: softprops/action-gh-release@v2
+          name: bhudi-agent-msi
+          path: agent/msi/bhudi-agent-setup.msi
+      - uses: softprops/action-gh-release@v2
         with:
-          tag_name: agent-setup-latest
-          name: Bhudi Agent Setup (Windows EXE + MSI)
-          body: |
-            ## Windows installers
-
-            | File | Use |
-            |------|-----|
-            | **bhudi-agent-setup.msi** | Enterprise / Intune / GPO (recommended) |
-            | **bhudi-agent-setup.exe** | Interactive double-click setup |
-
-            ### MSI
-            ```bat
-            msiexec /i bhudi-agent-setup.msi /qb
-            msiexec /i bhudi-agent-setup.msi SERVERURL=https://your-backend.example.com /qn
-            ```
-
-            ### EXE
-            Run as Administrator. Optional: `bhudi-agent-setup.exe -server https://your-backend.example.com`
-
-            **Requirement:** Python 3.10+ on the target device (Add to PATH).
-          files: |
-            agent/msi/bhudi-agent-setup.exe
-            agent/msi/bhudi-agent-setup.msi
-          make_latest: true
+          tag_name: agent-native-latest
+          files: agent/msi/bhudi-agent-setup.msi
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
