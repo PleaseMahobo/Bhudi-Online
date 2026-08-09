@@ -77,41 +77,52 @@ func runAgent(cfg runConfig) {
 
 	client := &http.Client{Timeout: 30 * time.Second}
 	for {
-		if err := cycle(client, cfg.Server, ident); err != nil {
+		if err := cycle(client, cfg.Server, &ident); err != nil {
 			fmt.Println("[error]", err)
+			if isAuthError(err) {
+				fmt.Println("[bhudi-agent] credentials rejected — re-enrolling…")
+				clearIdentity()
+				newID, e2 := enroll(cfg.Server)
+				if e2 != nil {
+					fmt.Println("[error] re-enroll:", e2)
+				} else {
+					ident = newID
+					fmt.Printf("[bhudi-agent] re-enrolled agent_id=%s\n", ident.AgentID)
+				}
+			}
 		}
 		time.Sleep(time.Duration(cfg.Interval) * time.Second)
 	}
 }
 
-func cycle(client *http.Client, server string, ident identity) error {
-	if err := sendHeartbeat(client, server, ident); err != nil {
+func cycle(client *http.Client, server string, ident *identity) error {
+	if err := sendHeartbeat(client, server, *ident); err != nil {
 		return err
 	}
 
-	for _, cmd := range pollEnterpriseCommands(client, server, ident) {
+	for _, cmd := range pollEnterpriseCommands(client, server, *ident) {
 		cmdID := firstString(cmd, "command_id", "id")
 		cmdType := firstString(cmd, "command_type")
 		fmt.Printf("[enterprise-command] %s type=%s\n", cmdID, cmdType)
-		_ = markEnterpriseSent(client, server, ident, cmdID)
-		result := executeEnterpriseCommand(server, ident, cmd)
-		_ = postEnterpriseResult(client, server, ident, cmdID, result)
+		_ = markEnterpriseSent(client, server, *ident, cmdID)
+		result := executeEnterpriseCommand(server, *ident, cmd)
+		_ = postEnterpriseResult(client, server, *ident, cmdID, result)
 		fmt.Printf("[enterprise-result] exit=%v\n", result["exit_code"])
 	}
 
-	cmds, err := pollCommands(client, server, ident)
+	cmds, err := pollCommands(client, server, *ident)
 	if err != nil {
 		return err
 	}
 	for _, c := range cmds {
 		fmt.Printf("[command] %s type=%s cmd=%s\n", c.CommandID, c.CommandType, c.Command)
-		if c.CommandType == "remote.desktop.start" || c.CommandType == "remote.terminal.start" {
+		if c.CommandType == "remote.desktop.start" || c.CommandType == "remote.desktop.webrtc" || c.CommandType == "remote.terminal.start" {
 			cmdMap := map[string]any{
 				"command_id":   c.CommandID,
 				"command_type": c.CommandType,
 				"payload":      c.Payload,
 			}
-			result := executeEnterpriseCommand(server, ident, cmdMap)
+			result := executeEnterpriseCommand(server, *ident, cmdMap)
 			exitCode := 0
 			if v, ok := result["exit_code"].(int); ok {
 				exitCode = v
@@ -120,12 +131,12 @@ func cycle(client *http.Client, server string, ident identity) error {
 			}
 			stdout, _ := result["stdout"].(string)
 			stderr, _ := result["stderr"].(string)
-			_ = postResult(client, server, ident, c.CommandID, exitCode, stdout, stderr)
+			_ = postResult(client, server, *ident, c.CommandID, exitCode, stdout, stderr)
 			fmt.Printf("[result] remote session exit=%d\n", exitCode)
 			continue
 		}
 		exitCode, stdout, stderr := runCommand(c.Command, c.Shell)
-		if err := postResult(client, server, ident, c.CommandID, exitCode, stdout, stderr); err != nil {
+		if err := postResult(client, server, *ident, c.CommandID, exitCode, stdout, stderr); err != nil {
 			fmt.Println("[result-error]", err)
 			continue
 		}
@@ -144,6 +155,9 @@ func executeEnterpriseCommand(server string, ident identity, cmd map[string]any)
 	switch cmdType {
 	case "remote.desktop.start":
 		return startRemoteDesktop(server, ident.AgentID, cmd)
+
+	case "remote.desktop.webrtc":
+		return startRemoteDesktopWebRTC(server, ident.AgentID, cmd)
 
 	case "remote.terminal.start":
 		interactive := true
@@ -279,6 +293,18 @@ func loadOrEnroll(server string) (identity, error) {
 		}
 	}
 	return enroll(server)
+}
+
+func clearIdentity() {
+	_ = os.Remove(identityPath())
+}
+
+func isAuthError(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := err.Error()
+	return strings.Contains(s, "401") || strings.Contains(s, "Invalid agent credentials")
 }
 
 func enroll(server string) (identity, error) {
