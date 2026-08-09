@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-const agentVersion = "2.2.4-capture-fix"
+const agentVersion = "2.2.5-arp-viewer"
 
 func main() {
 	if len(os.Args) < 2 {
@@ -52,17 +52,12 @@ func parseRunFlags(args []string) runConfig {
 func printHelp() {
 	fmt.Print(`Bhudi native agent (no Python required)
 
-  bhudi-agent [run] [-server URL] [-interval N]   Run in foreground
-  bhudi-agent install [-server URL]               Install service / startup task
-  bhudi-agent uninstall                           Remove service / startup task
+  bhudi-agent install [-server URL]   Install + register in Programs and Features
+  bhudi-agent uninstall               Remove task, ARP entry, binary
+  bhudi-agent run [-server URL]       Run in foreground
   bhudi-agent version
 
-Supports remote terminal, screen share, and WebRTC signaling spike.
-Auto re-enrolls if the backend rejects stored credentials.
-
-Environment:
-  BHUDI_SERVER_URL    Backend base URL
-  BHUDI_HOSTNAME      Override hostname
+Run install as Administrator for a system-wide Programs and Features entry.
 `)
 }
 
