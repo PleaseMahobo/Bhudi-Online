@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-const agentVersion = "2.2.5-arp-viewer"
+const agentVersion = "2.2.6-multimon-input"
 
 func main() {
 	if len(os.Args) < 2 {
@@ -50,14 +50,12 @@ func parseRunFlags(args []string) runConfig {
 }
 
 func printHelp() {
-	fmt.Print(`Bhudi native agent (no Python required)
+	fmt.Print(`Bhudi native agent
 
-  bhudi-agent install [-server URL]   Install + register in Programs and Features
-  bhudi-agent uninstall               Remove task, ARP entry, binary
-  bhudi-agent run [-server URL]       Run in foreground
+  bhudi-agent install [-server URL]
+  bhudi-agent uninstall
+  bhudi-agent run [-server URL]
   bhudi-agent version
-
-Run install as Administrator for a system-wide Programs and Features entry.
 `)
 }
 
