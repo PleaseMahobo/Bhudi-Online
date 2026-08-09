@@ -1,10 +1,4 @@
 // Bhudi native agent — single static binary, no Python runtime required.
-//
-// Usage:
-//   bhudi-agent                          # run agent (foreground)
-//   bhudi-agent install [-server URL]    # install as OS service / startup task
-//   bhudi-agent uninstall
-//   bhudi-agent version
 package main
 
 import (
@@ -14,7 +8,7 @@ import (
 	"strings"
 )
 
-const agentVersion = "2.0.0-native"
+const agentVersion = "2.1.0-native-terminal"
 
 func main() {
 	if len(os.Args) < 2 {
@@ -62,6 +56,8 @@ func printHelp() {
   bhudi-agent install [-server URL]               Install service / startup task
   bhudi-agent uninstall                           Remove service / startup task
   bhudi-agent version
+
+Supports interactive remote terminal sessions via WebSocket.
 
 Environment:
   BHUDI_SERVER_URL    Backend base URL
