@@ -1,6 +1,5 @@
 package main
 
-// MonitorInfo describes a display for remote desktop selection.
 type MonitorInfo struct {
 	Index   int    `json:"index"`
 	Name    string `json:"name"`

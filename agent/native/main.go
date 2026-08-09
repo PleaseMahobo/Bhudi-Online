@@ -1,4 +1,3 @@
-// Bhudi native agent — single static binary, no Python runtime required.
 package main
 
 import (
@@ -43,10 +42,7 @@ func parseRunFlags(args []string) runConfig {
 	server := fs.String("server", envOr("BHUDI_SERVER_URL", defaultServerURL), "Bhudi backend base URL")
 	interval := fs.Int("interval", 10, "Heartbeat interval seconds")
 	_ = fs.Parse(args)
-	return runConfig{
-		Server:   strings.TrimRight(*server, "/"),
-		Interval: *interval,
-	}
+	return runConfig{Server: strings.TrimRight(*server, "/"), Interval: *interval}
 }
 
 func printHelp() {
@@ -57,7 +53,7 @@ func printHelp() {
   bhudi-agent run [-server URL]
   bhudi-agent version
 
-Screen share requires an interactive desktop session (logged-in user).
+Screen share needs an interactive desktop session.
 `)
 }
 
