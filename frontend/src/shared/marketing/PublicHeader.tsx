@@ -11,8 +11,9 @@ const NAV = [
   { href: '/solutions', label: 'Solutions' },
   { href: '/pricing', label: 'Pricing' },
   { href: '/integrations', label: 'Integrations' },
-  { href: '/documentation', label: 'Documentation' },
-  { href: '/about', label: 'About' },
+  { href: '/documentation', label: 'Docs' },
+  { href: '/changelog', label: 'Changelog' },
+  { href: '/blog', label: 'Blog' },
   { href: '/contact', label: 'Contact' },
 ];
 
@@ -27,7 +28,7 @@ export default function PublicHeader() {
 
         <nav className="hidden items-center gap-1 lg:flex">
           {NAV.map((item) => {
-            const active = pathname === item.href;
+            const active = pathname === item.href || pathname.startsWith(item.href + '/');
             return (
               <Link
                 key={item.href}
@@ -52,7 +53,7 @@ export default function PublicHeader() {
             Log in
           </Link>
           <Link
-            href="/signup"
+            href="/trial"
             className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-500"
           >
             Start free trial
@@ -86,7 +87,7 @@ export default function PublicHeader() {
               Log in
             </Link>
             <Link
-              href="/signup"
+              href="/trial"
               className="rounded-xl bg-indigo-600 px-3 py-2 text-center text-sm font-semibold text-white"
             >
               Start free trial
