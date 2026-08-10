@@ -3,7 +3,6 @@ from fastapi import APIRouter
 
 api_router = APIRouter()
 
-# --- Always include (Phase A/B smoke path) ---
 from app.api.v1.endpoints import health, devices, agent_runtime
 
 api_router.include_router(health.router, prefix="/health", tags=["health"])
@@ -11,7 +10,6 @@ api_router.include_router(devices.router, prefix="/devices", tags=["devices"])
 api_router.include_router(agent_runtime.router, tags=["agent-runtime"])
 
 
-# --- Best-effort enterprise routers (skip if broken imports) ---
 def _safe_include(mod_path: str, attr: str = "router", **kwargs):
     try:
         import importlib
@@ -27,6 +25,7 @@ def _safe_include(mod_path: str, attr: str = "router", **kwargs):
 _safe_include("app.api.v1.endpoints.agents", tags=["agents"])
 _safe_include("app.api.v1.endpoints.auth", tags=["auth"])
 _safe_include("app.api.v1.endpoints.auth_extras", tags=["auth"])
+_safe_include("app.api.v1.endpoints.device_assignment", tags=["devices"])
 _safe_include("app.api.v1.endpoints.commands", tags=["commands"])
 _safe_include("app.api.v1.endpoints.command_catalog", tags=["command-catalog"])
 _safe_include("app.api.v1.endpoints.agent_commands", tags=["agent-commands"])
