@@ -2,15 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import {
-  Loader2,
-  Monitor,
-  RefreshCw,
-  ScreenShare,
-  Terminal,
-  Wifi,
-  XCircle,
-} from 'lucide-react';
+import { Loader2, Monitor, RefreshCw, Terminal, Wifi, XCircle } from 'lucide-react';
 import { getDevices } from '@/lib/api';
 
 type Device = {
@@ -20,6 +12,14 @@ type Device = {
   hostname?: string;
   name?: string;
   status?: string;
+};
+
+type MonitorInfo = {
+  index: number;
+  name: string;
+  width: number;
+  height: number;
+  primary?: boolean;
 };
 
 const API_BASE = (
@@ -56,10 +56,11 @@ export default function RemoteAccessConsole() {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [status, setStatus] = useState('Idle');
   const [termLog, setTermLog] = useState('');
-  const [frameUrl, setFrameUrl] = useState<string | null>(null);
-  const [zoom, setZoom] = useState(100);
-  const [wide, setWide] = useState(true);
   const [termInput, setTermInput] = useState('');
+  const [hasFrame, setHasFrame] = useState(false);
+  const [monitors, setMonitors] = useState<MonitorInfo[]>([]);
+  const [monitorIndex, setMonitorIndex] = useState(0);
+  const [fitMode, setFitMode] = useState<'contain' | 'width'>('contain');
 
   const wsRef = useRef<WebSocket | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -87,14 +88,85 @@ export default function RemoteAccessConsole() {
     if (m === 'desktop' || m === 'terminal') setMode(m);
   }, [searchParams]);
 
-  useEffect(() => {
-    return () => {
-      wsRef.current?.close();
-    };
-  }, []);
+  useEffect(() => () => { wsRef.current?.close(); }, []);
 
   function deviceAgentId(d: Device): string {
     return String(d.agent_id || d.device_id || d.id || '');
+  }
+
+  function sendInput(payload: Record<string, unknown>) {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify(payload));
+  }
+
+  function canvasCoords(e: React.MouseEvent<HTMLCanvasElement>) {
+    const canvas = canvasRef.current;
+    if (!canvas) return { x: 0, y: 0 };
+    const rect = canvas.getBoundingClientRect();
+    const rw = Math.max(rect.width, 1);
+    const rh = Math.max(rect.height, 1);
+    const x = Math.round(((e.clientX - rect.left) / rw) * frameSize.current.w);
+    const y = Math.round(((e.clientY - rect.top) / rh) * frameSize.current.h);
+    return {
+      x: Math.max(0, Math.min(frameSize.current.w - 1, x)),
+      y: Math.max(0, Math.min(frameSize.current.h - 1, y)),
+    };
+  }
+
+  function onCanvasMouseDown(e: React.MouseEvent<HTMLCanvasElement>) {
+    e.preventDefault();
+    canvasRef.current?.focus();
+    const { x, y } = canvasCoords(e);
+    sendInput({
+      type: 'mousedown',
+      x,
+      y,
+      button: e.button === 2 ? 'right' : e.button === 1 ? 'middle' : 'left',
+    });
+  }
+
+  function onCanvasMouseUp(e: React.MouseEvent<HTMLCanvasElement>) {
+    e.preventDefault();
+    const { x, y } = canvasCoords(e);
+    sendInput({
+      type: 'mouseup',
+      x,
+      y,
+      button: e.button === 2 ? 'right' : e.button === 1 ? 'middle' : 'left',
+    });
+  }
+
+  function onCanvasClick(e: React.MouseEvent<HTMLCanvasElement>) {
+    e.preventDefault();
+    const { x, y } = canvasCoords(e);
+    sendInput({
+      type: 'click',
+      x,
+      y,
+      button: e.button === 2 ? 'right' : e.button === 1 ? 'middle' : 'left',
+    });
+  }
+
+  function onCanvasMouseMove(e: React.MouseEvent<HTMLCanvasElement>) {
+    if (e.buttons === 0) return;
+    const { x, y } = canvasCoords(e);
+    sendInput({ type: 'mousemove', x, y });
+  }
+
+  function onCanvasWheel(e: React.WheelEvent<HTMLCanvasElement>) {
+    e.preventDefault();
+    const { x, y } = canvasCoords(e as unknown as React.MouseEvent<HTMLCanvasElement>);
+    sendInput({ type: 'wheel', x, y, deltaY: e.deltaY > 0 ? 120 : -120 });
+  }
+
+  function onCanvasKeyDown(e: React.KeyboardEvent<HTMLCanvasElement>) {
+    e.preventDefault();
+    sendInput({ type: 'keydown', key: e.key });
+  }
+
+  function onCanvasKeyUp(e: React.KeyboardEvent<HTMLCanvasElement>) {
+    sendInput({ type: 'keyup', key: e.key });
   }
 
   async function startSession() {
@@ -105,8 +177,9 @@ export default function RemoteAccessConsole() {
     setBusy(true);
     setError('');
     setStatus('Queueing session…');
-    setFrameUrl(null);
+    setHasFrame(false);
     setTermLog('');
+    wsRef.current?.close();
     try {
       const path =
         mode === 'desktop'
@@ -114,7 +187,12 @@ export default function RemoteAccessConsole() {
           : '/api/v1/runtime/remote/terminal';
       const body =
         mode === 'desktop'
-          ? { agent_id: agentId, session_mode: 'control', display_protocol: 'native' }
+          ? {
+              agent_id: agentId,
+              session_mode: 'control',
+              display_protocol: 'native',
+              monitor_index: monitorIndex,
+            }
           : { agent_id: agentId, shell };
       const res = await fetch(API_BASE + path, {
         method: 'POST',
@@ -139,12 +217,19 @@ export default function RemoteAccessConsole() {
           const msg = JSON.parse(String(ev.data));
           const type = msg.type as string;
           if (type === 'desktop_ready') {
-            setStatus('Desktop ready');
-            if (msg.width && msg.height) frameSize.current = { w: msg.width, h: msg.height };
+            setStatus(
+              'Desktop ready' +
+                (msg.monitor_index !== undefined ? ' · display ' + msg.monitor_index : '')
+            );
+            if (msg.width && msg.height) {
+              frameSize.current = { w: Number(msg.width), h: Number(msg.height) };
+            }
+            if (Array.isArray(msg.monitors) && msg.monitors.length) {
+              setMonitors(msg.monitors as MonitorInfo[]);
+            }
           }
           if (type === 'frame' && msg.data) {
             const src = 'data:image/jpeg;base64,' + msg.data;
-            setFrameUrl(src);
             const img = new Image();
             img.onload = () => {
               const c = canvasRef.current;
@@ -153,13 +238,17 @@ export default function RemoteAccessConsole() {
               if (!ctx) return;
               c.width = img.width;
               c.height = img.height;
+              frameSize.current = { w: img.width, h: img.height };
               ctx.drawImage(img, 0, 0);
+              setHasFrame(true);
+              setStatus('Streaming');
             };
             img.src = src;
           }
           if (type === 'terminal_output' || type === 'output') {
             setTermLog((prev) => prev + (msg.data || msg.output || ''));
           }
+          if (type === 'error') setError(String(msg.message || 'Session error'));
           if (type === 'session_closed') setStatus('Session ended');
         } catch {
           /* ignore */
@@ -174,21 +263,31 @@ export default function RemoteAccessConsole() {
   }
 
   function stopSession() {
+    sendInput({ type: 'close' });
     wsRef.current?.close();
     wsRef.current = null;
     setSessionId(null);
     setStatus('Idle');
-    setFrameUrl(null);
+    setHasFrame(false);
   }
 
   function sendTerm() {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN || !termInput.trim()) return;
-    wsRef.current.send(JSON.stringify({ type: 'input', data: termInput + '\n' }));
+    wsRef.current.send(JSON.stringify({ type: 'command', command: termInput }));
     setTermInput('');
   }
 
+  const monitorOptions: MonitorInfo[] =
+    monitors.length > 0
+      ? monitors
+      : [
+          { index: 0, name: 'Primary / Display 1', width: 0, height: 0, primary: true },
+          { index: 1, name: 'Display 2', width: 0, height: 0 },
+          { index: 2, name: 'Display 3', width: 0, height: 0 },
+        ];
+
   return (
-    <div className={'space-y-4 ' + (wide ? '' : 'max-w-5xl')}>
+    <div className="space-y-4">
       <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
         <div className="flex flex-wrap items-end gap-3">
           <div className="min-w-[200px] flex-1">
@@ -209,6 +308,7 @@ export default function RemoteAccessConsole() {
               })}
             </select>
           </div>
+
           <div className="flex gap-1 rounded-xl border border-slate-200 p-1">
             <button
               type="button"
@@ -231,6 +331,27 @@ export default function RemoteAccessConsole() {
               <Terminal size={14} /> Terminal
             </button>
           </div>
+
+          {mode === 'desktop' && (
+            <div className="min-w-[180px]">
+              <label className="mb-1 block text-xs font-medium text-slate-500">Display</label>
+              <select
+                value={monitorIndex}
+                onChange={(e) => setMonitorIndex(Number(e.target.value))}
+                className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm"
+              >
+                {monitorOptions.map((m) => (
+                  <option key={m.index} value={m.index}>
+                    {m.name}
+                    {m.width ? ` (${m.width}×${m.height})` : ''}
+                    {m.primary ? ' ★' : ''}
+                  </option>
+                ))}
+              </select>
+              <p className="mt-1 text-[11px] text-slate-400">Change display, then Connect again.</p>
+            </div>
+          )}
+
           {mode === 'terminal' && (
             <select
               value={shell}
@@ -242,6 +363,7 @@ export default function RemoteAccessConsole() {
               <option value="bash">Bash</option>
             </select>
           )}
+
           {!sessionId ? (
             <button
               type="button"
@@ -249,68 +371,123 @@ export default function RemoteAccessConsole() {
               onClick={() => void startSession()}
               className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-500 disabled:opacity-50"
             >
-              {busy ? <Loader2 size={16} className="animate-spin" /> : <ScreenShare size={16} />}
+              {busy ? <Loader2 size={16} className="animate-spin" /> : null}
               Connect
             </button>
           ) : (
             <button
               type="button"
               onClick={stopSession}
-              className="inline-flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-sm font-medium text-red-700"
+              className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700"
             >
-              <XCircle size={16} /> Disconnect
+              Disconnect
             </button>
           )}
+
           <button
             type="button"
             onClick={() => void loadDevices()}
-            className="rounded-xl border border-slate-200 p-2 text-slate-600 hover:bg-slate-50"
+            className="rounded-xl border border-slate-200 p-2 text-slate-500 hover:bg-slate-50"
             title="Refresh devices"
           >
             <RefreshCw size={16} />
           </button>
         </div>
-        <div className="mt-3 flex items-center gap-2 text-xs text-slate-500">
-          <Wifi size={12} />
-          <span>{status}</span>
-          {sessionId && <span className="font-mono text-slate-400">session {sessionId.slice(0, 8)}…</span>}
-          {agentId && <span className="font-mono text-slate-400">agent {agentId.slice(0, 8)}…</span>}
+
+        <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+          <Wifi size={14} />
+          <span>
+            Status: <span className="font-medium text-slate-800">{status}</span>
+          </span>
+          {sessionId && (
+            <span className="font-mono text-slate-400">session {sessionId.slice(0, 8)}…</span>
+          )}
         </div>
+
         {error && (
-          <div className="mt-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>
+          <div className="mt-3 flex items-start gap-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+            <XCircle size={16} className="mt-0.5 shrink-0" />
+            <span>{error}</span>
+          </div>
         )}
       </div>
 
       {mode === 'desktop' && (
         <div className="overflow-hidden rounded-2xl border border-slate-200 bg-slate-900 shadow-sm">
-          <div className="flex items-center justify-between border-b border-white/10 px-3 py-2 text-xs text-slate-300">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/10 px-3 py-2 text-xs text-slate-300">
             <span>Remote desktop</span>
             <div className="flex items-center gap-2">
-              <label className="flex items-center gap-1">
-                Zoom
-                <input
-                  type="range"
-                  min={50}
-                  max={150}
-                  value={zoom}
-                  onChange={(e) => setZoom(Number(e.target.value))}
-                />
-              </label>
-              <button type="button" className="underline" onClick={() => setWide((w) => !w)}>
-                {wide ? 'Narrow' : 'Wide'}
+              <button
+                type="button"
+                onClick={() => setFitMode('contain')}
+                className={
+                  'rounded px-2 py-1 ' +
+                  (fitMode === 'contain' ? 'bg-white/15 text-white' : 'hover:bg-white/10')
+                }
+              >
+                Fit page
+              </button>
+              <button
+                type="button"
+                onClick={() => setFitMode('width')}
+                className={
+                  'rounded px-2 py-1 ' +
+                  (fitMode === 'width' ? 'bg-white/15 text-white' : 'hover:bg-white/10')
+                }
+              >
+                Fit width
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const el = canvasRef.current?.parentElement;
+                  if (el?.requestFullscreen) void el.requestFullscreen();
+                }}
+                className="rounded px-2 py-1 hover:bg-white/10"
+              >
+                Fullscreen
               </button>
             </div>
           </div>
-          <div className="flex min-h-[360px] items-center justify-center overflow-auto p-2">
+          <div
+            className={
+              'relative flex bg-black p-2 ' +
+              (fitMode === 'contain'
+                ? 'max-h-[min(80vh,900px)] items-center justify-center overflow-auto'
+                : 'items-start justify-center overflow-auto')
+            }
+          >
             <canvas
               ref={canvasRef}
-              style={{ transform: 'scale(' + zoom / 100 + ')', transformOrigin: 'top left' }}
-              className="max-w-full bg-black"
+              tabIndex={0}
+              onMouseDown={onCanvasMouseDown}
+              onMouseUp={onCanvasMouseUp}
+              onClick={onCanvasClick}
+              onMouseMove={onCanvasMouseMove}
+              onWheel={onCanvasWheel}
+              onKeyDown={onCanvasKeyDown}
+              onKeyUp={onCanvasKeyUp}
+              onContextMenu={(e) => e.preventDefault()}
+              style={{
+                display: 'block',
+                width: fitMode === 'width' ? '100%' : 'auto',
+                maxWidth: '100%',
+                maxHeight: fitMode === 'contain' ? 'min(80vh, 880px)' : undefined,
+                height: 'auto',
+                cursor: 'crosshair',
+              }}
+              className="outline-none focus:ring-2 focus:ring-indigo-500"
             />
-            {!frameUrl && (
-              <p className="absolute text-sm text-slate-500">No frames yet — start a session with an online agent.</p>
+            {!hasFrame && (
+              <p className="pointer-events-none absolute text-sm text-slate-500">
+                No frames yet — Connect with agent v2.2.8+.
+              </p>
             )}
           </div>
+          <p className="border-t border-white/10 px-3 py-1.5 text-[11px] text-slate-500">
+            Click the screen to focus, then click/drag/type. Change Display and reconnect to switch
+            monitors.
+          </p>
         </div>
       )}
 
