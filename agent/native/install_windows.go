@@ -15,7 +15,7 @@ import (
 
 const (
 	windowsTaskName  = "BhudiAgent"
-	uninstallRegPath = `SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\BhudiAgent`
+	uninstallRegPath = `Software\Microsoft\Windows\CurrentVersion\Uninstall\BhudiAgent"`
 	displayName      = "Bhudi Agent"
 	publisherName    = "Bhudi"
 )
@@ -25,25 +25,25 @@ func installService(server string) error {
 	if err != nil {
 		return err
 	}
-	exe, _ = filepath.Abs(exe)
-
-	destDir := filepath.Join(os.Getenv("ProgramFiles"), "Bhudi", "Agent")
+	base := os.Getenv("ProgramFiles")
+	if base == "" {
+		base = os.Getenv("LOCALAPPDATA")
+	}
+	destDir := filepath.Join(base, "Bhudi", "Agent")
 	if err := os.MkdirAll(destDir, 0755); err != nil {
-		destDir = filepath.Join(os.Getenv("LOCALAPPDATA"), "Bhudi", "Agent")
-		if err := os.MkdirAll(destDir, 0755); err != nil {
-			return err
-		}
+		return err
 	}
 	dest := filepath.Join(destDir, "bhudi-agent.exe")
 	if err := copyFile(exe, dest); err != nil {
-		return fmt.Errorf("copy agent: %w", err)
+		return err
 	}
-	_ = writeConfig(server)
+
+	_ = exec.Command("schtasks", "/Delete", "/TN", windowsTaskName, "/F").Run()
 
 	cmdLine := fmt.Sprintf("\"%s\" run -server %s", dest, server)
-	_ = exec.Command("schtasks", "/Delete", "/TN", windowsTaskName, "/F").Run()
+	// /IT = only when an interactive user is logged on (required for screen capture)
 	create := exec.Command("schtasks", "/Create", "/TN", windowsTaskName,
-		"/TR", cmdLine, "/SC", "ONLOGON", "/RL", "HIGHEST", "/F")
+		"/TR", cmdLine, "/SC", "ONLOGON", "/RL", "HIGHEST", "/IT", "/F")
 	out, err := create.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("schtasks: %v (%s)", err, strings.TrimSpace(string(out)))
@@ -63,6 +63,7 @@ func installService(server string) error {
 	fmt.Println("  Binary: ", dest)
 	fmt.Println("  Server: ", server)
 	fmt.Println("  Task:   ", windowsTaskName)
+	fmt.Println("  Mode:   interactive logon (/IT) — required for screen capture")
 	time.Sleep(2 * time.Second)
 	return nil
 }
