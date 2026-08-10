@@ -62,7 +62,8 @@ def _frontend_base() -> str:
     return (
         os.getenv("FRONTEND_URL")
         or os.getenv("NEXT_PUBLIC_APP_URL")
-        or "https://bhudi-online.vercel.app"
+        or os.getenv("NEXT_PUBLIC_SITE_URL")
+        or "https://bhudi.online"
     ).rstrip("/")
 
 
