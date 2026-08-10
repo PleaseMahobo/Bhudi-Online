@@ -1,25 +1,28 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+/**
+ * Native agent downloads — redirects to GitHub release assets.
+ * No embedded shell scripts / template literals (Turbopack-safe).
+ */
 const RELEASE =
   'https://github.com/PleaseMahobo/Bhudi-Online/releases/download/agent-native-latest';
 
-const ASSETS: Record<string, { url: string; filename: string; fallback?: string }> = {
-  exe: { url: RELEASE + '/bhudi-agent.exe', filename: 'bhudi-agent.exe' },
-  'windows-exe': { url: RELEASE + '/bhudi-agent.exe', filename: 'bhudi-agent.exe' },
-  windows: { url: RELEASE + '/bhudi-agent.exe', filename: 'bhudi-agent.exe' },
+const ASSETS: Record<string, { url: string; fallback?: string }> = {
+  exe: { url: RELEASE + '/bhudi-agent.exe' },
+  'windows-exe': { url: RELEASE + '/bhudi-agent.exe' },
+  windows: { url: RELEASE + '/bhudi-agent.exe' },
   msi: {
     url: RELEASE + '/bhudi-agent-setup.msi',
-    filename: 'bhudi-agent-setup.msi',
     fallback: RELEASE + '/bhudi-agent.exe',
   },
-  linux: { url: RELEASE + '/bhudi-agent-linux-amd64', filename: 'bhudi-agent-linux-amd64' },
-  'linux-amd64': { url: RELEASE + '/bhudi-agent-linux-amd64', filename: 'bhudi-agent-linux-amd64' },
-  'linux-arm64': { url: RELEASE + '/bhudi-agent-linux-arm64', filename: 'bhudi-agent-linux-arm64' },
-  macos: { url: RELEASE + '/bhudi-agent-darwin-arm64', filename: 'bhudi-agent-darwin-arm64' },
-  darwin: { url: RELEASE + '/bhudi-agent-darwin-arm64', filename: 'bhudi-agent-darwin-arm64' },
-  'darwin-arm64': { url: RELEASE + '/bhudi-agent-darwin-arm64', filename: 'bhudi-agent-darwin-arm64' },
-  'darwin-amd64': { url: RELEASE + '/bhudi-agent-darwin-amd64', filename: 'bhudi-agent-darwin-amd64' },
-  'macos-intel': { url: RELEASE + '/bhudi-agent-darwin-amd64', filename: 'bhudi-agent-darwin-amd64' },
+  linux: { url: RELEASE + '/bhudi-agent-linux-amd64' },
+  'linux-amd64': { url: RELEASE + '/bhudi-agent-linux-amd64' },
+  'linux-arm64': { url: RELEASE + '/bhudi-agent-linux-arm64' },
+  macos: { url: RELEASE + '/bhudi-agent-darwin-arm64' },
+  darwin: { url: RELEASE + '/bhudi-agent-darwin-arm64' },
+  'darwin-arm64': { url: RELEASE + '/bhudi-agent-darwin-arm64' },
+  'darwin-amd64': { url: RELEASE + '/bhudi-agent-darwin-amd64' },
+  'macos-intel': { url: RELEASE + '/bhudi-agent-darwin-amd64' },
 };
 
 async function resolveUrl(url: string, fallback?: string): Promise<string> {
@@ -33,7 +36,7 @@ async function resolveUrl(url: string, fallback?: string): Promise<string> {
   return url;
 }
 
-/** Default: Windows EXE. MSI falls back to EXE if not published. */
+/** Default: Windows EXE. MSI falls back to EXE if the MSI asset is not published yet. */
 export async function GET(req: NextRequest) {
   const os = (new URL(req.url).searchParams.get('os') || 'exe').toLowerCase();
   const asset = ASSETS[os] || ASSETS.exe;
