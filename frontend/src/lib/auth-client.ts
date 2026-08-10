@@ -1,0 +1,58 @@
+const API_BASE = (process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000').replace(/\/$/, '');
+
+async function postJson<T>(path: string, body: unknown, auth = false): Promise<T> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (auth && typeof window !== 'undefined') {
+    const t = localStorage.getItem('access_token');
+    if (t) headers.Authorization = 'Bearer ' + t;
+  }
+  const res = await fetch(API_BASE + path, { method: 'POST', headers, body: JSON.stringify(body) });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const detail = data.detail;
+    throw new Error(typeof detail === 'string' ? detail : JSON.stringify(detail || res.statusText));
+  }
+  return data as T;
+}
+
+export async function registerUser(input: {
+  email: string;
+  password: string;
+  first_name?: string;
+  last_name?: string;
+}) {
+  return postJson('/api/v1/auth/register', input);
+}
+
+export async function loginUser(email: string, password: string, mfa_code?: string) {
+  return postJson<{ access_token: string; refresh_token: string; user?: unknown }>(
+    '/api/v1/auth/login',
+    { email, password, mfa_code: mfa_code || undefined }
+  );
+}
+
+export async function requestPasswordReset(email: string) {
+  return postJson<{ message: string; debug_token?: string; debug_reset_path?: string }>(
+    '/api/v1/auth/password-reset/request',
+    { email }
+  );
+}
+
+export async function confirmPasswordReset(token: string, new_password: string) {
+  return postJson<{ message: string }>('/api/v1/auth/password-reset/confirm', {
+    token,
+    new_password,
+  });
+}
+
+export async function mfaSetup() {
+  return postJson<{ secret: string; otpauth_uri: string; enabled: boolean }>(
+    '/api/v1/auth/mfa/setup',
+    {},
+    true
+  );
+}
+
+export async function mfaVerify(code: string) {
+  return postJson<{ enabled: boolean }>('/api/v1/auth/mfa/verify', { code }, true);
+}

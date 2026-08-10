@@ -13,7 +13,8 @@ class MfaService:
     def generate_secret(self, user: User) -> tuple[str, str]:
         secret = pyotp.random_base32()
         user.totp_secret = secret
-        user.mfa_enabled = True
+        # Only enabled after successful verify_code / enable_totp
+        user.mfa_enabled = False
         self.db.add(user)
         self.db.flush()
         uri = pyotp.totp.TOTP(secret).provisioning_uri(name=user.email, issuer_name="Bhudi")
