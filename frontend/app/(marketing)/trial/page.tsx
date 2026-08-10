@@ -1,111 +1,79 @@
-'use client';
-
 import Link from 'next/link';
-import { useState } from 'react';
-import { CheckCircle2 } from 'lucide-react';
+import { Check, ArrowRight } from 'lucide-react';
+import { PageHero, SectionLabel } from '@/shared/marketing/MarketingUI';
 
-const PERKS = [
-  'Full module access during trial',
-  'Sample estate to explore AI & alerts',
-  'No credit card required to start',
-  'Guided onboarding available',
+export const metadata = {
+  title: 'Start free trial — Bhudi',
+  description: 'Open a Bhudi workspace and deploy native agents to pilot devices.',
+};
+
+const INCLUDES = [
+  'Access to the operations shell',
+  'Native agent downloads (Windows, Linux, macOS)',
+  'Remote desktop and terminal',
+  'Device inventory and heartbeats',
+  'Bhudi AI assistant (preview capacity)',
 ];
 
 export default function TrialPage() {
-  const [sent, setSent] = useState(false);
-  const [loading, setLoading] = useState(false);
-
-  const onSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
-    setTimeout(() => {
-      setLoading(false);
-      setSent(true);
-    }, 700);
-  };
-
   return (
-    <div className="mx-auto grid max-w-6xl gap-12 px-4 py-16 sm:px-6 lg:grid-cols-2 lg:items-start">
-      <div>
-        <p className="text-sm font-semibold text-indigo-600">Start Free Trial</p>
-        <h1 className="mt-2 text-4xl font-bold tracking-tight text-[#0F172A]">
-          Try Bhudi on your terms
-        </h1>
-        <p className="mt-4 text-lg text-slate-600">
-          Spin up a workspace and experience Monitor · Manage · Secure with Bhudi AI
-          in the flow of work.
-        </p>
-        <ul className="mt-8 space-y-3">
-          {PERKS.map((p) => (
-            <li key={p} className="flex items-center gap-2 text-sm text-slate-700">
-              <CheckCircle2 size={18} className="text-emerald-500" />
-              {p}
-            </li>
-          ))}
-        </ul>
-        <p className="mt-8 text-sm text-slate-500">
-          Already have an account?{' '}
-          <Link href="/login" className="font-semibold text-indigo-600 hover:text-indigo-500">
-            Login
-          </Link>
-        </p>
-      </div>
+    <>
+      <PageHero
+        label="Free trial"
+        title="Pilot Bhudi on your terms"
+        subtitle="Create a workspace, install agents on a handful of machines, and experience remote access, print visibility, and the modern shell — without a long procurement cycle."
+      />
 
-      <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
-        {sent ? (
-          <div className="text-center">
-            <p className="text-lg font-semibold text-slate-900">You&apos;re on the list</p>
-            <p className="mt-2 text-sm text-slate-600">
-              We&apos;ll email trial access instructions shortly. You can also{' '}
-              <Link href="/login" className="font-medium text-indigo-600">
-                sign in
-              </Link>{' '}
-              if your workspace is already provisioned.
+      <section className="mx-auto max-w-6xl px-4 py-16 sm:px-6">
+        <div className="grid gap-10 lg:grid-cols-2">
+          <div>
+            <SectionLabel>What you get</SectionLabel>
+            <ul className="mt-6 space-y-3">
+              {INCLUDES.map((item) => (
+                <li key={item} className="flex items-start gap-2 text-slate-700">
+                  <Check className="mt-0.5 shrink-0 text-emerald-500" size={18} />
+                  {item}
+                </li>
+              ))}
+            </ul>
+            <p className="mt-6 text-sm text-slate-500">
+              Need a guided pilot for an MSP multi-tenant scenario?{' '}
+              <Link href="/contact" className="font-semibold text-indigo-600">
+                Contact sales
+              </Link>
+              .
             </p>
           </div>
-        ) : (
-          <form onSubmit={onSubmit} className="space-y-4">
-            <div>
-              <label className="text-xs font-medium text-slate-600">Full name</label>
-              <input
-                required
-                className="mt-1 w-full rounded-xl border border-slate-300 px-4 py-2.5 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
-              />
+
+          <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
+            <h2 className="text-xl font-bold text-[#0F172A]">Create your workspace</h2>
+            <p className="mt-2 text-sm text-slate-600">
+              Use signup to register, or log in if you already have an account.
+            </p>
+            <div className="mt-6 flex flex-col gap-3">
+              <Link
+                href="/signup"
+                className="inline-flex items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-3 text-sm font-semibold text-white hover:bg-indigo-500"
+              >
+                Sign up for trial
+                <ArrowRight size={16} />
+              </Link>
+              <Link
+                href="/login"
+                className="inline-flex items-center justify-center rounded-xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-800 hover:bg-slate-50"
+              >
+                Already registered? Log in
+              </Link>
             </div>
-            <div>
-              <label className="text-xs font-medium text-slate-600">Work email</label>
-              <input
-                required
-                type="email"
-                className="mt-1 w-full rounded-xl border border-slate-300 px-4 py-2.5 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
-              />
-            </div>
-            <div>
-              <label className="text-xs font-medium text-slate-600">Company</label>
-              <input
-                required
-                className="mt-1 w-full rounded-xl border border-slate-300 px-4 py-2.5 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
-              />
-            </div>
-            <div>
-              <label className="text-xs font-medium text-slate-600">Approx. endpoints</label>
-              <select className="mt-1 w-full rounded-xl border border-slate-300 px-4 py-2.5 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100">
-                <option>1 – 100</option>
-                <option>100 – 1,000</option>
-                <option>1,000 – 5,000</option>
-                <option>5,000+</option>
-              </select>
-            </div>
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full rounded-xl bg-indigo-600 px-4 py-3 text-sm font-semibold text-white hover:bg-indigo-500 disabled:opacity-60"
-            >
-              {loading ? 'Submitting…' : 'Request trial access'}
-            </button>
-          </form>
-        )}
-      </div>
-    </div>
+            <ol className="mt-8 space-y-2 border-t border-slate-100 pt-6 text-sm text-slate-600">
+              <li>1. Complete signup</li>
+              <li>2. Open Agents and download an installer</li>
+              <li>3. Run install once on a pilot PC</li>
+              <li>4. Connect from Remote Access</li>
+            </ol>
+          </div>
+        </div>
+      </section>
+    </>
   );
 }

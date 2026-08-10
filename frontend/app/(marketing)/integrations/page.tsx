@@ -1,68 +1,66 @@
-import Link from 'next/link';
+import { PageHero, CtaBand, SectionLabel } from '@/shared/marketing/MarketingUI';
 
 export const metadata = {
   title: 'Integrations — Bhudi',
-  description: 'Security, print, identity, and cloud integrations for Bhudi.',
+  description: 'Security, print, identity, and cloud tools that fit into the Bhudi operations workspace.',
 };
 
 const GROUPS = [
   {
     title: 'Endpoint security',
-    items: ['Microsoft Defender', 'CrowdStrike', 'Huntress', 'Bitdefender', 'Sophos', 'Malwarebytes', 'ThreatLocker'],
+    items: ['CrowdStrike', 'ThreatLocker', 'Huntress', 'Bitdefender', 'Sophos', 'Malwarebytes'],
   },
   {
     title: 'Print ecosystem',
-    items: ['Microsoft Print Server', 'Universal Print', 'UniPrint', 'Printix', 'PaperCut'],
+    items: ['Microsoft Print Server', 'Universal Print', 'Printix', 'PaperCut', 'UniPrint'],
   },
   {
-    title: 'Identity & collaboration',
-    items: ['Microsoft 365', 'Entra ID / Azure AD', 'SSO-ready enterprise auth'],
+    title: 'Identity & access',
+    items: ['Microsoft Entra ID (roadmap)', 'SSO / SAML (Enterprise)', 'Local workspace auth'],
   },
   {
-    title: 'Operations',
-    items: ['Ticketing bridges', 'Webhook & API access', 'Script / automation runners'],
+    title: 'Cloud & ops',
+    items: ['GitHub agent releases', 'Railway-hosted API', 'Webhooks (roadmap)', 'SIEM export (roadmap)'],
   },
 ];
 
 export default function IntegrationsPage() {
   return (
-    <div className="mx-auto max-w-6xl px-4 py-16 sm:px-6">
-      <div className="max-w-2xl">
-        <p className="text-sm font-semibold text-indigo-600">Integrations</p>
-        <h1 className="mt-2 text-4xl font-bold tracking-tight text-[#0F172A]">
-          Connect the stack you already run
-        </h1>
-        <p className="mt-4 text-lg text-slate-600">
-          Bhudi is provider-aware — not locked to a single vendor narrative. Bring
-          your security, print, and identity tools into one operational picture.
+    <>
+      <PageHero
+        label="Integrations"
+        title="Meet the tools you already trust"
+        subtitle="Bhudi is designed to sit at the center of operations — surface partner security signals, print stacks, and identity providers without forcing a rip-and-replace."
+        primaryHref="/contact"
+        primaryLabel="Request an integration"
+        secondaryHref="/documentation"
+        secondaryLabel="Developer docs"
+      />
+
+      <section className="mx-auto max-w-6xl px-4 py-16 sm:px-6">
+        <div className="grid gap-10 md:grid-cols-2">
+          {GROUPS.map((g) => (
+            <div key={g.title}>
+              <SectionLabel>{g.title}</SectionLabel>
+              <ul className="mt-4 grid gap-2 sm:grid-cols-2">
+                {g.items.map((name) => (
+                  <li
+                    key={name}
+                    className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-medium text-slate-800 shadow-sm"
+                  >
+                    {name}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </div>
+        <p className="mt-10 text-sm text-slate-500">
+          Availability varies by plan and release channel. Tell us which connectors matter most for your estate.
         </p>
-      </div>
+      </section>
 
-      <div className="mt-14 grid gap-8 md:grid-cols-2">
-        {GROUPS.map((g) => (
-          <div key={g.title} className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-            <h2 className="text-lg font-semibold text-slate-900">{g.title}</h2>
-            <ul className="mt-4 flex flex-wrap gap-2">
-              {g.items.map((item) => (
-                <li
-                  key={item}
-                  className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm text-slate-700"
-                >
-                  {item}
-                </li>
-              ))}
-            </ul>
-          </div>
-        ))}
-      </div>
-
-      <p className="mt-10 text-sm text-slate-600">
-        Need something specific?{' '}
-        <Link href="/contact" className="font-semibold text-indigo-600 hover:text-indigo-500">
-          Contact us
-        </Link>{' '}
-        about roadmap integrations.
-      </p>
-    </div>
+      <CtaBand title="Need a connector we have not listed?" body="Contact us with your stack — we prioritize integrations used by active MSP and enterprise customers." />
+    </>
   );
 }

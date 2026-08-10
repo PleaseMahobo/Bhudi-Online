@@ -1,22 +1,24 @@
 import Link from 'next/link';
 import BhudiLogo from '@/shared/components/BhudiLogo';
 
-const COLUMNS = [
+const COLS = [
   {
     title: 'Product',
     links: [
       { href: '/features', label: 'Features' },
+      { href: '/solutions', label: 'Solutions' },
       { href: '/pricing', label: 'Pricing' },
       { href: '/integrations', label: 'Integrations' },
-      { href: '/features#ai', label: 'Bhudi AI' },
+      { href: '/agents', label: 'Download agent' },
     ],
   },
   {
-    title: 'Solutions',
+    title: 'Resources',
     links: [
-      { href: '/solutions', label: 'For MSPs' },
-      { href: '/solutions', label: 'Enterprise IT' },
       { href: '/documentation', label: 'Documentation' },
+      { href: '/trial', label: 'Free trial' },
+      { href: '/remote', label: 'Remote access' },
+      { href: '/login', label: 'Log in' },
     ],
   },
   {
@@ -24,43 +26,43 @@ const COLUMNS = [
     links: [
       { href: '/about', label: 'About' },
       { href: '/contact', label: 'Contact' },
-      { href: '/login', label: 'Sign in' },
-      { href: '/signup', label: 'Start free trial' },
+      { href: '/signup', label: 'Sign up' },
     ],
   },
 ];
 
 export default function PublicFooter() {
   return (
-    <footer className="border-t border-slate-800 bg-[#0F172A] text-slate-300">
-      <div className="mx-auto grid max-w-6xl gap-10 px-4 py-14 sm:px-6 md:grid-cols-4">
-        <div>
-          <BhudiLogo href="/" size="md" inverted withWordmark />
-          <p className="mt-4 text-sm leading-relaxed text-slate-400">
-            AI-powered IT operations for MSPs and enterprise teams. Monitor, manage, and secure every
-            endpoint — with intelligence built in.
-          </p>
-        </div>
-
-        {COLUMNS.map((col) => (
-          <div key={col.title}>
-            <h3 className="text-sm font-semibold text-white">{col.title}</h3>
-            <ul className="mt-4 space-y-2.5">
-              {col.links.map((l) => (
-                <li key={l.href + l.label}>
-                  <Link href={l.href} className="text-sm text-slate-400 hover:text-white">
-                    {l.label}
-                  </Link>
-                </li>
-              ))}
-            </ul>
+    <footer className="border-t border-slate-200 bg-[#0F172A] text-slate-300">
+      <div className="mx-auto max-w-6xl px-4 py-14 sm:px-6">
+        <div className="grid gap-10 md:grid-cols-4">
+          <div>
+            <BhudiLogo href="/" size="md" withWordmark inverted />
+            <p className="mt-4 max-w-xs text-sm leading-relaxed text-slate-400">
+              AI-powered IT operations for MSPs and enterprise teams — monitor, manage, and
+              secure from one modern workspace.
+            </p>
           </div>
-        ))}
-      </div>
-      <div className="border-t border-slate-800">
-        <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-2 px-4 py-6 text-xs text-slate-500 sm:px-6">
-          <span>© {new Date().getFullYear()} Bhudi RMM. All rights reserved.</span>
-          <span>Big Brother approach to remote monitoring, management and security.</span>
+          {COLS.map((col) => (
+            <div key={col.title}>
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                {col.title}
+              </p>
+              <ul className="mt-4 space-y-2">
+                {col.links.map((l) => (
+                  <li key={l.href}>
+                    <Link href={l.href} className="text-sm text-slate-300 hover:text-white">
+                      {l.label}
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </div>
+        <div className="mt-12 flex flex-col gap-2 border-t border-white/10 pt-8 text-xs text-slate-500 sm:flex-row sm:items-center sm:justify-between">
+          <p>© {new Date().getFullYear()} Bhudi. All rights reserved.</p>
+          <p>Monitor · Manage · Secure</p>
         </div>
       </div>
     </footer>

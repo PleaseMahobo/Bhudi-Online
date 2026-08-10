@@ -1,41 +1,51 @@
-import Link from 'next/link';
+import { PageHero, CtaBand, SectionLabel } from '@/shared/marketing/MarketingUI';
 
 export const metadata = {
   title: 'About — Bhudi',
-  description: 'Why Bhudi exists and how we approach IT operations platforms.',
+  description: 'Bhudi is an AI-powered IT operations platform for MSPs and enterprise IT teams.',
 };
 
 export default function AboutPage() {
   return (
-    <div className="mx-auto max-w-3xl px-4 py-16 sm:px-6">
-      <p className="text-sm font-semibold text-indigo-600">About</p>
-      <h1 className="mt-2 text-4xl font-bold tracking-tight text-[#0F172A]">
-        IT operations with a point of view
-      </h1>
-      <div className="mt-8 space-y-5 text-slate-600 leading-relaxed">
-        <p>
-          Bhudi is an AI-powered IT operations platform for MSPs and enterprise
-          teams. We believe operators deserve software that is as calm as it is
-          capable — familiar workflows without becoming a near-clone of any one
-          legacy console.
+    <>
+      <PageHero
+        label="About"
+        title="IT operations deserve a modern shell"
+        subtitle="Bhudi exists to give MSPs and internal IT one place to monitor, manage, and secure the estate — with AI that shortens investigation, not a clone of yesterday’s RMM."
+        primaryHref="/contact"
+        primaryLabel="Contact us"
+        secondaryHref="/features"
+        secondaryLabel="Explore features"
+      />
+
+      <section className="mx-auto max-w-3xl px-4 py-16 sm:px-6">
+        <SectionLabel>Mission</SectionLabel>
+        <p className="mt-4 text-lg leading-relaxed text-slate-700">
+          Technicians should not need five browser tabs and a jump box ritual to answer
+          a simple question about a device. Bhudi unifies devices, remote access, print,
+          tickets, and security signals — then puts an assistant in the same chrome.
         </p>
-        <p>
-          Our product direction uses best-in-class RMM usability as inspiration,
-          then builds a distinct Bhudi identity: Deep Navy and Indigo visual
-          language, print management as a first-class citizen, and an AI assistant
-          that stays docked in the work — not a separate chatbot tab.
+        <p className="mt-4 leading-relaxed text-slate-600">
+          We take inspiration from clean operational UX while building a distinct Bhudi
+          identity: deep navy surfaces, indigo actions, and native agents that do not drag
+          a Python runtime onto every PC.
         </p>
-        <p>
-          Monitor. Manage. Secure. That is the job. Bhudi is how we help teams do
-          it with less noise and more signal.
-        </p>
-      </div>
-      <Link
-        href="/contact"
-        className="mt-10 inline-flex rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-indigo-500"
-      >
-        Get in touch
-      </Link>
-    </div>
+
+        <div className="mt-12 grid gap-6 sm:grid-cols-3">
+          {[
+            ['Clarity', 'Prioritize what matters without visual noise.'],
+            ['Control', 'Remote and automate with audit-friendly actions.'],
+            ['Intelligence', 'Ask Bhudi AI; get paths to resolution faster.'],
+          ].map(([t, b]) => (
+            <div key={t} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+              <h3 className="font-semibold text-[#0F172A]">{t}</h3>
+              <p className="mt-2 text-sm text-slate-600">{b}</p>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <CtaBand title="Build the next chapter with us" body="Whether you are piloting a site or partnering on delivery, we would like to hear from you." />
+    </>
   );
 }
