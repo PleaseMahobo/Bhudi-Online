@@ -15,7 +15,6 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-// startRemoteDesktop streams screen frames over the remote-access WebSocket session.
 func startRemoteDesktop(serverURL, agentID string, command map[string]any) map[string]any {
 	payload, _ := command["payload"].(map[string]any)
 	if payload == nil {
@@ -25,7 +24,6 @@ func startRemoteDesktop(serverURL, agentID string, command map[string]any) map[s
 	if sessionID == "" {
 		return resultErr("session_id is required for screen sharing")
 	}
-
 	sessionMode := strings.ToLower(strVal(payload["session_mode"]))
 	if sessionMode == "" {
 		sessionMode = "control"
@@ -43,26 +41,20 @@ func startRemoteDesktop(serverURL, agentID string, command map[string]any) map[s
 			monitorIndex = n
 		}
 	}
-
 	wsURL, err := sessionWSURL(serverURL, sessionID, agentID)
 	if err != nil {
 		return resultErr(err.Error())
 	}
-
 	go runDesktopSession(wsURL, sessionID, sessionMode, displayProtocol, monitorIndex)
-
 	return map[string]any{
 		"exit_code": 0,
 		"stdout":    "started remote desktop session " + sessionID,
 		"stderr":    "",
 		"metadata": map[string]any{
-			"session_id":       sessionID,
-			"streaming":        true,
-			"stream_path":      "/api/v1/remote-access/sessions/" + sessionID + "/dashboard",
-			"session_type":     "desktop",
-			"session_mode":     sessionMode,
-			"display_protocol": displayProtocol,
-			"monitor_index":    monitorIndex,
+			"session_id": sessionID, "streaming": true,
+			"stream_path": "/api/v1/remote-access/sessions/" + sessionID + "/dashboard",
+			"session_type": "desktop", "session_mode": sessionMode,
+			"display_protocol": displayProtocol, "monitor_index": monitorIndex,
 		},
 	}
 }
@@ -102,23 +94,22 @@ func runDesktopSession(wsURL, sessionID, sessionMode, displayProtocol string, mo
 	mons := listMonitors()
 
 	_ = writeJSON(conn, map[string]any{
-		"type":             "desktop_ready",
-		"session_id":       sessionID,
-		"platform":         runtime.GOOS,
-		"display_protocol": displayProtocol,
-		"session_mode":     sessionMode,
-		"width":            fw,
-		"height":           fh,
-		"monitor_index":    monitorIndex,
-		"origin_x":         ox,
-		"origin_y":         oy,
-		"encoding":         "jpeg",
-		"monitors":         mons,
+		"type": "desktop_ready", "session_id": sessionID,
+		"platform": runtime.GOOS, "display_protocol": displayProtocol,
+		"session_mode": sessionMode, "width": fw, "height": fh,
+		"native_w": fw, "native_h": fh,
+		"monitor_index": monitorIndex, "origin_x": ox, "origin_y": oy,
+		"encoding": "jpeg", "monitors": mons,
 	})
+	fmt.Printf("[remote-desktop] monitor=%d origin=(%d,%d) size=%dx%d count=%d\n", monitorIndex, ox, oy, fw, fh, len(mons))
 
 	stop := make(chan struct{})
 	var once sync.Once
 	closeStop := func() { once.Do(func() { close(stop) }) }
+
+	nativeW, nativeH := fw, fh
+	frameW, frameH := fw, fh
+	var frameMu sync.Mutex
 
 	go func() {
 		defer closeStop()
@@ -150,9 +141,22 @@ func runDesktopSession(wsURL, sessionID, sessionMode, displayProtocol string, mo
 				case "mouse", "mousemove", "mousedown", "mouseup", "click", "wheel",
 					"keydown", "keyup", "keypress", "keyboard":
 					if sessionMode == "control" {
-						applyDesktopInputAt(inner, fw, fh, ox, oy)
+						frameMu.Lock()
+						fW, fH, nW, nH := frameW, frameH, nativeW, nativeH
+						frameMu.Unlock()
+						mapped := map[string]any{}
+						for k, v := range inner {
+							mapped[k] = v
+						}
+						fx, fy := numVal(inner["x"]), numVal(inner["y"])
+						if fW > 0 && fH > 0 {
+							fx = fx * float64(nW) / float64(fW)
+							fy = fy * float64(nH) / float64(fH)
+						}
+						mapped["x"] = fx
+						mapped["y"] = fy
+						applyDesktopInputAt(mapped, nW, nH, ox, oy)
 					}
-				default:
 				}
 			}
 			if msgType == "close" {
@@ -175,20 +179,21 @@ func runDesktopSession(wsURL, sessionID, sessionMode, displayProtocol string, mo
 				fmt.Println("[remote-desktop] capture:", err)
 				continue
 			}
-			img = maybeScale(img, 1280)
+			img = maybeScale(img, 1600)
 			var buf bytes.Buffer
-			if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: 55}); err != nil {
+			if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: 60}); err != nil {
 				continue
 			}
+			bw, bh := img.Bounds().Dx(), img.Bounds().Dy()
+			frameMu.Lock()
+			frameW, frameH = bw, bh
+			frameMu.Unlock()
 			seq++
 			_ = writeJSON(conn, map[string]any{
-				"type":       "frame",
-				"session_id": sessionID,
-				"encoding":   "jpeg",
-				"seq":        seq,
-				"width":      img.Bounds().Dx(),
-				"height":     img.Bounds().Dy(),
-				"data":       base64.StdEncoding.EncodeToString(buf.Bytes()),
+				"type": "frame", "session_id": sessionID, "encoding": "jpeg", "seq": seq,
+				"width": bw, "height": bh, "native_w": nativeW, "native_h": nativeH,
+				"origin_x": ox, "origin_y": oy,
+				"data": base64.StdEncoding.EncodeToString(buf.Bytes()),
 			})
 		}
 	}
