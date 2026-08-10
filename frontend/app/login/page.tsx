@@ -35,12 +35,15 @@ export default function LoginPage() {
       }
       router.push('/dashboard');
     } catch (err: any) {
-      const msg = String(err?.message || 'Sign in failed');
+      const msg = String(err?.message || '').trim();
       if (msg.includes('mfa_required')) {
         setNeedMfa(true);
-        setError('Enter your authenticator code to continue.');
+        setError('Enter the 6-digit code from your authenticator app.');
+      } else if (msg.includes('Invalid authenticator')) {
+        setNeedMfa(true);
+        setError('Invalid authenticator code. Try again.');
       } else {
-        setError(msg);
+        setError(msg || 'Sign in failed. Check your email and password.');
       }
     } finally {
       setLoading(false);
@@ -99,8 +102,8 @@ export default function LoginPage() {
           )}
 
           {error && (
-            <p className="rounded-xl border border-red-500/40 bg-red-950/40 px-3 py-2 text-center text-sm text-red-300">
-              {error}
+            <p className="rounded-xl border border-red-400/50 bg-red-950/60 px-3 py-2.5 text-center text-sm font-medium text-red-200">
+              {error.trim() || 'Sign in failed. Check your email and password.'}
             </p>
           )}
 
