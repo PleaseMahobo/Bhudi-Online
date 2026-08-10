@@ -31,9 +31,8 @@ from app.services.remote_session_manager import remote_session_manager
 
 router = APIRouter(prefix="/runtime")
 
-# --------------- in-memory stores (disk-backed) ---------------
 _agents: dict[str, dict[str, Any]] = {}
-_commands: dict[str, list[dict[str, Any]]] = {}  # agent_id -> commands
+_commands: dict[str, list[dict[str, Any]]] = {}
 
 _RUNTIME_STORE = _Path(os.environ.get("BHUDI_RUNTIME_STORE", "/tmp/bhudi_runtime_agents.json"))
 
@@ -350,6 +349,7 @@ class RuntimeRemoteDesktopRequest(BaseModel):
     agent_id: str
     session_mode: str = "control"
     display_protocol: str = "native"
+    monitor_index: int = 0
 
 
 def _queue_structured(agent_id: str, command_type: str, payload: dict) -> dict:
@@ -403,13 +403,18 @@ def runtime_remote_desktop(body: RuntimeRemoteDesktopRequest):
     session = remote_session_manager.create_session(
         agent_id=body.agent_id,
         session_type="desktop",
-        metadata={"session_mode": body.session_mode, "display_protocol": body.display_protocol},
+        metadata={
+            "session_mode": body.session_mode,
+            "display_protocol": body.display_protocol,
+            "monitor_index": body.monitor_index,
+        },
     )
     payload = {
         "session_id": session.session_id,
         "session_mode": body.session_mode,
         "display_protocol": body.display_protocol,
         "session_type": "desktop",
+        "monitor_index": body.monitor_index,
     }
     queued = _queue_structured(body.agent_id, "remote.desktop.start", payload)
     remote_session_manager.attach_command(session.session_id, queued["command_id"])
