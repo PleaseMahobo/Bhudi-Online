@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-const agentVersion = "2.2.9-persist-install"
+const agentVersion = "2.3.0-persist"
 
 func main() {
 	if len(os.Args) < 2 {
@@ -31,18 +31,14 @@ func main() {
 	case "version", "-version", "--version":
 		fmt.Println("bhudi-agent", agentVersion)
 	case "help", "-h", "--help":
-		fmt.Print(`Bhudi native agent — install once, reconnects automatically
+		fmt.Print(`Bhudi agent — install once, stays online
 
-  bhudi-agent.exe install -server https://your-backend
-      Copies to Program Files, creates logon task + startup entry,
-      saves config. Do this once per PC (Run as administrator).
+  install -server URL   Install + logon task + 5-min watchdog
+  uninstall             Remove tasks and startup entry
+  run [-server URL]     Run in foreground (used by tasks)
+  version
 
-  bhudi-agent.exe uninstall
-  bhudi-agent.exe run [-server URL]
-  bhudi-agent.exe version
-
-After install, the agent starts at every user logon and keeps the
-same identity in %ProgramData%\Bhudi\Agent\agent_identity.json.
+Designed for personal PCs as well as managed fleets.
 `)
 	default:
 		runAgent(parseRunFlags(os.Args[1:]))
