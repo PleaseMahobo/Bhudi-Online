@@ -4,78 +4,76 @@ import { PageHero, CtaBand, SectionLabel } from '@/shared/marketing/MarketingUI'
 
 export const metadata = {
   title: 'Pricing — Bhudi',
-  description: 'Indicative Bhudi packaging for pilots through multi-tenant MSP production.',
+  description: 'Plans for individuals who need ongoing PC help, households, and small support practices.',
 };
 
 const PLANS = [
   {
-    name: 'Starter',
-    price: '$3',
-    period: 'per device / month',
-    blurb: 'Pilot remote access and core RMM on a focused device set.',
+    name: 'Personal',
+    price: '$9',
+    period: 'per month',
+    blurb: 'For one person who wants trusted remote help on their own PC whenever they need it.',
     features: [
-      'Up to 50 devices (trial soft cap)',
-      'Native agents (Windows / Linux / macOS)',
-      'Remote desktop & terminal',
-      'Device inventory & heartbeats',
+      '1 registered computer',
+      'Native Windows agent (install once)',
+      'Remote desktop & terminal for your helper',
+      'Stays connected after reboot',
       'Email support',
     ],
-    cta: 'Start trial',
-    href: '/trial',
+    cta: 'Start personal trial',
+    href: '/signup?plan=personal',
     highlighted: false,
   },
   {
-    name: 'Professional',
-    price: '$6',
-    period: 'per device / month',
-    blurb: 'Full operations shell for MSPs and mid-size IT teams.',
+    name: 'Household',
+    price: '$19',
+    period: 'per month',
+    blurb: 'Parents, partners, or a helper who regularly assists a few family computers.',
     features: [
-      'Everything in Starter',
-      'Print management module',
-      'Ticketing & ITSM views',
-      'Automation & scripts',
-      'Bhudi AI assistant',
-      'Priority support',
+      'Up to 5 computers',
+      'Invite one trusted helper',
+      'Remote access per device',
+      'Basic alerts & device status',
+      'Priority email support',
     ],
-    cta: 'Talk to sales',
-    href: '/contact',
+    cta: 'Start household trial',
+    href: '/signup?plan=household',
     highlighted: true,
   },
   {
-    name: 'Enterprise',
-    price: 'Custom',
-    period: 'volume & modules',
-    blurb: 'Governance, SSO, and integration depth for complex estates.',
+    name: 'Helper Pro',
+    price: '$39',
+    period: 'per month',
+    blurb: 'Independent helpers and small shops supporting multiple clients’ PCs — without enterprise complexity.',
     features: [
-      'Everything in Professional',
-      'Advanced multi-tenant controls',
-      'SSO / SAML',
-      'Custom integrations',
-      'Dedicated success',
-      'Deployment assistance',
+      'Up to 25 computers',
+      'Multiple client folders',
+      'Remote desktop & terminal',
+      'Print & device basics',
+      'Chat / email support',
     ],
-    cta: 'Contact sales',
-    href: '/contact',
+    cta: 'Start helper trial',
+    href: '/signup?plan=helper',
     highlighted: false,
   },
 ];
 
 const FAQ = [
   {
-    q: 'Are these final list prices?',
-    a: 'Figures are indicative packaging for planning. Commercial agreements are quoted to your device count, modules, and support tier.',
+    q: 'Is this only for companies?',
+    a: 'No. Bhudi is built so individuals can install an agent on their PC and let a trusted person connect securely when help is needed.',
   },
   {
-    q: 'Is there a free trial?',
-    a: 'Yes. Start from the trial page, deploy agents to a pilot group, and evaluate remote access before committing.',
+    q: 'Do I need to reinstall every time?',
+    a: 'No. Install once. The agent starts at logon and a watchdog restarts it if it stops.',
   },
   {
-    q: 'Do endpoints need Python?',
-    a: 'No. Bhudi ships a native static agent for Windows, Linux, and macOS.',
+    q: 'Does my PC need Python?',
+    a: 'No. The agent is a normal Windows program.',
   },
   {
-    q: 'Minimum commitment?',
-    a: 'Trials are month-to-month for evaluation. Production terms are agreed during sales onboarding.',
+    q: 'What about businesses?',
+    a: 'Larger estates can contact us for volume pricing. Plans above are aimed at personal and small-helper use first.',
   },
 ];
 
@@ -84,17 +82,17 @@ export default function PricingPage() {
     <>
       <PageHero
         label="Pricing"
-        title="Simple per-device packaging"
-        subtitle="Indicative monthly pricing so you can plan a pilot. We right-size seats, modules, and support when you are ready to go live."
-        primaryHref="/trial"
-        primaryLabel="Start free trial"
+        title="Help with your computer — without enterprise pricing"
+        subtitle="Built for people who regularly need remote assistance on their own PCs, and for the helpers who support them."
+        primaryHref="/signup?plan=personal"
+        primaryLabel="Create free account"
         secondaryHref="/contact"
-        secondaryLabel="Get a quote"
+        secondaryLabel="Ask a question"
       />
 
       <section className="mx-auto max-w-6xl px-4 py-16 sm:px-6">
         <p className="mb-8 text-center text-sm text-slate-500">
-          Prices shown in USD · billed monthly · volume discounts available
+          USD · cancel anytime · trial available on all plans
         </p>
         <div className="grid gap-6 lg:grid-cols-3">
           {PLANS.map((plan) => (
@@ -108,9 +106,7 @@ export default function PricingPage() {
             >
               <h2 className="text-lg font-semibold text-slate-900">{plan.name}</h2>
               <p className="mt-2 text-4xl font-bold tracking-tight text-[#0F172A]">{plan.price}</p>
-              <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
-                {plan.period}
-              </p>
+              <p className="text-xs font-medium uppercase tracking-wide text-slate-400">{plan.period}</p>
               <p className="mt-3 text-sm text-slate-600">{plan.blurb}</p>
               <ul className="mt-6 flex-1 space-y-3">
                 {plan.features.map((f) => (
@@ -150,7 +146,14 @@ export default function PricingPage() {
         </div>
       </section>
 
-      <CtaBand title="Ready when you are" body="Start a trial or ask sales for a volume quote." />
+      <CtaBand
+        title="Install once. Get help whenever you need it."
+        body="Create an account, put the agent on your PC, and invite the person who helps you."
+        primaryHref="/signup?plan=personal"
+        primaryLabel="Create account"
+        secondaryHref="/agents"
+        secondaryLabel="Download agent"
+      />
     </>
   );
 }
