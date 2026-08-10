@@ -1,3 +1,4 @@
+// Bhudi native agent — single static binary, no Python runtime required.
 package main
 
 import (
@@ -7,7 +8,7 @@ import (
 	"strings"
 )
 
-const agentVersion = "2.2.7-display-fix"
+const agentVersion = "2.2.8-screen-capture-fix"
 
 func main() {
 	if len(os.Args) < 2 {
@@ -42,18 +43,25 @@ func parseRunFlags(args []string) runConfig {
 	server := fs.String("server", envOr("BHUDI_SERVER_URL", defaultServerURL), "Bhudi backend base URL")
 	interval := fs.Int("interval", 10, "Heartbeat interval seconds")
 	_ = fs.Parse(args)
-	return runConfig{Server: strings.TrimRight(*server, "/"), Interval: *interval}
+	return runConfig{
+		Server:   strings.TrimRight(*server, "/"),
+		Interval: *interval,
+	}
 }
 
 func printHelp() {
-	fmt.Print(`Bhudi native agent
+	fmt.Print(`Bhudi native agent (no Python required)
 
-  bhudi-agent install [-server URL]
-  bhudi-agent uninstall
-  bhudi-agent run [-server URL]
+  bhudi-agent [run] [-server URL] [-interval N]   Run in foreground
+  bhudi-agent install [-server URL]               Install service / startup task
+  bhudi-agent uninstall                           Remove service / startup task
   bhudi-agent version
 
-Screen share needs an interactive desktop session.
+Environment:
+  BHUDI_SERVER_URL    Backend base URL
+  BHUDI_HOSTNAME      Override hostname
+
+Remote desktop requires an interactive user session (not Session 0 only).
 `)
 }
 
