@@ -27,6 +27,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { useAuth } from '@/shared/auth/AuthContext';
+import BhudiLogo from '@/shared/components/BhudiLogo';
 
 type NavItem = { label: string; href: string; icon: LucideIcon; exact?: boolean; badge?: string };
 
@@ -90,9 +91,7 @@ export default function AppSidebar({
         }
       >
         <div className="flex h-14 items-center justify-between border-b border-white/10 px-4">
-          <Link href="/dashboard" className="text-sm font-bold tracking-tight text-white">
-            Bhudi
-          </Link>
+          <BhudiLogo href="/dashboard" size="sm" inverted withWordmark />
           <button type="button" className="lg:hidden text-slate-400" onClick={onMobileClose}>
             <X size={18} />
           </button>
@@ -118,7 +117,9 @@ export default function AppSidebar({
                 <Icon size={16} className="shrink-0 opacity-90" />
                 <span className="flex-1 truncate">{item.label}</span>
                 {item.badge && (
-                  <span className="rounded-full bg-white/15 px-1.5 text-[10px] font-semibold">{item.badge}</span>
+                  <span className="rounded-full bg-white/15 px-1.5 text-[10px] font-semibold">
+                    {item.badge}
+                  </span>
                 )}
                 {active && <ChevronRight size={14} className="opacity-70" />}
               </MotionLink>
