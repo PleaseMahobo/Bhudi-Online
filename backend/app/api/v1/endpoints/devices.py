@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.database.session import get_db
@@ -69,6 +69,10 @@ def _normalize_row(raw: dict[str, Any]) -> dict[str, Any]:
         "disk_percent": raw.get("disk_percent"),
         "last_seen": last_seen_s,
         "source": raw.get("source") or "unknown",
+        "organization_id": str(raw["organization_id"]) if raw.get("organization_id") else None,
+        "organization_name": raw.get("organization_name"),
+        "site_id": str(raw["site_id"]) if raw.get("site_id") else None,
+        "site_name": raw.get("site_name"),
     }
 
 
@@ -92,7 +96,6 @@ def _runtime_agents() -> list[dict[str, Any]]:
 
 @router.get("/status")
 def device_status():
-    """Lightweight status used by the frontend dashboard."""
     return list_devices_unified()
 
 
@@ -140,14 +143,16 @@ def list_devices_unified(db: Session | None = None) -> dict[str, Any]:
                         "ip": getattr(d, "ip", None),
                         "last_seen": getattr(d, "last_seen", None),
                         "source": "db",
+                        "organization_id": getattr(d, "organization_id", None),
+                        "site_id": getattr(d, "site_id", None),
                     }
                 )
                 if not row["id"]:
                     continue
                 if row["id"] not in by_id:
                     by_id[row["id"]] = row
-        except Exception as exc:
-            print(f"[devices] DB list failed: {exc}")
+        except Exception as exp:
+            print(f"[devices] DB list failed: {exp}")
 
     devices = sorted(
         by_id.values(),
@@ -159,3 +164,107 @@ def list_devices_unified(db: Session | None = None) -> dict[str, Any]:
         counts[s] = counts.get(s, 0) + 1
 
     return {"devices": devices, "count": len(devices), "counts": counts}
+
+
+def _find_agent(device_id: str) -> dict[str, Any] | None:
+    try:
+        from app.api.v1.endpoints import agent_runtime
+
+        agents = getattr(agent_runtime, "_agents", {}) or {}
+        if device_id in agents:
+            return agents[device_id]
+        for a in agents.values():
+            if str(a.get("agent_id")) == device_id or str(a.get("hostname")) == device_id:
+                return a
+    except Exception:
+        pass
+    for d in device_state.get_devices():
+        if str(d.get("device_id") or d.get("id")) == device_id:
+            return d
+    return None
+
+
+@router.get("/{device_id}")
+def get_device(device_id: str, db: Session = Depends(get_db)):
+    unified = list_devices_unified(db)
+    for d in unified["devices"]:
+        if d.get("id") == device_id or d.get("hostname") == device_id:
+            return d
+    raise HTTPException(status_code=404, detail="Device not found")
+
+
+@router.post("/{device_id}/inventory/{kind}")
+def request_inventory(device_id: str, kind: str):
+    kind = kind.lower().strip()
+    if kind not in ("processes", "software"):
+        raise HTTPException(400, "kind must be processes or software")
+
+    agent = _find_agent(device_id)
+    if not agent:
+        raise HTTPException(404, "Agent not found — device must be enrolled and online")
+
+    agent_id = str(agent.get("agent_id") or device_id)
+    platform = str(agent.get("platform") or "").lower()
+
+    if kind == "processes":
+        if "win" in platform:
+            cmd = "tasklist /fo csv /nh"
+        else:
+            cmd = "ps -eo pid,user,%cpu,%mem,comm --sort=-%cpu | head -80"
+    else:
+        if "win" in platform:
+            cmd = (
+                "powershell -NoProfile -Command "
+                '"Get-ItemProperty HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\* '
+                ", HKLM:\\Software\\Wow6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\* "
+                "| Select-Object DisplayName, DisplayVersion | Where-Object DisplayName | "
+                'ConvertTo-Csv -NoTypeInformation"'
+            )
+        elif "darwin" in platform or "macos" in platform:
+            cmd = "ls /Applications | head -100"
+        else:
+            cmd = "dpkg-query -W -f='${Package}\\t${Version}\\n' 2>/dev/null | head -100 || rpm -qa | head -100"
+
+    try:
+        from app.api.v1.endpoints import agent_runtime
+
+        if agent_id not in agent_runtime._agents:
+            raise HTTPException(404, "Runtime agent not found")
+        body = agent_runtime.CommandCreate(command=cmd, shell=True)
+        result = agent_runtime.queue_command(agent_id, body)
+        return {
+            "accepted": True,
+            "command_id": result.get("command_id"),
+            "kind": kind,
+            "command": cmd,
+            "agent_id": agent_id,
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(500, f"Failed to queue inventory: {exc}") from exc
+
+
+@router.get("/{device_id}/commands/{command_id}")
+def get_device_command(device_id: str, command_id: str):
+    try:
+        from app.api.v1.endpoints import agent_runtime
+
+        agent_id = device_id
+        agent = _find_agent(device_id)
+        if agent:
+            agent_id = str(agent.get("agent_id") or device_id)
+        for c in agent_runtime._commands.get(agent_id, []):
+            if c.get("command_id") == command_id:
+                return {
+                    "command_id": command_id,
+                    "status": c.get("status"),
+                    "command": c.get("command"),
+                    "result": c.get("result"),
+                    "finished_at": c.get("finished_at"),
+                }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(500, str(exc)) from exc
+    raise HTTPException(404, "Command not found")
