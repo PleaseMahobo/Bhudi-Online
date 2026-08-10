@@ -15,7 +15,7 @@ import (
 
 const (
 	windowsTaskName  = "BhudiAgent"
-	uninstallRegPath = `Software\Microsoft\Windows\CurrentVersion\Uninstall\BhudiAgent"`
+	uninstallRegPath = `SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\BhudiAgent`
 	displayName      = "Bhudi Agent"
 	publisherName    = "Bhudi"
 )
@@ -41,7 +41,6 @@ func installService(server string) error {
 	_ = exec.Command("schtasks", "/Delete", "/TN", windowsTaskName, "/F").Run()
 
 	cmdLine := fmt.Sprintf("\"%s\" run -server %s", dest, server)
-	// /IT = only when an interactive user is logged on (required for screen capture)
 	create := exec.Command("schtasks", "/Create", "/TN", windowsTaskName,
 		"/TR", cmdLine, "/SC", "ONLOGON", "/RL", "HIGHEST", "/IT", "/F")
 	out, err := create.CombinedOutput()
