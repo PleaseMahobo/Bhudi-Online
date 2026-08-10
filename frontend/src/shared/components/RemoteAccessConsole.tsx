@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import {
   Loader2,
   Monitor,
@@ -30,7 +31,7 @@ function authHeaders(): HeadersInit {
   const token =
     typeof window !== 'undefined' ? localStorage.getItem('access_token') || '' : '';
   return token
-    ? { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }
+    ? { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }
     : { 'Content-Type': 'application/json' };
 }
 
@@ -45,6 +46,7 @@ function wsBase(): string {
 }
 
 export default function RemoteAccessConsole() {
+  const searchParams = useSearchParams();
   const [devices, setDevices] = useState<Device[]>([]);
   const [agentId, setAgentId] = useState('');
   const [mode, setMode] = useState<'desktop' | 'terminal'>('desktop');
@@ -57,6 +59,7 @@ export default function RemoteAccessConsole() {
   const [frameUrl, setFrameUrl] = useState<string | null>(null);
   const [zoom, setZoom] = useState(100);
   const [wide, setWide] = useState(true);
+  const [termInput, setTermInput] = useState('');
 
   const wsRef = useRef<WebSocket | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -78,6 +81,13 @@ export default function RemoteAccessConsole() {
   }, [loadDevices]);
 
   useEffect(() => {
+    const a = searchParams.get('agent') || searchParams.get('device') || '';
+    const m = searchParams.get('mode');
+    if (a) setAgentId(a);
+    if (m === 'desktop' || m === 'terminal') setMode(m);
+  }, [searchParams]);
+
+  useEffect(() => {
     return () => {
       wsRef.current?.close();
     };
@@ -94,11 +104,9 @@ export default function RemoteAccessConsole() {
     }
     setBusy(true);
     setError('');
-    setTermLog('');
-    setFrameUrl(null);
     setStatus('Queueing session…');
-    wsRef.current?.close();
-
+    setFrameUrl(null);
+    setTermLog('');
     try {
       const path =
         mode === 'desktop'
@@ -107,320 +115,230 @@ export default function RemoteAccessConsole() {
       const body =
         mode === 'desktop'
           ? { agent_id: agentId, session_mode: 'control', display_protocol: 'native' }
-          : { agent_id: agentId, shell, interactive: true };
-
+          : { agent_id: agentId, shell };
       const res = await fetch(API_BASE + path, {
         method: 'POST',
         headers: authHeaders(),
         body: JSON.stringify(body),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        const detail = data.detail || data.message || `HTTP ${res.status}`;
-        throw new Error(typeof detail === 'string' ? detail : JSON.stringify(detail));
-      }
-
+      if (!res.ok) throw new Error(data.detail || res.statusText || 'Failed to start');
       const sid = data.session_id as string;
       if (!sid) throw new Error('No session_id returned');
       setSessionId(sid);
-      setStatus('Waiting for agent… (agent must be online, v2.2+)');
+      setStatus('Connecting…');
 
-      const url = `${wsBase()}/api/v1/remote-access/sessions/${sid}/dashboard`;
+      const url = wsBase() + '/api/v1/remote-access/sessions/' + sid + '/dashboard';
       const ws = new WebSocket(url);
       wsRef.current = ws;
-
-      ws.onopen = () => setStatus('Dashboard connected — waiting for agent…');
-      ws.onerror = () => setError('WebSocket error — check backend URL.');
-      ws.onclose = () => setStatus((s) => (s.includes('ended') ? s : 'Session closed'));
+      ws.onopen = () => setStatus('Connected — waiting for agent');
+      ws.onerror = () => setError('WebSocket error');
+      ws.onclose = () => setStatus('Disconnected');
       ws.onmessage = (ev) => {
-        let msg: Record<string, unknown>;
         try {
-          msg = JSON.parse(String(ev.data));
-        } catch {
-          return;
-        }
-        const type = String(msg.type || '');
-
-        if (type === 'agent_connected') setStatus('Agent connected');
-        if (type === 'agent_disconnected') setStatus('Agent disconnected');
-        if (type === 'desktop_ready') {
-          setStatus('Desktop ready');
-          if (msg.width && msg.height) {
-            frameSize.current = { w: Number(msg.width), h: Number(msg.height) };
+          const msg = JSON.parse(String(ev.data));
+          const type = msg.type as string;
+          if (type === 'desktop_ready') {
+            setStatus('Desktop ready');
+            if (msg.width && msg.height) frameSize.current = { w: msg.width, h: msg.height };
           }
+          if (type === 'frame' && msg.data) {
+            const src = 'data:image/jpeg;base64,' + msg.data;
+            setFrameUrl(src);
+            const img = new Image();
+            img.onload = () => {
+              const c = canvasRef.current;
+              if (!c) return;
+              const ctx = c.getContext('2d');
+              if (!ctx) return;
+              c.width = img.width;
+              c.height = img.height;
+              ctx.drawImage(img, 0, 0);
+            };
+            img.src = src;
+          }
+          if (type === 'terminal_output' || type === 'output') {
+            setTermLog((prev) => prev + (msg.data || msg.output || ''));
+          }
+          if (type === 'session_closed') setStatus('Session ended');
+        } catch {
+          /* ignore */
         }
-        if (type === 'terminal_ready') {
-          setStatus('Terminal ready');
-          setTermLog(
-            (l) =>
-              l +
-              `\n[ready] shell=${msg.shell || ''} platform=${msg.platform || ''}\n`
-          );
-        }
-        if (type === 'frame' && msg.data) {
-          setStatus('Streaming');
-          const encoding = String(msg.encoding || 'jpeg');
-          const dataUrl = `data:image/${encoding};base64,${msg.data}`;
-          setFrameUrl(dataUrl);
-          const img = new Image();
-          img.onload = () => {
-            const canvas = canvasRef.current;
-            if (!canvas) return;
-            const w = Number(msg.width) || img.width;
-            const h = Number(msg.height) || img.height;
-            frameSize.current = { w, h };
-            canvas.width = w;
-            canvas.height = h;
-            const ctx = canvas.getContext('2d');
-            ctx?.drawImage(img, 0, 0, w, h);
-          };
-          img.src = dataUrl;
-        }
-        if (type === 'output' && msg.data) {
-          setTermLog((l) => l + String(msg.data));
-        }
-        if (type === 'error') {
-          setError(String(msg.message || 'Session error'));
-        }
-        if (type === 'session_closed') setStatus('Session ended');
       };
-    } catch (e: unknown) {
+    } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to start session');
-      setStatus('Failed');
+      setStatus('Idle');
     } finally {
       setBusy(false);
     }
   }
 
-  function sendInput(payload: Record<string, unknown>) {
-    const ws = wsRef.current;
-    if (!ws || ws.readyState !== WebSocket.OPEN) return;
-    ws.send(JSON.stringify(payload));
-  }
-
-  function onCanvasClick(e: React.MouseEvent<HTMLCanvasElement>) {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const rect = canvas.getBoundingClientRect();
-    const x = Math.round(((e.clientX - rect.left) / rect.width) * frameSize.current.w);
-    const y = Math.round(((e.clientY - rect.top) / rect.height) * frameSize.current.h);
-    sendInput({ type: 'click', x, y, button: e.button === 2 ? 'right' : 'left' });
-  }
-
-  function onTermKey(e: React.KeyboardEvent<HTMLTextAreaElement>) {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      const line = (e.target as HTMLTextAreaElement).value;
-      const parts = line.split('\n');
-      const cmd = parts[parts.length - 1] || '';
-      sendInput({ type: 'command', command: cmd });
-    }
-  }
-
   function stopSession() {
-    sendInput({ type: 'close' });
     wsRef.current?.close();
+    wsRef.current = null;
     setSessionId(null);
-    setStatus('Stopped');
+    setStatus('Idle');
+    setFrameUrl(null);
+  }
+
+  function sendTerm() {
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN || !termInput.trim()) return;
+    wsRef.current.send(JSON.stringify({ type: 'input', data: termInput + '\n' }));
+    setTermInput('');
   }
 
   return (
-    <div className="space-y-6 p-6">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-bold text-slate-900">Remote Access</h1>
-          <p className="mt-1 text-sm text-slate-500">
-            Screen share and interactive terminal for online native agents (v2.2+).
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={() => void loadDevices()}
-          className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-        >
-          <RefreshCw size={15} />
-          Refresh devices
-        </button>
-      </div>
-
-      <section className="space-y-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-        <div className="grid gap-4 md:grid-cols-2">
-          <label className="block text-sm font-medium text-slate-700">
-            Target device
+    <div className={'space-y-4 ' + (wide ? '' : 'max-w-5xl')}>
+      <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="min-w-[200px] flex-1">
+            <label className="mb-1 block text-xs font-medium text-slate-500">Device / agent</label>
             <select
               value={agentId}
               onChange={(e) => setAgentId(e.target.value)}
-              className="mt-2 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm"
+              className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm"
             >
-              <option value="">Select online agent…</option>
+              <option value="">Select device…</option>
               {devices.map((d) => {
                 const id = deviceAgentId(d);
                 return (
                   <option key={id} value={id}>
-                    {(d.hostname || d.name || id) + ' · ' + (d.status || 'unknown')}
+                    {(d.hostname || d.name || id) + (d.status ? ' (' + d.status + ')' : '')}
                   </option>
                 );
               })}
             </select>
-          </label>
-
-          <div>
-            <p className="text-sm font-medium text-slate-700">Session type</p>
-            <div className="mt-2 flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={() => setMode('desktop')}
-                className={
-                  'inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium ' +
-                  (mode === 'desktop'
-                    ? 'border-indigo-300 bg-indigo-50 text-indigo-800'
-                    : 'border-slate-200 text-slate-600')
-                }
-              >
-                <ScreenShare size={14} /> Screen share
-              </button>
-              <button
-                type="button"
-                onClick={() => setMode('terminal')}
-                className={
-                  'inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium ' +
-                  (mode === 'terminal'
-                    ? 'border-indigo-300 bg-indigo-50 text-indigo-800'
-                    : 'border-slate-200 text-slate-600')
-                }
-              >
-                <Terminal size={14} /> Terminal
-              </button>
-            </div>
-            {mode === 'terminal' && (
-              <select
-                value={shell}
-                onChange={(e) => setShell(e.target.value)}
-                className="mt-2 h-9 rounded-lg border border-slate-200 px-2 text-sm"
-              >
-                <option value="powershell">PowerShell</option>
-                <option value="cmd">CMD</option>
-                <option value="bash">Bash</option>
-                <option value="zsh">Zsh</option>
-              </select>
-            )}
           </div>
-        </div>
-
-        <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            disabled={busy || !agentId}
-            onClick={() => void startSession()}
-            className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-indigo-500 disabled:opacity-50"
-          >
-            {busy ? <Loader2 size={16} className="animate-spin" /> : <Monitor size={16} />}
-            {busy ? 'Starting…' : 'Connect'}
-          </button>
-          {sessionId && (
+          <div className="flex gap-1 rounded-xl border border-slate-200 p-1">
+            <button
+              type="button"
+              onClick={() => setMode('desktop')}
+              className={
+                'inline-flex items-center gap-1 rounded-lg px-3 py-1.5 text-xs font-medium ' +
+                (mode === 'desktop' ? 'bg-indigo-600 text-white' : 'text-slate-600')
+              }
+            >
+              <Monitor size={14} /> Desktop
+            </button>
+            <button
+              type="button"
+              onClick={() => setMode('terminal')}
+              className={
+                'inline-flex items-center gap-1 rounded-lg px-3 py-1.5 text-xs font-medium ' +
+                (mode === 'terminal' ? 'bg-indigo-600 text-white' : 'text-slate-600')
+              }
+            >
+              <Terminal size={14} /> Terminal
+            </button>
+          </div>
+          {mode === 'terminal' && (
+            <select
+              value={shell}
+              onChange={(e) => setShell(e.target.value)}
+              className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
+            >
+              <option value="powershell">PowerShell</option>
+              <option value="cmd">CMD</option>
+              <option value="bash">Bash</option>
+            </select>
+          )}
+          {!sessionId ? (
+            <button
+              type="button"
+              disabled={busy || !agentId}
+              onClick={() => void startSession()}
+              className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-500 disabled:opacity-50"
+            >
+              {busy ? <Loader2 size={16} className="animate-spin" /> : <ScreenShare size={16} />}
+              Connect
+            </button>
+          ) : (
             <button
               type="button"
               onClick={stopSession}
-              className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-700"
+              className="inline-flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-sm font-medium text-red-700"
             >
-              Disconnect
+              <XCircle size={16} /> Disconnect
             </button>
           )}
+          <button
+            type="button"
+            onClick={() => void loadDevices()}
+            className="rounded-xl border border-slate-200 p-2 text-slate-600 hover:bg-slate-50"
+            title="Refresh devices"
+          >
+            <RefreshCw size={16} />
+          </button>
         </div>
-
-        <div className="flex items-center gap-2 text-xs text-slate-500">
-          <Wifi size={14} />
-          Status: <span className="font-medium text-slate-800">{status}</span>
-          {sessionId && (
-            <span className="font-mono text-slate-400">session {sessionId.slice(0, 8)}…</span>
-          )}
+        <div className="mt-3 flex items-center gap-2 text-xs text-slate-500">
+          <Wifi size={12} />
+          <span>{status}</span>
+          {sessionId && <span className="font-mono text-slate-400">session {sessionId.slice(0, 8)}…</span>}
+          {agentId && <span className="font-mono text-slate-400">agent {agentId.slice(0, 8)}…</span>}
         </div>
-
         {error && (
-          <div className="flex items-start gap-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
-            <XCircle size={16} className="mt-0.5 shrink-0" />
-            <div>
-              <p>{error}</p>
-              <p className="mt-1 text-xs text-red-600/80">
-                Common causes: agent offline, agent older than v2.2, backend restarted (re-enroll agent),
-                or agent id mismatch.
-              </p>
-            </div>
-          </div>
+          <div className="mt-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>
         )}
-      </section>
+      </div>
 
-      <section className="overflow-hidden rounded-2xl border border-slate-200 bg-slate-950 shadow-sm">
-        <header className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 px-4 py-3 text-sm font-semibold text-slate-200">
-          <span>{mode === 'desktop' ? 'Live screen' : 'Live terminal'}</span>
-          {mode === 'desktop' && (
-            <div className="flex flex-wrap items-center gap-3 text-xs font-normal text-slate-400">
-              <label className="flex items-center gap-2">
+      {mode === 'desktop' && (
+        <div className="overflow-hidden rounded-2xl border border-slate-200 bg-slate-900 shadow-sm">
+          <div className="flex items-center justify-between border-b border-white/10 px-3 py-2 text-xs text-slate-300">
+            <span>Remote desktop</span>
+            <div className="flex items-center gap-2">
+              <label className="flex items-center gap-1">
                 Zoom
                 <input
                   type="range"
                   min={50}
-                  max={200}
-                  step={10}
+                  max={150}
                   value={zoom}
                   onChange={(e) => setZoom(Number(e.target.value))}
-                  className="w-28"
                 />
-                <span className="w-10 tabular-nums text-slate-300">{zoom}%</span>
               </label>
-              <button
-                type="button"
-                onClick={() => setWide((w) => !w)}
-                className="rounded-lg border border-slate-700 px-2 py-1 text-slate-300 hover:bg-slate-800"
-              >
-                {wide ? 'Fit width' : 'Contain'}
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  const el = canvasRef.current?.parentElement;
-                  if (el && el.requestFullscreen) void el.requestFullscreen();
-                }}
-                className="rounded-lg border border-slate-700 px-2 py-1 text-slate-300 hover:bg-slate-800"
-              >
-                Fullscreen
+              <button type="button" className="underline" onClick={() => setWide((w) => !w)}>
+                {wide ? 'Narrow' : 'Wide'}
               </button>
             </div>
-          )}
-        </header>
-        {mode === 'desktop' ? (
-          <div className="relative flex min-h-[480px] items-start justify-center overflow-auto bg-black p-2">
+          </div>
+          <div className="flex min-h-[360px] items-center justify-center overflow-auto p-2">
             <canvas
               ref={canvasRef}
-              onClick={onCanvasClick}
-              onContextMenu={(e) => e.preventDefault()}
-              style={{
-                width: wide ? `${zoom}%` : undefined,
-                maxWidth: wide ? undefined : '100%',
-                height: 'auto',
-                maxHeight: wide ? undefined : '80vh',
-                imageRendering: 'auto',
-              }}
-              className="cursor-crosshair"
+              style={{ transform: 'scale(' + zoom / 100 + ')', transformOrigin: 'top left' }}
+              className="max-w-full bg-black"
             />
             {!frameUrl && (
-              <p className="absolute top-1/2 text-sm text-slate-500">No frames yet — click Connect</p>
+              <p className="absolute text-sm text-slate-500">No frames yet — start a session with an online agent.</p>
             )}
           </div>
-        ) : (
-          <div className="p-3">
-            <pre className="h-72 overflow-auto whitespace-pre-wrap font-mono text-xs text-emerald-400">
-              {termLog || 'Terminal output will appear here after Connect…'}
-            </pre>
-            <textarea
-              rows={2}
-              onKeyDown={onTermKey}
-              placeholder="Type a command and press Enter"
-              className="mt-2 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 font-mono text-sm text-slate-100"
+        </div>
+      )}
+
+      {mode === 'terminal' && (
+        <div className="overflow-hidden rounded-2xl border border-slate-200 bg-slate-950 shadow-sm">
+          <pre className="max-h-[420px] min-h-[280px] overflow-auto p-4 font-mono text-[12px] text-emerald-300">
+            {termLog || 'Terminal output will appear here…'}
+          </pre>
+          <div className="flex border-t border-white/10">
+            <input
+              value={termInput}
+              onChange={(e) => setTermInput(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && sendTerm()}
+              placeholder="Type a command…"
+              className="flex-1 bg-transparent px-3 py-2 font-mono text-sm text-white outline-none"
+              disabled={!sessionId}
             />
+            <button
+              type="button"
+              onClick={sendTerm}
+              disabled={!sessionId}
+              className="px-4 text-sm font-medium text-indigo-300 hover:text-white disabled:opacity-40"
+            >
+              Send
+            </button>
           </div>
-        )}
-      </section>
+        </div>
+      )}
     </div>
   );
 }
