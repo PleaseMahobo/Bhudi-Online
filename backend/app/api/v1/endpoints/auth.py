@@ -157,6 +157,29 @@ def login(
         request.password,
     )
 
+    # MFA challenge: password OK but TOTP required
+    if bool(getattr(user, "mfa_enabled", False)):
+        code = (request.mfa_code or "").strip()
+        if not code:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="mfa_required",
+            )
+        try:
+            from app.services.mfa_service import MfaService
+            if not MfaService(db).verify_code(user, code):
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Invalid authenticator code",
+                )
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"MFA verification unavailable: {exc}",
+            ) from exc
+
     ip_address = (
         http_request.client.host
         if http_request.client
