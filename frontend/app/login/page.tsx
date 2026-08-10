@@ -1,9 +1,9 @@
 'use client';
 
+import BhudiLogo from '@/shared/components/BhudiLogo';
 import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Sparkles } from 'lucide-react';
 import { useAuth } from '@/shared/auth/AuthContext';
 import { loginUser } from '@/lib/auth-client';
 
@@ -25,6 +25,7 @@ export default function LoginPage() {
       const tokens = await loginUser(email, password, needMfa ? mfaCode : undefined);
       localStorage.setItem('access_token', tokens.access_token);
       if (tokens.refresh_token) localStorage.setItem('refresh_token', tokens.refresh_token);
+      localStorage.setItem('user_email', email);
       if (auth?.login) {
         try {
           await auth.login(email, password);
@@ -49,13 +50,8 @@ export default function LoginPage() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-[#0F172A] p-4">
       <div className="w-full max-w-md rounded-3xl border border-slate-700 bg-slate-900 p-10 shadow-xl">
-        <div className="mb-10 text-center">
-          <Link href="/" className="inline-flex items-center gap-2 font-semibold text-white">
-            <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-indigo-600">
-              <Sparkles size={18} />
-            </span>
-            Bhudi
-          </Link>
+        <div className="mb-10 flex flex-col items-center text-center">
+          <BhudiLogo href="/" size="md" inverted withWordmark />
           <p className="mt-3 text-sm text-slate-400">Sign in to your operations workspace</p>
         </div>
 
