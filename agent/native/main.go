@@ -5,10 +5,11 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"runtime"
 	"strings"
 )
 
-const agentVersion = "2.2.8-screen-capture-fix"
+const agentVersion = "2.3.0-session-capture"
 
 func main() {
 	if len(os.Args) < 2 {
@@ -29,6 +30,8 @@ func main() {
 		}
 	case "run", "start":
 		runAgent(parseRunFlags(os.Args[2:]))
+	case "diagnose-capture", "diagnose":
+		runCaptureDiagnose()
 	case "version", "-version", "--version":
 		fmt.Println("bhudi-agent", agentVersion)
 	case "help", "-h", "--help":
@@ -49,19 +52,46 @@ func parseRunFlags(args []string) runConfig {
 	}
 }
 
+func runCaptureDiagnose() {
+	fmt.Println("bhudi-agent", agentVersion, "capture diagnose")
+	fmt.Println("  goos/goarch:", runtime.GOOS+"/"+runtime.GOARCH)
+	fmt.Println("  desktop:    ", desktopStatusNote())
+	if err := ensureInteractiveDesktop(); err != nil {
+		fmt.Println("  attach:     FAIL —", err)
+	} else {
+		fmt.Println("  attach:     OK —", desktopStatusNote())
+	}
+	img, err := capturePrimaryScreen()
+	if err != nil {
+		fmt.Println("  capture:    FAIL —", err)
+		fmt.Println()
+		fmt.Println("Tips:")
+		fmt.Println("  • Log on to the Windows console (not only RDP disconnect leaving Session 0).")
+		fmt.Println("  • Run:  bhudi-agent.exe run -server <URL>   in that logged-on session.")
+		fmt.Println("  • Reinstall with:  bhudi-agent.exe install -server <URL>")
+		fmt.Println("    (creates an ONLOGON /IT interactive task so capture works after login).")
+		os.Exit(1)
+	}
+	b := img.Bounds()
+	fmt.Printf("  capture:    OK — %dx%d\n", b.Dx(), b.Dy())
+	fmt.Println("Screen capture is configured for this session.")
+}
+
 func printHelp() {
 	fmt.Print(`Bhudi native agent (no Python required)
 
   bhudi-agent [run] [-server URL] [-interval N]   Run in foreground
-  bhudi-agent install [-server URL]               Install service / startup task
-  bhudi-agent uninstall                           Remove service / startup task
+  bhudi-agent install [-server URL]               Install interactive logon task
+  bhudi-agent uninstall                           Remove startup task
+  bhudi-agent diagnose-capture                    Test WinSta0 desktop attach + GDI capture
   bhudi-agent version
 
 Environment:
   BHUDI_SERVER_URL    Backend base URL
   BHUDI_HOSTNAME      Override hostname
 
-Remote desktop requires an interactive user session (not Session 0 only).
+Windows remote desktop capture needs an interactive console session.
+Use "diagnose-capture" on the target PC to verify configuration.
 `)
 }
 
