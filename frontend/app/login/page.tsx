@@ -1,38 +1,53 @@
 'use client';
 
-import Link from 'next/link';
-import { useAuth } from '@/shared/auth/AuthContext';
 import { useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Sparkles } from 'lucide-react';
+import { useAuth } from '@/shared/auth/AuthContext';
+import { loginUser } from '@/lib/auth-client';
 
-export default function Login() {
-  const { login } = useAuth();
-
+export default function LoginPage() {
+  const router = useRouter();
+  const auth = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [mfaCode, setMfaCode] = useState('');
+  const [needMfa, setNeedMfa] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const router = useRouter();
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    setLoading(true);
     setError('');
-
-    const success = await login(email, password);
-
-    if (success) {
+    setLoading(true);
+    try {
+      const tokens = await loginUser(email, password, needMfa ? mfaCode : undefined);
+      localStorage.setItem('access_token', tokens.access_token);
+      if (tokens.refresh_token) localStorage.setItem('refresh_token', tokens.refresh_token);
+      if (auth?.login) {
+        try {
+          await auth.login(email, password);
+        } catch {
+          /* tokens already stored */
+        }
+      }
       router.push('/dashboard');
-    } else {
-      setError('Invalid email or password');
+    } catch (err: any) {
+      const msg = String(err?.message || 'Sign in failed');
+      if (msg.includes('mfa_required')) {
+        setNeedMfa(true);
+        setError('Enter your authenticator code to continue.');
+      } else {
+        setError(msg);
+      }
+    } finally {
+      setLoading(false);
     }
-
-    setLoading(false);
-  };
+  }
 
   return (
-    <div className="min-h-screen bg-[#0F172A] flex items-center justify-center p-4">
+    <div className="flex min-h-screen items-center justify-center bg-[#0F172A] p-4">
       <div className="w-full max-w-md rounded-3xl border border-slate-700 bg-slate-900 p-10 shadow-xl">
         <div className="mb-10 text-center">
           <Link href="/" className="inline-flex items-center gap-2 font-semibold text-white">
@@ -57,7 +72,12 @@ export default function Login() {
             />
           </div>
           <div>
-            <label className="text-xs font-medium text-slate-400">Password</label>
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-medium text-slate-400">Password</label>
+              <Link href="/forgot-password" className="text-xs text-indigo-400 hover:text-indigo-300">
+                Forgot password?
+              </Link>
+            </div>
             <input
               type="password"
               placeholder="Password"
@@ -67,6 +87,20 @@ export default function Login() {
               required
             />
           </div>
+          {needMfa && (
+            <div>
+              <label className="text-xs font-medium text-slate-400">Authenticator code</label>
+              <input
+                value={mfaCode}
+                onChange={(e) => setMfaCode(e.target.value)}
+                inputMode="numeric"
+                autoFocus
+                className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-3 text-center font-mono text-lg tracking-widest text-white outline-none focus:border-indigo-500"
+                placeholder="000000"
+                required
+              />
+            </div>
+          )}
 
           {error && (
             <p className="rounded-xl border border-red-500/40 bg-red-950/40 px-3 py-2 text-center text-sm text-red-300">
@@ -85,8 +119,8 @@ export default function Login() {
 
         <p className="mt-8 text-center text-xs text-slate-500">
           New to Bhudi?{' '}
-          <Link href="/trial" className="font-medium text-indigo-400 hover:text-indigo-300">
-            Start a free trial
+          <Link href="/signup" className="font-medium text-indigo-400 hover:text-indigo-300">
+            Create an account
           </Link>
         </p>
       </div>
