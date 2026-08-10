@@ -60,6 +60,11 @@ class LoginRequest(BaseModel):
 
     password: str
 
+    mfa_code: str | None = Field(
+        default=None,
+        description="Optional TOTP code when MFA is enabled",
+    )
+
 
 
 # ==========================================================

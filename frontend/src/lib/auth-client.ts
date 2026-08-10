@@ -9,8 +9,22 @@ async function postJson<T>(path: string, body: unknown, auth = false): Promise<T
   const res = await fetch(API_BASE + path, { method: 'POST', headers, body: JSON.stringify(body) });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    const detail = data.detail;
-    throw new Error(typeof detail === 'string' ? detail : JSON.stringify(detail || res.statusText));
+    const detail = data?.detail;
+    let message = '';
+    if (typeof detail === 'string' && detail.trim()) {
+      message = detail.trim();
+    } else if (Array.isArray(detail) && detail.length) {
+      message = detail
+        .map((d: any) => (typeof d === 'string' ? d : d?.msg || d?.message || JSON.stringify(d)))
+        .filter(Boolean)
+        .join('; ');
+    } else if (detail && typeof detail === 'object') {
+      message = detail.msg || detail.message || '';
+    }
+    if (!message) {
+      message = data?.error || data?.message || res.statusText || `Sign in failed (${res.status})`;
+    }
+    throw new Error(String(message));
   }
   return data as T;
 }
