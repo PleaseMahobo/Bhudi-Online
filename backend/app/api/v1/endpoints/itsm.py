@@ -43,8 +43,6 @@ def _ticket_response(ticket) -> ServiceTicketResponse:
     return base
 
 
-# ---------- Tickets ----------
-
 @router.post(
     "/tickets", response_model=ServiceTicketResponse, status_code=status.HTTP_201_CREATED
 )
@@ -60,6 +58,7 @@ def list_tickets(
     asset_id: UUID | None = None,
     device_id: UUID | None = None,
     priority: str | None = None,
+    q: str | None = None,
     db: Session = Depends(get_db),
 ):
     tickets = ITSMService(db).list_tickets(
@@ -68,6 +67,7 @@ def list_tickets(
         asset_id=asset_id,
         device_id=device_id,
         priority=priority,
+        q=q,
     )
     return [_ticket_response(t) for t in tickets]
 
@@ -113,8 +113,6 @@ def delete_ticket(ticket_id: UUID, db: Session = Depends(get_db)):
     if not ITSMService(db).delete_ticket(ticket_id):
         raise HTTPException(404, "Ticket not found")
 
-
-# ---------- Asset links ----------
 
 @router.post(
     "/tickets/{ticket_id}/assets",
@@ -162,8 +160,6 @@ def create_ticket_for_asset(
     return _ticket_response(ticket)
 
 
-# ---------- Work notes ----------
-
 @router.post(
     "/tickets/{ticket_id}/notes",
     response_model=WorkNoteResponse,
@@ -183,13 +179,10 @@ def list_work_notes(ticket_id: UUID, db: Session = Depends(get_db)):
     return ITSMService(db).list_work_notes(ticket_id)
 
 
-# ---------- Warranty automation ----------
-
 @router.post(
     "/jobs/warranty-expiry",
     response_model=list[ServiceTicketResponse],
 )
 def job_warranty_expiry(within_days: int = 30, db: Session = Depends(get_db)):
-    """Scan assets and open service requests for warranties ending soon."""
     tickets = ITSMService(db).open_warranty_expiry_tickets(within_days=within_days)
     return [_ticket_response(t) for t in tickets]
