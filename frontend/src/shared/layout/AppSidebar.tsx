@@ -32,7 +32,7 @@ type NavItem = { label: string; href: string; icon: LucideIcon; exact?: boolean;
 
 const NAV_ITEMS: NavItem[] = [
   { label: 'Dashboard', href: '/dashboard', icon: LayoutDashboard, exact: true },
-  { label: 'Devices', href: '/assets', icon: Monitor },
+  { label: 'Devices', href: '/devices', icon: Monitor },
   { label: 'Download Agent', href: '/agents', icon: Download },
   { label: 'Customers', href: '/msp', icon: Users },
   { label: 'Tickets', href: '/itsm', icon: Ticket, badge: '3' },
@@ -81,87 +81,59 @@ export default function AppSidebar({
   return (
     <>
       {mobileOpen && (
-        <button
-          type="button"
-          aria-label="Close navigation"
-          onClick={onMobileClose}
-          className="fixed inset-0 z-40 bg-slate-950/50 lg:hidden"
-        />
+        <div className="fixed inset-0 z-40 bg-slate-900/40 lg:hidden" onClick={onMobileClose} />
       )}
-
       <aside
-        className={`fixed inset-y-0 left-0 z-50 flex w-64 flex-col border-r border-slate-800 bg-slate-950 text-slate-100 transition-transform duration-200 lg:static lg:translate-x-0 ${
-          mobileOpen ? 'translate-x-0' : '-translate-x-full'
-        }`}
+        className={
+          'fixed inset-y-0 left-0 z-50 flex w-64 flex-col border-r border-slate-200 bg-slate-950 text-slate-100 transition-transform lg:static lg:translate-x-0 ' +
+          (mobileOpen ? 'translate-x-0' : '-translate-x-full')
+        }
       >
-        <div className="flex h-14 shrink-0 items-center justify-between border-b border-slate-800 px-4">
-          <Link href="/dashboard" className="flex items-center gap-2 font-semibold tracking-tight" onClick={onMobileClose}>
-            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-600 text-sm font-bold text-white">
-              B
-            </span>
-            <span className="text-white">Bhudi</span>
+        <div className="flex h-14 items-center justify-between border-b border-white/10 px-4">
+          <Link href="/dashboard" className="text-sm font-bold tracking-tight text-white">
+            Bhudi
           </Link>
-          <button type="button" className="rounded-md p-1 text-slate-400 hover:bg-slate-800 lg:hidden" onClick={onMobileClose}>
+          <button type="button" className="lg:hidden text-slate-400" onClick={onMobileClose}>
             <X size={18} />
           </button>
         </div>
-
-        <div className="border-b border-slate-800 px-4 py-3">
-          <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Workspace</p>
-          <button type="button" className="mt-1 flex w-full items-center justify-between rounded-lg py-1 text-left hover:bg-slate-800/60">
-            <span className="truncate text-sm font-medium text-slate-200">{user?.email || 'Bhudi Workspace'}</span>
-            <ChevronRight size={15} className="shrink-0 text-slate-500" />
-          </button>
-        </div>
-
-        <nav className="flex-1 space-y-0.5 overflow-y-auto px-2 py-3" aria-label="Main navigation">
-          {NAV_ITEMS.map((item, index) => {
+        <nav className="flex-1 space-y-0.5 overflow-y-auto p-3">
+          {NAV_ITEMS.map((item) => {
             const active = isActivePath(pathname, item);
             const Icon = item.icon;
             return (
               <MotionLink
-                key={`${item.href}-${item.label}`}
+                key={item.href + item.label}
                 href={item.href}
                 onClick={onMobileClose}
-                initial={{ opacity: 0, x: -6 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ ...SPRING, delay: index * 0.012 }}
-                aria-current={active ? 'page' : undefined}
-                className={`group relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors ${
-                  active
-                    ? 'bg-indigo-600/20 font-semibold text-indigo-300'
-                    : 'font-medium text-slate-400 hover:bg-slate-800/90 hover:text-white'
-                }`}
+                className={
+                  'flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition ' +
+                  (active
+                    ? 'bg-indigo-600/90 text-white'
+                    : 'text-slate-300 hover:bg-white/5 hover:text-white')
+                }
+                whileTap={{ scale: 0.98 }}
+                transition={SPRING}
               >
-                {active && (
-                  <span className="absolute left-0 top-1/2 h-6 w-0.5 -translate-y-1/2 rounded-r-full bg-indigo-400" />
-                )}
-                <span
-                  className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md ${
-                    active ? 'bg-indigo-600/30 text-indigo-300' : 'text-slate-500 group-hover:text-indigo-300'
-                  }`}
-                >
-                  <Icon size={17} strokeWidth={active ? 2.25 : 1.75} />
-                </span>
-                <span className="min-w-0 flex-1 truncate">{item.label}</span>
+                <Icon size={16} className="shrink-0 opacity-90" />
+                <span className="flex-1 truncate">{item.label}</span>
                 {item.badge && (
-                  <span className="rounded-full bg-indigo-500/20 px-1.5 py-0.5 text-[10px] font-semibold text-indigo-300">
-                    {item.badge}
-                  </span>
+                  <span className="rounded-full bg-white/15 px-1.5 text-[10px] font-semibold">{item.badge}</span>
                 )}
+                {active && <ChevronRight size={14} className="opacity-70" />}
               </MotionLink>
             );
           })}
         </nav>
-
-        <div className="shrink-0 border-t border-slate-800 p-2">
+        <div className="border-t border-white/10 p-3">
+          <div className="mb-2 truncate px-2 text-xs text-slate-400">{user?.email || 'Signed in'}</div>
           <button
             type="button"
             onClick={handleLogout}
-            className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm text-red-400 transition-colors hover:bg-red-950/40 hover:text-red-300"
+            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-slate-300 hover:bg-white/5 hover:text-white"
           >
-            <LogOut size={17} />
-            <span>Sign out</span>
+            <LogOut size={16} />
+            Sign out
           </button>
         </div>
       </aside>
