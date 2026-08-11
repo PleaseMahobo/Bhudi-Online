@@ -20,8 +20,8 @@ const BOX = {
 } as const;
 
 /**
- * Official Cyber Bastion / Bhudi RMM logo (metallic chrome mark).
- * Prefers /brand/bhudi-logo.png, falls back to embedded asset.
+ * Cyber Bastion / Bhudi RMM logo.
+ * Uses embedded metallic mark (always available), prefers /brand/bhudi-logo.png when present.
  */
 export default function BhudiLogo({
   withWordmark = false,
@@ -37,22 +37,25 @@ export default function BhudiLogo({
   const img = (
     // eslint-disable-next-line @next/next/no-img-element
     <img
-      src="/brand/bhudi-logo.png"
+      src={BHUDI_LOGO_DATA_URL}
       alt="Bhudi RMM — Cyber Bastion"
-      width={isFull ? px * 1.15 : px}
+      width={isFull ? Math.round(px * 1.15) : px}
       height={px}
       className={
         isFull
           ? 'mx-auto h-auto w-full max-w-[220px] object-contain drop-shadow-lg'
           : 'h-full w-full object-contain'
       }
-      onError={(e) => {
+      onLoad={(e) => {
+        // Prefer full raster lockup when the static file is deployed
         const el = e.currentTarget;
-        if (el.dataset.fallback === 'data') return;
-        if (!el.dataset.fallback) {
-          el.dataset.fallback = 'data';
-          el.src = BHUDI_LOGO_DATA_URL;
-        }
+        if (el.dataset.triedPng) return;
+        el.dataset.triedPng = '1';
+        const probe = new window.Image();
+        probe.onload = () => {
+          el.src = '/brand/bhudi-logo.png';
+        };
+        probe.src = '/brand/bhudi-logo.png';
       }}
     />
   );
