@@ -4,7 +4,9 @@ const BACKEND = (
   process.env.API_BASE_URL ||
   process.env.NEXT_PUBLIC_API_URL ||
   'https://bhudi-online-production.up.railway.app'
-).replace(/\/$/, '');
+)
+  .replace(/\/$/, '')
+  .replace(/\/api\/v1$/, '');
 
 function forwardSetCookies(upstream: Response, response: NextResponse) {
   const cookies = upstream.headers.getSetCookie?.() ?? [];
