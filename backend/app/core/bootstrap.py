@@ -96,6 +96,11 @@ def initialize_database() -> dict[str, Any]:
         admin_password = os.getenv("BHUDI_ADMIN_PASSWORD", "StrongPassword123!")
 
         existing = db.query(User).filter(User.email == admin_email).first()
+        force_reset = os.getenv("BHUDI_ADMIN_FORCE_RESET", "").strip().lower() in (
+            "1",
+            "true",
+            "yes",
+        )
         if existing is None:
             admin_user = User(
                 email=admin_email,
@@ -110,6 +115,15 @@ def initialize_database() -> dict[str, Any]:
             db.refresh(admin_user)
         else:
             admin_user = existing
+            if force_reset and admin_password:
+                admin_user.password_hash = hash_password(admin_password)
+                admin_user.active = True
+                admin_user.role = getattr(admin_user, "role", None) or "admin"
+                if hasattr(admin_user, "failed_login_attempts"):
+                    admin_user.failed_login_attempts = 0
+                if hasattr(admin_user, "locked_until"):
+                    admin_user.locked_until = None
+                print(f"[bootstrap] forced password reset for {admin_email}")
 
         admin_role = db.query(Role).filter(Role.name == "admin").first()
         if admin_role is not None:
