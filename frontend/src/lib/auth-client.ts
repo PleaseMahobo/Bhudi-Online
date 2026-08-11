@@ -3,9 +3,6 @@ const API_BASE = '';
 async function postJson<T>(path: string, body: unknown, auth = false): Promise<T> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
 
-  // Authentication is cookie-based at the application boundary. Keep the
-  // access token fallback for existing sessions, but never call the backend
-  // directly from the browser.
   if (auth && typeof window !== 'undefined') {
     const t = localStorage.getItem('access_token');
     if (t) headers.Authorization = 'Bearer ' + t;
@@ -57,7 +54,7 @@ export async function loginUser(email: string, password: string, mfa_code?: stri
 }
 
 export async function requestPasswordReset(email: string) {
-  return postJson<{ message: string; debug_token?: string; debug_reset_path?: string }>(
+  return postJson<{ message: string }>(
     '/api/v1/auth/password-reset/request',
     { email }
   );
