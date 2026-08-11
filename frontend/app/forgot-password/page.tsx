@@ -8,7 +8,6 @@ import { requestPasswordReset } from '@/lib/auth-client';
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState('');
   const [msg, setMsg] = useState('');
-  const [debugPath, setDebugPath] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -17,11 +16,9 @@ export default function ForgotPasswordPage() {
     setLoading(true);
     setError('');
     setMsg('');
-    setDebugPath('');
     try {
       const res = await requestPasswordReset(email);
-      setMsg(res.message || 'Check your email for reset instructions.');
-      if (res.debug_reset_path) setDebugPath(res.debug_reset_path);
+      setMsg(res.message || 'If an account exists for that email, reset instructions have been sent.');
     } catch (err: any) {
       setError(err?.message || 'Request failed');
     } finally {
@@ -45,17 +42,10 @@ export default function ForgotPasswordPage() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-3 text-sm text-white outline-none focus:border-indigo-500"
+              placeholder="you@company.com"
             />
           </div>
           {msg && <p className="text-sm text-emerald-300">{msg}</p>}
-          {debugPath && (
-            <p className="text-xs text-amber-200">
-              Dev reset link:{' '}
-              <Link href={debugPath} className="underline">
-                {debugPath}
-              </Link>
-            </p>
-          )}
           {error && <p className="text-sm text-red-300">{error}</p>}
           <button
             type="submit"
