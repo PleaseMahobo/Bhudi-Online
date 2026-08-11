@@ -20,17 +20,16 @@ type User = {
 type AuthContextType = {
   user: User | null;
   loading: boolean;
-  login: (email: string, password: string) => Promise<boolean>;
+  login: (email: string, password: string, mfaCode?: string) => Promise<boolean>;
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
 };
 
 const AuthContext = createContext<AuthContextType | null>(null);
 
-// Railway Backend URL
-const API_URL =
-  process.env.NEXT_PUBLIC_API_URL ||
-  "https://bhudi-online-production.up.railway.app";
+// Authentication stays same-origin. Next.js owns the browser-facing auth
+// boundary and proxies requests to FastAPI server-side.
+const API_URL = "";
 
 export function AuthProvider({
   children,
@@ -42,12 +41,13 @@ export function AuthProvider({
 
   async function refreshUser() {
     try {
-      const res = await fetch(`${API_URL}/api/v1/auth/me`, {
+      const res = await fetch(`${API_URL}/api/auth/me`, {
         method: "GET",
         credentials: "include",
         headers: {
           "Content-Type": "application/json",
         },
+        cache: "no-store",
       });
 
       if (!res.ok) {
@@ -56,16 +56,16 @@ export function AuthProvider({
       }
 
       const data = await res.json();
-      setUser(data.user);
+      setUser(data.user ?? data ?? null);
     } catch (error) {
       console.error("Failed to refresh user:", error);
       setUser(null);
     }
   }
 
-  async function login(email: string, password: string): Promise<boolean> {
+  async function login(email: string, password: string, mfaCode?: string): Promise<boolean> {
     try {
-      const res = await fetch(`${API_URL}/api/v1/auth/login`, {
+      const res = await fetch(`${API_URL}/api/auth/login`, {
         method: "POST",
         credentials: "include",
         headers: {
@@ -74,6 +74,7 @@ export function AuthProvider({
         body: JSON.stringify({
           email,
           password,
+          mfa_code: mfaCode || undefined,
         }),
       });
 
@@ -84,14 +85,15 @@ export function AuthProvider({
 
       const data = await res.json();
 
-      // Store JWT if returned
       if (data.access_token) {
         localStorage.setItem("access_token", data.access_token);
       }
+      if (data.refresh_token) {
+        localStorage.setItem("refresh_token", data.refresh_token);
+      }
 
-      if (data.user) {
-        setUser(data.user);
-      } else {
+      setUser(data.user ?? null);
+      if (!data.user) {
         await refreshUser();
       }
 
@@ -104,7 +106,7 @@ export function AuthProvider({
 
   async function logout() {
     try {
-      await fetch(`${API_URL}/api/v1/auth/logout`, {
+      await fetch(`${API_URL}/api/auth/logout`, {
         method: "POST",
         credentials: "include",
       });
@@ -113,6 +115,7 @@ export function AuthProvider({
     }
 
     localStorage.removeItem("access_token");
+    localStorage.removeItem("refresh_token");
     setUser(null);
   }
 
