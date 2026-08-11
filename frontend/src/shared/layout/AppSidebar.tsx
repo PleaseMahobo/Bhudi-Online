@@ -91,7 +91,7 @@ export default function AppSidebar({
         }
       >
         <div className="flex h-14 items-center justify-between border-b border-white/10 px-4">
-          <BhudiLogo href="/dashboard" size="sm" inverted withWordmark />
+          <BhudiLogo href="/dashboard" size="sm" inverted withWordmark variant="mark" />
           <button type="button" className="lg:hidden text-slate-400" onClick={onMobileClose}>
             <X size={18} />
           </button>
