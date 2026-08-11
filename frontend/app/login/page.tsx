@@ -54,7 +54,7 @@ export default function LoginPage() {
     <div className="flex min-h-screen items-center justify-center bg-[#0F172A] p-4">
       <div className="w-full max-w-md rounded-3xl border border-slate-700 bg-slate-900 p-10 shadow-xl">
         <div className="mb-10 flex flex-col items-center text-center">
-          <BhudiLogo href="/" size="md" inverted withWordmark />
+          <BhudiLogo href="/" size="lg" variant="full" />
           <p className="mt-3 text-sm text-slate-400">Sign in to your operations workspace</p>
         </div>
 
@@ -102,8 +102,8 @@ export default function LoginPage() {
           )}
 
           {error && (
-            <p className="rounded-xl border border-red-400/50 bg-red-950/60 px-3 py-2.5 text-center text-sm font-medium text-red-200">
-              {error.trim() || 'Sign in failed. Check your email and password.'}
+            <p className="rounded-xl border border-red-500/40 bg-red-950/40 px-3 py-2 text-center text-sm text-red-300">
+              {error}
             </p>
           )}
 
