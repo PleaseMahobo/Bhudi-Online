@@ -2,25 +2,30 @@
 
 **Deep Buddy** is a tactical-class RMM product skin in the Bhudi Online monorepo.
 
-It is inspired by **Tactical RMM** workflows (client → site → agent tree, agent status, remote sessions, scripts) and shares the **Bhudi** native agent + runtime API.
+Inspired by **Tactical RMM** workflows (client → site → agent), powered by the **Bhudi** native agent and runtime API.
 
-## URLs (frontend)
+## URLs
 
 | Path | Purpose |
 |------|---------|
 | `/deep-buddy` | Marketing website |
 | `/deep-buddy/console` | RMM dashboard |
-| `/deep-buddy/console/clients` | Client / site tree |
-| `/deep-buddy/console/agents` | Agent fleet list |
+| `/deep-buddy/console/clients` | Live client / site tree |
+| `/deep-buddy/console/agents` | Agent fleet |
 
-## Related
+## API
 
-- Tactical template / install scripts: [PleaseMahobo/TacticalRmm](https://github.com/PleaseMahobo/TacticalRmm)
-- Full platform: Bhudi Online (`/`, `/dashboard`, …)
-- Agents: `/agents` (native Windows / Linux / macOS)
+| Endpoint | Purpose |
+|----------|---------|
+| `GET /api/v1/deep-buddy/tree` | Client → site → agent tree |
+| `GET /api/v1/deep-buddy/status` | Product / fleet summary |
+
+## Deploy
+
+See **[DEPLOY.md](./DEPLOY.md)** for live DB tree, dedicated Vercel domain, and Tactical script mapping.
 
 ## Brand
 
-- Product name: **Deep Buddy**
-- Parent: **Cyber Bastion**
-- Sibling product: **Bhudi Online** / **Bhudi RMM**
+- **Deep Buddy** — product
+- **Cyber Bastion** — parent
+- **Bhudi Online** — full platform sibling
