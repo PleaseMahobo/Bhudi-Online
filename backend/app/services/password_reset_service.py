@@ -46,7 +46,6 @@ class PasswordResetService:
         if user is None or not user.active:
             return
 
-        # Invalidate outstanding reset tokens for this user.
         now = datetime.now(timezone.utc)
         outstanding = (
             self.db.query(PasswordResetToken)
@@ -69,9 +68,7 @@ class PasswordResetService:
         self.db.add(token)
         self.db.commit()
 
-        reset_url = (
-            f"{settings.FRONTEND_URL}/reset-password?token={raw_token}"
-        )
+        reset_url = f"{settings.FRONTEND_URL}/reset-password?token={raw_token}"
         display_name = user.first_name or "there"
         subject = "Reset your Bhudi RMM password"
         body_text = (
@@ -105,8 +102,9 @@ class PasswordResetService:
             body_html=body_html,
         )
         if not result.ok:
-            # Do not leak SMTP details to the caller. The token remains invalidated
-            # if delivery failed, preventing accidental token reuse.
+            # Do not leave a live reset token when email delivery fails.
+            token.used_at = datetime.now(timezone.utc)
+            self.db.commit()
             raise RuntimeError("Password reset email could not be delivered")
 
     def confirm_reset(self, token_value: str, new_password: str) -> None:
