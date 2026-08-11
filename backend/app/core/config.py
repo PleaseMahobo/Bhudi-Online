@@ -64,7 +64,7 @@ class Settings:
     ARGON2_HASH_LENGTH: int = int(os.getenv("ARGON2_HASH_LENGTH", "32"))
     ARGON2_SALT_LENGTH: int = int(os.getenv("ARGON2_SALT_LENGTH", "16"))
 
-    # SMTP / Report email delivery
+    # SMTP / email delivery
     SMTP_ENABLED: bool = os.getenv("SMTP_ENABLED", "false").lower() in (
         "1", "true", "yes", "on",
     )
@@ -79,12 +79,32 @@ class Settings:
         "1", "true", "yes", "on",
     )
     SMTP_FROM_EMAIL: str = os.getenv("SMTP_FROM_EMAIL", "")
-    SMTP_FROM_NAME: str = os.getenv("SMTP_FROM_NAME", "Bhudi Reports")
+    SMTP_FROM_NAME: str = os.getenv("SMTP_FROM_NAME", "Bhudi RMM")
     SMTP_TIMEOUT: int = int(os.getenv("SMTP_TIMEOUT", "30"))
-    # Retry policy for transient SMTP / network failures
     SMTP_MAX_RETRIES: int = int(os.getenv("SMTP_MAX_RETRIES", "3"))
     SMTP_RETRY_BASE_DELAY: float = float(os.getenv("SMTP_RETRY_BASE_DELAY", "1.0"))
     SMTP_RETRY_MAX_DELAY: float = float(os.getenv("SMTP_RETRY_MAX_DELAY", "30.0"))
+
+    # Password reset links
+    FRONTEND_URL: str = os.getenv(
+        "FRONTEND_URL",
+        "http://localhost:3000",
+    ).rstrip("/")
+    PASSWORD_RESET_SECRET: str = os.getenv(
+        "PASSWORD_RESET_SECRET",
+        "",
+    )
+    PASSWORD_RESET_EXPIRE_MINUTES: int = int(
+        os.getenv("PASSWORD_RESET_EXPIRE_MINUTES", "60")
+    )
+    PASSWORD_RESET_ISSUER: str = os.getenv(
+        "PASSWORD_RESET_ISSUER",
+        "bhudi-api",
+    )
+    PASSWORD_RESET_AUDIENCE: str = os.getenv(
+        "PASSWORD_RESET_AUDIENCE",
+        "bhudi-password-reset",
+    )
 
     # Stripe billing / webhooks
     STRIPE_ENABLED: bool = os.getenv("STRIPE_ENABLED", "false").lower() in (
@@ -93,7 +113,6 @@ class Settings:
     STRIPE_SECRET_KEY: str = os.getenv("STRIPE_SECRET_KEY", "")
     STRIPE_WEBHOOK_SECRET: str = os.getenv("STRIPE_WEBHOOK_SECRET", "")
     STRIPE_WEBHOOK_TOLERANCE: int = int(os.getenv("STRIPE_WEBHOOK_TOLERANCE", "300"))
-    # Persist full event JSON for debugging (disable in high-volume prod)
     STRIPE_STORE_PAYLOAD: bool = os.getenv("STRIPE_STORE_PAYLOAD", "true").lower() in (
         "1", "true", "yes", "on",
     )
