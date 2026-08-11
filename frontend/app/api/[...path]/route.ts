@@ -6,7 +6,9 @@ const BACKEND_URL = (
   process.env.API_BASE_URL ||
   process.env.NEXT_PUBLIC_API_URL ||
   'https://bhudi-online-production.up.railway.app'
-).replace(/\/$/, '');
+)
+  .replace(/\/$/, '')
+  .replace(/\/api\/v1$/, '');
 
 export async function GET(request: NextRequest) {
   return proxyRequest(request);
@@ -46,6 +48,8 @@ async function proxyRequest(request: NextRequest) {
     if (contentType) headers.set('content-type', contentType);
     const auth = request.headers.get('authorization');
     if (auth) headers.set('authorization', auth);
+    const cookie = request.headers.get('cookie');
+    if (cookie) headers.set('cookie', cookie);
     const accept = request.headers.get('accept');
     if (accept) headers.set('accept', accept);
 

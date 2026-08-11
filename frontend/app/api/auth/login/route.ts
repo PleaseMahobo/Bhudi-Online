@@ -4,9 +4,18 @@ const BACKEND = (
   process.env.API_BASE_URL ||
   process.env.NEXT_PUBLIC_API_URL ||
   'https://bhudi-online-production.up.railway.app'
-).replace(/\/$/, '');
+)
+  .replace(/\/$/, '')
+  .replace(/\/api\/v1$/, '');
 
-/** Proxy POST /api/auth/login → FastAPI /api/v1/auth/login */
+function forwardSetCookies(upstream: Response, response: NextResponse) {
+  const cookies = upstream.headers.getSetCookie?.() ?? [];
+  for (const cookie of cookies) {
+    response.headers.append('set-cookie', cookie);
+  }
+}
+
+/** Proxy POST /api/auth/login → FastAPI /api/v1/auth/login. */
 export async function POST(request: NextRequest) {
   try {
     const body = await request.text();
@@ -16,13 +25,19 @@ export async function POST(request: NextRequest) {
       body,
       cache: 'no-store',
     });
+
     const data = await res.text();
-    return new NextResponse(data, {
+    const response = new NextResponse(data, {
       status: res.status,
       headers: {
         'Content-Type': res.headers.get('Content-Type') || 'application/json',
       },
     });
+
+    // FastAPI sets HttpOnly access/refresh cookies. Forward both cookies to
+    // the browser so subsequent same-origin requests remain authenticated.
+    forwardSetCookies(res, response);
+    return response;
   } catch (e) {
     return NextResponse.json(
       { detail: 'Backend login unavailable', error: String(e) },

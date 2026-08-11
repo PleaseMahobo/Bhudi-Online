@@ -1,12 +1,23 @@
-const API_BASE = (process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000').replace(/\/$/, '');
+const API_BASE = '';
 
 async function postJson<T>(path: string, body: unknown, auth = false): Promise<T> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+
+  // Authentication is cookie-based at the application boundary. Keep the
+  // access token fallback for existing sessions, but never call the backend
+  // directly from the browser.
   if (auth && typeof window !== 'undefined') {
     const t = localStorage.getItem('access_token');
     if (t) headers.Authorization = 'Bearer ' + t;
   }
-  const res = await fetch(API_BASE + path, { method: 'POST', headers, body: JSON.stringify(body) });
+
+  const res = await fetch(API_BASE + path, {
+    method: 'POST',
+    headers,
+    credentials: 'include',
+    body: JSON.stringify(body),
+  });
+
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
     const detail = data?.detail;
@@ -22,7 +33,7 @@ async function postJson<T>(path: string, body: unknown, auth = false): Promise<T
       message = detail.msg || detail.message || '';
     }
     if (!message) {
-      message = data?.error || data?.message || res.statusText || `Sign in failed (${res.status})`;
+      message = data?.error || data?.message || res.statusText || `Request failed (${res.status})`;
     }
     throw new Error(String(message));
   }
@@ -40,7 +51,7 @@ export async function registerUser(input: {
 
 export async function loginUser(email: string, password: string, mfa_code?: string) {
   return postJson<{ access_token: string; refresh_token: string; user?: unknown }>(
-    '/api/v1/auth/login',
+    '/api/auth/login',
     { email, password, mfa_code: mfa_code || undefined }
   );
 }

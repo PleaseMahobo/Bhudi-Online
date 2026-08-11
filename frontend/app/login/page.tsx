@@ -26,13 +26,11 @@ export default function LoginPage() {
       localStorage.setItem('access_token', tokens.access_token);
       if (tokens.refresh_token) localStorage.setItem('refresh_token', tokens.refresh_token);
       localStorage.setItem('user_email', email);
-      if (auth?.login) {
-        try {
-          await auth.login(email, password);
-        } catch {
-          /* tokens already stored */
-        }
-      }
+
+      // The login request is now made exactly once through the same-origin
+      // Next.js auth proxy. Refresh the context from the authenticated cookie
+      // instead of issuing a second login request.
+      await auth.refreshUser();
       router.push('/dashboard');
     } catch (err: any) {
       const msg = String(err?.message || '').trim();
