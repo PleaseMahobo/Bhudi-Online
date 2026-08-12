@@ -55,13 +55,13 @@ export async function loginUser(email: string, password: string, mfa_code?: stri
 
 export async function requestPasswordReset(email: string) {
   return postJson<{ message: string }>(
-    '/api/v1/auth/password-reset/request',
+    '/api/auth/password-reset/request',
     { email }
   );
 }
 
 export async function confirmPasswordReset(token: string, new_password: string) {
-  return postJson<{ message: string }>('/api/v1/auth/password-reset/confirm', {
+  return postJson<{ message: string }>('/api/auth/password-reset/confirm', {
     token,
     new_password,
   });

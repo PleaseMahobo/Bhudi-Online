@@ -3,82 +3,114 @@
 import { useState, Suspense } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Sparkles } from 'lucide-react';
+import BhudiLogo from '@/shared/components/BhudiLogo';
 import { confirmPasswordReset } from '@/lib/auth-client';
 
-function ResetForm() {
-  const search = useSearchParams();
+function ResetPasswordForm() {
   const router = useRouter();
-  const tokenFromUrl = search.get('token') || '';
-  const [token, setToken] = useState(tokenFromUrl);
+  const searchParams = useSearchParams();
+  const token = searchParams.get('token') || '';
+
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
-  const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState(false);
 
-  async function onSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError('');
-    if (password !== confirm) {
-      setError('Passwords do not match');
-      return;
-    }
+
     if (password.length < 12) {
-      setError('Password must be at least 12 characters');
+      setError('Password must be at least 12 characters.');
       return;
     }
+    if (password !== confirm) {
+      setError('Passwords do not match.');
+      return;
+    }
+    if (!token) {
+      setError('Invalid or missing reset token. Please request a new link.');
+      return;
+    }
+
     setLoading(true);
     try {
       await confirmPasswordReset(token, password);
-      router.push('/login?reset=1');
+      setSuccess(true);
+      setTimeout(() => router.push('/login'), 2500);
     } catch (err: any) {
-      setError(err?.message || 'Reset failed');
+      setError(err?.message || 'Could not reset password. The link may have expired.');
     } finally {
       setLoading(false);
     }
   }
 
-  return (
-    <form onSubmit={onSubmit} className="space-y-4">
-      {!tokenFromUrl && (
-        <div>
-          <label className="text-xs text-slate-400">Reset token</label>
-          <input
-            value={token}
-            onChange={(e) => setToken(e.target.value)}
-            required
-            className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-3 text-sm text-white outline-none focus:border-indigo-500"
-          />
+  if (!token) {
+    return (
+      <div className="space-y-6 text-center">
+        <p className="rounded-xl border border-red-500/40 bg-red-950/40 px-4 py-3 text-sm text-red-300">
+          Invalid or missing reset link. Please request a new one.
+        </p>
+        <Link href="/forgot-password" className="text-sm text-indigo-400 hover:text-indigo-300">
+          Request a new reset link
+        </Link>
+      </div>
+    );
+  }
+
+  if (success) {
+    return (
+      <div className="space-y-6 text-center">
+        <div className="rounded-xl border border-emerald-500/30 bg-emerald-950/40 px-4 py-4 text-sm text-emerald-300">
+          Password updated successfully. Redirecting you to sign in…
         </div>
-      )}
+        <Link href="/login" className="text-sm text-indigo-400 hover:text-indigo-300">
+          Go to Sign In now
+        </Link>
+      </div>
+    );
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-5">
       <div>
-        <label className="text-xs text-slate-400">New password</label>
+        <label className="text-xs font-medium text-slate-400">New password</label>
         <input
           type="password"
-          required
-          minLength={12}
+          placeholder="At least 12 characters"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
-          className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-3 text-sm text-white outline-none focus:border-indigo-500"
+          className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-3 text-sm text-white outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/30"
+          required
+          minLength={12}
         />
       </div>
       <div>
-        <label className="text-xs text-slate-400">Confirm password</label>
+        <label className="text-xs font-medium text-slate-400">Confirm password</label>
         <input
           type="password"
-          required
+          placeholder="Repeat new password"
           value={confirm}
           onChange={(e) => setConfirm(e.target.value)}
-          className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-3 text-sm text-white outline-none focus:border-indigo-500"
+          className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-3 text-sm text-white outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/30"
+          required
+          minLength={12}
         />
       </div>
-      {error && <p className="text-sm text-red-300">{error}</p>}
+
+      {error && (
+        <p className="rounded-xl border border-red-500/40 bg-red-950/40 px-3 py-2 text-center text-sm text-red-300">
+          {error}
+        </p>
+      )}
+
       <button
         type="submit"
         disabled={loading}
-        className="w-full rounded-xl bg-indigo-600 py-3 text-sm font-semibold text-white hover:bg-indigo-500 disabled:opacity-50"
+        className="w-full rounded-xl bg-indigo-600 py-3 text-sm font-semibold text-white transition hover:bg-indigo-500 disabled:opacity-50"
       >
-        {loading ? 'Saving…' : 'Set new password'}
+        {loading ? 'Updating…' : 'Set New Password'}
       </button>
     </form>
   );
@@ -88,23 +120,13 @@ export default function ResetPasswordPage() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-[#0F172A] p-4">
       <div className="w-full max-w-md rounded-3xl border border-slate-700 bg-slate-900 p-10 shadow-xl">
-        <div className="mb-8 text-center">
-          <Link href="/" className="inline-flex items-center gap-2 font-semibold text-white">
-            <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-indigo-600">
-              <Sparkles size={18} />
-            </span>
-            Bhudi
-          </Link>
+        <div className="mb-10 flex flex-col items-center text-center">
+          <BhudiLogo href="/" size="lg" variant="full" />
           <p className="mt-3 text-sm text-slate-400">Choose a new password</p>
         </div>
-        <Suspense fallback={<p className="text-sm text-slate-400">Loading…</p>}>
-          <ResetForm />
+        <Suspense fallback={<p className="text-center text-slate-400">Loading…</p>}>
+          <ResetPasswordForm />
         </Suspense>
-        <p className="mt-8 text-center text-xs text-slate-500">
-          <Link href="/login" className="text-indigo-400">
-            Back to sign in
-          </Link>
-        </p>
       </div>
     </div>
   );
