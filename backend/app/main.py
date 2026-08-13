@@ -1,4 +1,5 @@
 from dotenv import load_dotenv
+
 load_dotenv()
 
 import asyncio
@@ -193,7 +194,9 @@ async def websocket_device(websocket: WebSocket, device_id: str):
     try:
         while True:
             data = await websocket.receive_json()
-            await manager.broadcast({"type": "device", "device_id": device_id, "data": data})
+            await manager.broadcast(
+                {"type": "device", "device_id": device_id, "data": data}
+            )
     except WebSocketDisconnect:
         manager.disconnect(websocket)
 
