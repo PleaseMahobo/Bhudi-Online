@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-const agentVersion = "2.3.0-persist"
+const agentVersion = "2.4.0-service"
 
 func main() {
 	if len(os.Args) < 2 {
@@ -31,14 +31,18 @@ func main() {
 	case "version", "-version", "--version":
 		fmt.Println("bhudi-agent", agentVersion)
 	case "help", "-h", "--help":
-		fmt.Print(`Bhudi agent — install once, stays online
+		fmt.Print(`Bhudi agent — install once, starts at every boot
 
-  install -server URL   Install + logon task + 5-min watchdog
-  uninstall             Remove tasks and startup entry
-  run [-server URL]     Run in foreground (used by tasks)
+  install -server URL   Install Windows Service / systemd / LaunchAgent
+  uninstall             Remove service and startup entries
+  run [-server URL]     Run in foreground (used by the service)
   version
 
-Designed for personal PCs as well as managed fleets.
+Windows (Administrator):
+  bhudi-agent.exe install -server https://bhudi-online-production.up.railway.app
+
+Linux (preferred with sudo for boot-wide service):
+  sudo ./bhudi-agent-linux-amd64 install -server https://bhudi-online-production.up.railway.app
 `)
 	default:
 		runAgent(parseRunFlags(os.Args[1:]))

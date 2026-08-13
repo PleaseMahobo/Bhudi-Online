@@ -4,6 +4,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,6 +16,7 @@ import (
 )
 
 const (
+	windowsServiceName  = "BhudiAgent"
 	windowsTaskName     = "BhudiAgent"
 	windowsWatchdogName = "BhudiAgentWatchdog"
 	uninstallRegPath    = `SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\BhudiAgent`
@@ -47,26 +49,29 @@ func installService(server string) error {
 		fmt.Println("Warning: could not write config:", err)
 	}
 
-	cmdLine := fmt.Sprintf("\"%s\" run -server %s", dest, server)
-
-	_ = exec.Command("schtasks", "/Delete", "/TN", windowsTaskName, "/F").Run()
-	create := exec.Command("schtasks", "/Create", "/TN", windowsTaskName,
-		"/TR", cmdLine, "/SC", "ONLOGON", "/RL", "HIGHEST", "/IT", "/F")
-	if out, err := create.CombinedOutput(); err != nil {
-		fmt.Printf("Warning: logon task failed: %v (%s)\n", err, strings.TrimSpace(string(out)))
+	// Primary: Windows Service (starts at boot, before user logon)
+	if err := installWindowsService(dest, server); err != nil {
+		fmt.Printf("Warning: Windows Service install failed: %v\n", err)
+		fmt.Println("Falling back to ONSTART scheduled task...")
+		if err2 := installOnStartTask(dest, server); err2 != nil {
+			fmt.Printf("Warning: ONSTART task failed: %v\n", err2)
+		}
 	} else {
-		fmt.Println("Logon task:", windowsTaskName)
+		fmt.Println("Windows Service installed:", windowsServiceName, "(Start=Automatic)")
 	}
 
+	// Watchdog every 5 minutes (covers service crash / delayed network)
+	cmdLine := fmt.Sprintf("\"%s\" run -server %s", dest, server)
 	_ = exec.Command("schtasks", "/Delete", "/TN", windowsWatchdogName, "/F").Run()
 	watch := exec.Command("schtasks", "/Create", "/TN", windowsWatchdogName,
-		"/TR", cmdLine, "/SC", "MINUTE", "/MO", "5", "/RL", "HIGHEST", "/IT", "/F")
+		"/TR", cmdLine, "/SC", "MINUTE", "/MO", "5", "/RL", "HIGHEST", "/F")
 	if out, err := watch.CombinedOutput(); err != nil {
 		fmt.Printf("Warning: watchdog task failed: %v (%s)\n", err, strings.TrimSpace(string(out)))
 	} else {
 		fmt.Println("Watchdog task:", windowsWatchdogName, "(every 5 minutes)")
 	}
 
+	// Optional user logon Run key (backup if service not elevated)
 	if err := writeRunKey(dest, server); err != nil {
 		fmt.Println("Warning: Run key not set:", err)
 	} else {
@@ -76,23 +81,94 @@ func installService(server string) error {
 	if err := writeUninstallRegistry(destDir, dest); err != nil {
 		fmt.Println("Warning: Programs and Features entry failed:", err)
 	} else {
-		fmt.Println("Registered in Apps & features as \"Bhudi Agent\".")
+		fmt.Println("Registered in Apps & features as", displayName)
 	}
 
-	if err := startDetached(dest, server); err != nil {
-		fmt.Println("Warning: could not start agent now:", err)
+	// Start now
+	if err := startWindowsService(); err != nil {
+		fmt.Println("Service start deferred; starting process directly:", err)
+		if err := startDetached(dest, server); err != nil {
+			fmt.Println("Warning: could not start agent now:", err)
+		} else {
+			fmt.Println("Agent started in the background.")
+		}
 	} else {
-		fmt.Println("Agent started in the background (stays up after this window closes).")
+		fmt.Println("Service started.")
 	}
 
 	fmt.Println()
-	fmt.Println("Install complete — install once; the agent keeps reconnecting.")
+	fmt.Println("Install complete — install once; agent starts at every boot.")
 	fmt.Println("  Binary:   ", dest)
 	fmt.Println("  Server:   ", server)
 	fmt.Println("  Identity: ", identityPath())
-	fmt.Println()
-	fmt.Println("Persistence: logon start + 5-minute watchdog + same PC identity")
+	fmt.Println("  Service:  ", windowsServiceName, "(Automatic)")
 	time.Sleep(1 * time.Second)
+	return nil
+}
+
+func installWindowsService(dest, server string) error {
+	// Remove previous service if present
+	_ = exec.Command("sc", "stop", windowsServiceName).Run()
+	_ = exec.Command("sc", "delete", windowsServiceName).Run()
+	time.Sleep(500 * time.Millisecond)
+
+	// sc.exe requires a space after '='
+	binPath := fmt.Sprintf("\"%s\" run -server %s", dest, server)
+	create := exec.Command("sc", "create", windowsServiceName,
+		"binPath=", binPath,
+		"start=", "auto",
+		"DisplayName=", displayName,
+		"obj=", "LocalSystem",
+	)
+	out, err := create.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("%v: %s", err, strings.TrimSpace(string(out)))
+	}
+
+	_ = exec.Command("sc", "description", windowsServiceName,
+		"Bhudi RMM agent — heartbeats, remote access, command execution").Run()
+
+	// Restart on failure
+	_ = exec.Command("sc", "failure", windowsServiceName,
+		"reset=", "86400",
+		"actions=", "restart/5000/restart/10000/restart/30000").Run()
+	_ = exec.Command("sc", "failureflag", windowsServiceName, "1").Run()
+
+	// Delayed auto-start so network is more likely ready
+	_ = exec.Command("sc", "config", windowsServiceName, "start=", "delayed-auto").Run()
+
+	return nil
+}
+
+func startWindowsService() error {
+	out, err := exec.Command("sc", "start", windowsServiceName).CombinedOutput()
+	if err != nil {
+		msg := strings.TrimSpace(string(out))
+		// 1056 = already running
+		if strings.Contains(msg, "1056") || strings.Contains(strings.ToLower(msg), "already") {
+			return nil
+		}
+		return fmt.Errorf("%v: %s", err, msg)
+	}
+	return nil
+}
+
+func installOnStartTask(dest, server string) error {
+	cmdLine := fmt.Sprintf("\"%s\" run -server %s", dest, server)
+	_ = exec.Command("schtasks", "/Delete", "/TN", windowsTaskName, "/F").Run()
+	// ONSTART = at system startup (boot), SYSTEM account, highest privileges
+	create := exec.Command("schtasks", "/Create", "/TN", windowsTaskName,
+		"/TR", cmdLine,
+		"/SC", "ONSTART",
+		"/RU", "SYSTEM",
+		"/RL", "HIGHEST",
+		"/F",
+	)
+	out, err := create.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("%v: %s", err, strings.TrimSpace(string(out)))
+	}
+	fmt.Println("Boot task (ONSTART):", windowsTaskName)
 	return nil
 }
 
@@ -102,7 +178,7 @@ func startDetached(dest, server string) error {
 	cmd.Stderr = nil
 	cmd.Stdin = nil
 	cmd.SysProcAttr = &syscall.SysProcAttr{
-		CreationFlags: 0x00000008 | 0x00000200,
+		CreationFlags: 0x00000008 | 0x00000200, // DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
 		HideWindow:    true,
 	}
 	return cmd.Start()
@@ -140,30 +216,38 @@ func writeUninstallRegistry(installDir, uninstallExe string) error {
 }
 
 func uninstallService() error {
+	_ = exec.Command("sc", "stop", windowsServiceName).Run()
+	_ = exec.Command("sc", "delete", windowsServiceName).Run()
+	fmt.Println("Windows Service removed:", windowsServiceName)
+
 	_ = exec.Command("schtasks", "/Delete", "/TN", windowsTaskName, "/F").Run()
 	_ = exec.Command("schtasks", "/Delete", "/TN", windowsWatchdogName, "/F").Run()
 	fmt.Println("Scheduled tasks removed.")
+
 	if key, err := registry.OpenKey(registry.CURRENT_USER, runKeyPath, registry.SET_VALUE); err == nil {
 		_ = key.DeleteValue("BhudiAgent")
 		key.Close()
 	}
 	_ = registry.DeleteKey(registry.LOCAL_MACHINE, uninstallRegPath)
 	_ = registry.DeleteKey(registry.CURRENT_USER, uninstallRegPath)
-	for _, base := range []string{os.Getenv("ProgramFiles"), os.Getenv("LOCALAPPDATA")} {
-		if base == "" {
-			continue
-		}
-		_ = os.Remove(filepath.Join(base, "Bhudi", "Agent", "bhudi-agent.exe"))
-	}
-	clearIdentity()
+	fmt.Println("Startup and uninstall registry cleaned.")
 	fmt.Println("Uninstall complete.")
 	return nil
 }
 
 func copyFile(src, dst string) error {
-	in, err := os.ReadFile(src)
+	in, err := os.Open(src)
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(dst, in, 0755)
+	defer in.Close()
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0755)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+	if _, err := io.Copy(out, in); err != nil {
+		return err
+	}
+	return out.Close()
 }
