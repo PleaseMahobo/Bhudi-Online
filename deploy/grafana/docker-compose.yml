@@ -1,13 +1,22 @@
-# Grafana + Prometheus for Bhudi device metrics
-# Usage:
-#   cd deploy/grafana
-#   docker compose up -d
-# Open http://localhost:3001 (admin / admin — change immediately)
-#
-# Point Grafana Postgres datasource at your Supabase/Railway DATABASE_URL
-# (use the pooler host, SSL required for Supabase).
+# Grafana + Prometheus for Bhudi
+#   cd deploy/grafana && docker compose up -d
+# Grafana: http://localhost:3001  Prometheus: http://localhost:9090
 
 services:
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=15d
+      - --web.enable-lifecycle
+    volumes:
+      - ../prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+
   grafana:
     image: grafana/grafana:11.2.0
     restart: unless-stopped
@@ -18,21 +27,19 @@ services:
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-changeme}
       GF_USERS_ALLOW_SIGN_UP: "false"
       GF_SERVER_ROOT_URL: ${GRAFANA_ROOT_URL:-http://localhost:3001}
+      GF_INSTALL_PLUGINS: grafana-clock-panel
+      # Optional: pre-seed Postgres vars for provisioning (edit datasources.yml)
+      BHUDI_PG_HOST: ${BHUDI_PG_HOST:-}
+      BHUDI_PG_USER: ${BHUDI_PG_USER:-postgres}
+      BHUDI_PG_PASSWORD: ${BHUDI_PG_PASSWORD:-}
+      BHUDI_PG_DATABASE: ${BHUDI_PG_DATABASE:-postgres}
+      BHUDI_PG_SSLMODE: ${BHUDI_PG_SSLMODE:-require}
     volumes:
       - grafana-data:/var/lib/grafana
       - ./provisioning:/etc/grafana/provisioning:ro
       - ./dashboards:/var/lib/grafana/dashboards:ro
-
-  # Optional local Prometheus if you later export /metrics from the API
-  prometheus:
-    image: prom/prometheus:v2.54.1
-    restart: unless-stopped
-    profiles: ["prometheus"]
-    ports:
-      - "9090:9090"
-    volumes:
-      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
-      - prometheus-data:/prometheus
+    depends_on:
+      - prometheus
 
 volumes:
   grafana-data:

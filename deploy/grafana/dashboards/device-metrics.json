@@ -7,72 +7,155 @@
   "links": [],
   "panels": [
     {
-      "datasource": { "type": "postgres", "uid": "${DS_BHUDI}" },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": {
-        "defaults": {
-          "unit": "percent",
-          "min": 0,
-          "max": 100
-        },
+        "defaults": { "unit": "reqps" },
         "overrides": []
       },
-      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 0 },
+      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 0 },
+      "id": 10,
+      "targets": [
+        {
+          "expr": "sum(rate(bhudi_http_requests_total[5m]))",
+          "legendFormat": "HTTP rps",
+          "refId": "A"
+        }
+      ],
+      "title": "API request rate",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": { "unit": "s" },
+        "overrides": []
+      },
+      "gridPos": { "h": 6, "w": 8, "x": 8, "y": 0 },
+      "id": 11,
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(bhudi_http_request_duration_seconds_bucket[5m])) by (le))",
+          "legendFormat": "p95 latency",
+          "refId": "A"
+        }
+      ],
+      "title": "API latency p95",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": { "unit": "short" },
+        "overrides": []
+      },
+      "gridPos": { "h": 6, "w": 8, "x": 16, "y": 0 },
+      "id": 12,
+      "targets": [
+        {
+          "expr": "bhudi_agents_online",
+          "legendFormat": "agents online",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(rate(bhudi_agent_heartbeats_total[5m]))",
+          "legendFormat": "heartbeats/s",
+          "refId": "B"
+        }
+      ],
+      "title": "Agents & heartbeats",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": { "unit": "percent", "min": 0, "max": 100 },
+        "overrides": []
+      },
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 6 },
+      "id": 13,
+      "targets": [
+        {
+          "expr": "bhudi_device_cpu_percent",
+          "legendFormat": "CPU {{hostname}}",
+          "refId": "A"
+        },
+        {
+          "expr": "bhudi_device_memory_percent",
+          "legendFormat": "Mem {{hostname}}",
+          "refId": "B"
+        }
+      ],
+      "title": "Live agent CPU / Memory (Prometheus gauges)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "postgres", "uid": "bhudi-postgres" },
+      "fieldConfig": {
+        "defaults": { "unit": "percent", "min": 0, "max": 100 },
+        "overrides": []
+      },
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 15 },
       "id": 1,
       "targets": [
         {
           "format": "time_series",
-          "rawSql": "SELECT\n  recorded_at AS time,\n  cpu_usage AS \"CPU %\",\n  ram_usage AS \"Memory %\",\n  disk_usage AS \"Disk %\"\nFROM device_metrics\nWHERE\n  recorded_at BETWEEN $__timeFrom() AND $__timeTo()\n  AND ($device_id = '' OR device_id::text = $device_id)\nORDER BY recorded_at",
+          "rawQuery": true,
+          "rawSql": "SELECT\n  time_bucket AS time,\n  avg_cpu AS \"CPU %\",\n  avg_mem AS \"Memory %\",\n  avg_disk AS \"Disk %\"\nFROM (\n  SELECT\n    date_trunc(\n      CASE\n        WHEN $__interval_ms >= 3600000 THEN 'hour'\n        WHEN $__interval_ms >= 300000 THEN 'minute'\n        ELSE 'minute'\n      END,\n      recorded_at\n    ) AS time_bucket,\n    ROUND(AVG(cpu_usage)::numeric, 2) AS avg_cpu,\n    ROUND(AVG(ram_usage)::numeric, 2) AS avg_mem,\n    ROUND(AVG(disk_usage)::numeric, 2) AS avg_disk\n  FROM device_metrics\n  WHERE\n    $__timeFilter(recorded_at)\n    AND (\n      COALESCE(TRIM('$device_id'), '') = ''\n      OR device_id::text = TRIM('$device_id')\n    )\n  GROUP BY 1\n) s\nORDER BY 1",
           "refId": "A"
         }
       ],
-      "title": "Device CPU / Memory / Disk",
+      "title": "Historical CPU / Memory / Disk (Postgres, bucketed)",
       "type": "timeseries"
     },
     {
-      "datasource": { "type": "postgres", "uid": "${DS_BHUDI}" },
-      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 10 },
+      "datasource": { "type": "postgres", "uid": "bhudi-postgres" },
+      "gridPos": { "h": 5, "w": 8, "x": 0, "y": 25 },
       "id": 2,
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } },
       "targets": [
         {
           "format": "table",
-          "rawSql": "SELECT count(*) AS samples FROM device_metrics WHERE recorded_at > now() - interval '1 hour'",
+          "rawQuery": true,
+          "rawSql": "SELECT COUNT(*)::bigint AS samples\nFROM device_metrics\nWHERE $__timeFilter(recorded_at)\n  AND (COALESCE(TRIM('$device_id'), '') = '' OR device_id::text = TRIM('$device_id'))",
           "refId": "A"
         }
       ],
-      "title": "Samples (1h)",
+      "title": "Samples in range",
       "type": "stat"
     },
     {
-      "datasource": { "type": "postgres", "uid": "${DS_BHUDI}" },
-      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 10 },
+      "datasource": { "type": "postgres", "uid": "bhudi-postgres" },
+      "gridPos": { "h": 5, "w": 8, "x": 8, "y": 25 },
       "id": 3,
       "targets": [
         {
           "format": "table",
-          "rawSql": "SELECT count(DISTINCT device_id) AS devices FROM device_metrics WHERE recorded_at > now() - interval '1 hour'",
+          "rawQuery": true,
+          "rawSql": "SELECT COUNT(DISTINCT device_id)::bigint AS devices\nFROM device_metrics\nWHERE $__timeFilter(recorded_at)",
           "refId": "A"
         }
       ],
-      "title": "Active devices (1h)",
+      "title": "Distinct devices",
       "type": "stat"
     },
     {
-      "datasource": { "type": "postgres", "uid": "${DS_BHUDI}" },
-      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 10 },
+      "datasource": { "type": "postgres", "uid": "bhudi-postgres" },
+      "gridPos": { "h": 5, "w": 8, "x": 16, "y": 25 },
       "id": 4,
       "targets": [
         {
           "format": "table",
-          "rawSql": "SELECT round(avg(cpu_usage)::numeric, 1) AS avg_cpu FROM device_metrics WHERE recorded_at > now() - interval '1 hour'",
+          "rawQuery": true,
+          "rawSql": "SELECT ROUND(AVG(cpu_usage)::numeric, 1) AS avg_cpu\nFROM device_metrics\nWHERE $__timeFilter(recorded_at)\n  AND (COALESCE(TRIM('$device_id'), '') = '' OR device_id::text = TRIM('$device_id'))",
           "refId": "A"
         }
       ],
-      "title": "Avg CPU % (1h)",
+      "title": "Avg CPU %",
       "type": "stat"
     }
   ],
   "schemaVersion": 39,
-  "tags": ["bhudi", "metrics"],
+  "tags": ["bhudi", "metrics", "prometheus"],
   "templating": {
     "list": [
       {
@@ -88,5 +171,5 @@
   "time": { "from": "now-6h", "to": "now" },
   "title": "Bhudi Device Metrics",
   "uid": "bhudi-device-metrics",
-  "version": 1
+  "version": 2
 }
