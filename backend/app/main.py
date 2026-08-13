@@ -28,6 +28,14 @@ try:
 except Exception as e:
     print(f"[startup] rate limit middleware skipped: {e}")
 
+try:
+    from app.middleware.prometheus_middleware import PrometheusMiddleware
+
+    app.add_middleware(PrometheusMiddleware)
+    print("[startup] Prometheus HTTP metrics middleware enabled")
+except Exception as e:
+    print(f"[startup] Prometheus middleware skipped: {e}")
+
 # OpenTelemetry must instrument the app object before serving traffic
 try:
     from app.core.telemetry import setup_tracing
@@ -79,12 +87,6 @@ async def startup_event():
 async def shutdown_event():
     print("Bhudi RMM API shutting down...")
     try:
-        from app.core.telemetry import shutdown_tracing
-
-        shutdown_tracing()
-    except Exception:
-        pass
-    try:
         from app.workers.command_dispatcher import dispatcher
         dispatcher.stop()
     except Exception:
@@ -108,11 +110,21 @@ async def root():
 
 @app.get("/metrics", tags=["Observability"])
 async def metrics():
-    """Prometheus text exposition (best-effort if client installed)."""
+    """Prometheus text exposition."""
     try:
-        from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
+        from app.api.v1.endpoints import agent_runtime
+        from app.core.prometheus_metrics import set_agents_online
 
-        return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
+        agents = getattr(agent_runtime, "_agents", {}) or {}
+        online = sum(1 for a in agents.values() if (a.get("status") or "").lower() == "online")
+        set_agents_online(online)
+    except Exception:
+        pass
+    try:
+        from app.core.prometheus_metrics import render_metrics
+
+        body, ctype = render_metrics()
+        return Response(content=body, media_type=ctype)
     except Exception:
         return Response(
             content=(
@@ -138,76 +150,46 @@ async def handle_heartbeat(device_id: str, data: dict):
         {
             "type": "heartbeat",
             "device_id": device_id,
-            "status": "online",
             "data": device_heartbeats[device_id],
-        },
-        channel="heartbeats",
-    )
-    # Also broadcast on general for legacy clients
-    await manager.broadcast(
-        {
-            "type": "heartbeat",
-            "device_id": device_id,
-            "status": "online",
-            "data": device_heartbeats[device_id],
-        },
-        channel="general",
+        }
     )
 
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
-    await manager.connect(websocket, channel="general")
+    await manager.connect(websocket)
     try:
         while True:
             data = await websocket.receive_json()
-            if data.get("type") == "heartbeat" and data.get("device_id"):
-                await handle_heartbeat(data["device_id"], data)
-            elif data.get("type") == "subscribe":
-                # Client can request channel switch via message
-                channel = data.get("channel", "general")
-                await manager.disconnect(websocket)
-                await manager.connect(websocket, channel=channel)
-                await websocket.send_json({"type": "subscribed", "channel": channel})
+            if data.get("type") == "heartbeat":
+                device_id = str(data.get("device_id") or "unknown")
+                await handle_heartbeat(device_id, data)
+            else:
+                await manager.broadcast(data)
     except WebSocketDisconnect:
-        await manager.disconnect(websocket)
+        manager.disconnect(websocket)
 
 
 @app.websocket("/ws/alerts")
-async def alerts_websocket(websocket: WebSocket):
-    """Dedicated real-time channel for Alert Engine events."""
-    await manager.connect(websocket, channel="alerts")
+async def websocket_alerts(websocket: WebSocket):
+    await manager.connect(websocket)
     try:
-        await websocket.send_json({
-            "type": "connected",
-            "channel": "alerts",
-            "message": "Subscribed to live alerts",
-        })
         while True:
-            # Keep connection alive; ignore client messages or handle ping
             data = await websocket.receive_json()
-            if data.get("type") == "ping":
-                await websocket.send_json({"type": "pong"})
+            await manager.broadcast({"type": "alert", "data": data})
     except WebSocketDisconnect:
-        await manager.disconnect(websocket)
+        manager.disconnect(websocket)
 
 
 @app.websocket("/ws/{device_id}")
-async def device_ws(websocket: WebSocket, device_id: str):
-    await manager.connect(websocket, channel="general")
+async def websocket_device(websocket: WebSocket, device_id: str):
+    await manager.connect(websocket)
     try:
         while True:
             data = await websocket.receive_json()
-            data["device_id"] = device_id
-            if data.get("type") == "heartbeat":
-                await handle_heartbeat(device_id, data)
-            else:
-                await manager.broadcast(
-                    {"type": "message", "device_id": device_id, "data": data},
-                    channel="general",
-                )
+            await manager.broadcast({"type": "device", "device_id": device_id, "data": data})
     except WebSocketDisconnect:
-        await manager.disconnect(websocket)
+        manager.disconnect(websocket)
 
 
-print("Bhudi RMM API initialized")
+Bhudi RMM API initialized = True  # noqa: E305 — import side-effect marker for workers
