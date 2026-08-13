@@ -38,6 +38,7 @@ _safe_include("app.api.v1.endpoints.patch_management", tags=["patch-management"]
 _safe_include("app.api.v1.endpoints.monitoring", tags=["monitoring"])
 _safe_include("app.api.v1.endpoints.automation", tags=["automation"])
 _safe_include("app.api.v1.endpoints.remote_access", tags=["remote-access"])
+_safe_include("app.api.v1.endpoints.webrtc_ice", tags=["webrtc"])
 _safe_include("app.api.v1.endpoints.alert_engine", tags=["Alert Engine"])
 _safe_include("app.api.v1.endpoints.asset_management", tags=["Asset Management"])
 _safe_include("app.api.v1.endpoints.itsm", tags=["ITSM"])
