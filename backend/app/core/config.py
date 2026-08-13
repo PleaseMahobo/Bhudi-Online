@@ -64,7 +64,21 @@ class Settings:
     ARGON2_HASH_LENGTH: int = int(os.getenv("ARGON2_HASH_LENGTH", "32"))
     ARGON2_SALT_LENGTH: int = int(os.getenv("ARGON2_SALT_LENGTH", "16"))
 
-    # SMTP / email delivery
+    # Transactional email delivery.
+    # "resend" uses HTTPS/443 and is the recommended Railway deployment mode.
+    # "smtp" is retained only for environments where outbound SMTP is available.
+    EMAIL_PROVIDER: str = os.getenv("EMAIL_PROVIDER", "resend").strip().lower()
+    RESEND_API_KEY: str = os.getenv("RESEND_API_KEY", "")
+    RESEND_API_URL: str = os.getenv(
+        "RESEND_API_URL",
+        "https://api.resend.com/emails",
+    )
+    EMAIL_MAX_RETRIES: int = int(os.getenv("EMAIL_MAX_RETRIES", "3"))
+    EMAIL_RETRY_BASE_DELAY: float = float(os.getenv("EMAIL_RETRY_BASE_DELAY", "1.0"))
+    EMAIL_RETRY_MAX_DELAY: float = float(os.getenv("EMAIL_RETRY_MAX_DELAY", "30.0"))
+    EMAIL_HTTP_TIMEOUT: int = int(os.getenv("EMAIL_HTTP_TIMEOUT", "30"))
+
+    # Legacy SMTP delivery. Keep available for local/on-prem/Pro environments.
     SMTP_ENABLED: bool = os.getenv("SMTP_ENABLED", "false").lower() in (
         "1", "true", "yes", "on",
     )
