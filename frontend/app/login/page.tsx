@@ -22,16 +22,9 @@ export default function LoginPage() {
     setError('');
     setLoading(true);
     try {
-      const tokens = await loginUser(email, password, needMfa ? mfaCode : undefined);
-      localStorage.setItem('access_token', tokens.access_token);
-      if (tokens.refresh_token) localStorage.setItem('refresh_token', tokens.refresh_token);
-      localStorage.setItem('user_email', email);
-
-      // The login request is now made exactly once through the same-origin
-      // Next.js auth proxy. Refresh the context from the authenticated cookie
-      // instead of issuing a second login request.
+      await loginUser(email, password, needMfa ? mfaCode : undefined);
       await auth.refreshUser();
-      router.push('/dashboard');
+      router.replace('/dashboard');
     } catch (err: any) {
       const msg = String(err?.message || '').trim();
       if (msg.includes('mfa_required')) {
@@ -55,71 +48,20 @@ export default function LoginPage() {
           <BhudiLogo href="/" size="lg" variant="full" />
           <p className="mt-3 text-sm text-slate-400">Sign in to your operations workspace</p>
         </div>
-
         <form onSubmit={handleSubmit} className="space-y-5">
           <div>
             <label className="text-xs font-medium text-slate-400">Email</label>
-            <input
-              type="email"
-              placeholder="you@company.com"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-3 text-sm text-white outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/30"
-              required
-            />
+            <input type="email" placeholder="you@company.com" value={email} onChange={(e) => setEmail(e.target.value)} className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-3 text-sm text-white outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/30" required />
           </div>
           <div>
-            <div className="flex items-center justify-between">
-              <label className="text-xs font-medium text-slate-400">Password</label>
-              <Link href="/forgot-password" className="text-xs text-indigo-400 hover:text-indigo-300">
-                Forgot password?
-              </Link>
-            </div>
-            <input
-              type="password"
-              placeholder="Password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-3 text-sm text-white outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/30"
-              required
-            />
+            <div className="flex items-center justify-between"><label className="text-xs font-medium text-slate-400">Password</label><Link href="/forgot-password" className="text-xs text-indigo-400 hover:text-indigo-300">Forgot password?</Link></div>
+            <input type="password" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-3 text-sm text-white outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/30" required />
           </div>
-          {needMfa && (
-            <div>
-              <label className="text-xs font-medium text-slate-400">Authenticator code</label>
-              <input
-                value={mfaCode}
-                onChange={(e) => setMfaCode(e.target.value)}
-                inputMode="numeric"
-                autoFocus
-                className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-3 text-center font-mono text-lg tracking-widest text-white outline-none focus:border-indigo-500"
-                placeholder="000000"
-                required
-              />
-            </div>
-          )}
-
-          {error && (
-            <p className="rounded-xl border border-red-500/40 bg-red-950/40 px-3 py-2 text-center text-sm text-red-300">
-              {error}
-            </p>
-          )}
-
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full rounded-xl bg-indigo-600 py-3 text-sm font-semibold text-white transition hover:bg-indigo-500 disabled:opacity-50"
-          >
-            {loading ? 'Signing in…' : 'Sign In'}
-          </button>
+          {needMfa && <div><label className="text-xs font-medium text-slate-400">Authenticator code</label><input value={mfaCode} onChange={(e) => setMfaCode(e.target.value)} inputMode="numeric" autoFocus className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-3 text-center font-mono text-lg tracking-widest text-white outline-none focus:border-indigo-500" placeholder="000000" required /></div>}
+          {error && <p className="rounded-xl border border-red-500/40 bg-red-950/40 px-3 py-2 text-center text-sm text-red-300">{error}</p>}
+          <button type="submit" disabled={loading} className="w-full rounded-xl bg-indigo-600 py-3 text-sm font-semibold text-white transition hover:bg-indigo-500 disabled:opacity-50">{loading ? 'Signing in…' : 'Sign In'}</button>
         </form>
-
-        <p className="mt-8 text-center text-xs text-slate-500">
-          New to Bhudi?{' '}
-          <Link href="/signup" className="font-medium text-indigo-400 hover:text-indigo-300">
-            Create an account
-          </Link>
-        </p>
+        <p className="mt-8 text-center text-xs text-slate-500">New to Bhudi? <Link href="/signup" className="font-medium text-indigo-400 hover:text-indigo-300">Create an account</Link></p>
       </div>
     </div>
   );

@@ -31,10 +31,23 @@ def password_reset_request(payload: dict, db: Session = Depends(get_db)):
 @router.post("/password-reset/confirm")
 def password_reset_confirm(payload: dict, db: Session = Depends(get_db)):
     token = str(payload.get("token") or "").strip()
-    new_password = str(
-        payload.get("new_password") or payload.get("password") or ""
-    )
-    PasswordResetService(db).confirm_reset(token, new_password)
+    new_password = str(payload.get("new_password") or payload.get("password") or "")
+    service = PasswordResetService(db)
+    service.confirm_reset(token, new_password)
+
+    # A successful reset must also release any login lockout. Keep this here
+    # as an explicit invariant at the API boundary so older reset-service
+    # implementations cannot leave the account locked after a valid reset.
+    token_hash = service._hash_token(token)
+    from app.models.password_reset_token import PasswordResetToken
+    row = db.query(PasswordResetToken).filter(PasswordResetToken.token_hash == token_hash).first()
+    if row is not None:
+        user = service.auth.users.get_by_id(row.user_id)
+        if user is not None:
+            user.failed_login_attempts = 0
+            user.locked_until = None
+            db.commit()
+
     return {"message": "Password has been reset. You can sign in with your new password."}
 
 
@@ -53,7 +66,7 @@ def ensure_admin(
 
     Requires header: X-Bootstrap-Secret matching env BHUDI_BOOTSTRAP_SECRET.
     Optional JSON body: { "email", "password" }.
-    Defaults: BHUDI_ADMIN_EMAIL / BHUDI_ADMIN_PASSWORD (or built-in defaults).
+    Defaults: BHUDI_ADMIN_EMAIL / BHUDI_ADMIN_PASSWORD.
     """
     from app.core.security import hash_password
     from app.models.user import User
@@ -63,47 +76,26 @@ def ensure_admin(
     if not expected or provided != expected:
         raise HTTPException(status_code=403, detail="Forbidden")
 
-    email = (
-        (body.email if body and body.email else None)
-        or os.getenv("BHUDI_ADMIN_EMAIL", "admin@example.com")
-    ).strip().lower()
-    password = (
-        (body.password if body and body.password else None)
-        or os.getenv("BHUDI_ADMIN_PASSWORD", "StrongPassword123!")
-    )
+    email = ((body.email if body and body.email else None) or os.getenv("BHUDI_ADMIN_EMAIL", "admin@example.com")).strip().lower()
+    password = (body.password if body and body.password else None) or os.getenv("BHUDI_ADMIN_PASSWORD", "StrongPassword123!")
     if not password or len(password) < 12:
-        raise HTTPException(
-            status_code=400,
-            detail="Password must be at least 12 characters",
-        )
+        raise HTTPException(status_code=400, detail="Password must be at least 12 characters")
 
     try:
         user = db.query(User).filter(User.email == email).first()
         created = False
         if user is None:
-            user = User(
-                email=email,
-                password_hash=hash_password(password),
-                first_name="System",
-                last_name="Admin",
-                role="admin",
-                active=True,
-            )
+            user = User(email=email, password_hash=hash_password(password), first_name="System", last_name="Admin", role="admin", active=True)
             db.add(user)
             created = True
         else:
             user.password_hash = hash_password(password)
             user.active = True
             user.role = "admin"
-            if hasattr(user, "failed_login_attempts"):
-                user.failed_login_attempts = 0
-            if hasattr(user, "locked_until"):
-                user.locked_until = None
+            user.failed_login_attempts = 0
+            user.locked_until = None
         db.commit()
         return {"ok": True, "created": created, "email": email}
     except Exception as exc:
         db.rollback()
-        raise HTTPException(
-            status_code=500,
-            detail=f"ensure-admin failed: {type(exc).__name__}: {exc}",
-        ) from exc
+        raise HTTPException(status_code=500, detail=f"ensure-admin failed: {type(exc).__name__}: {exc}") from exc
