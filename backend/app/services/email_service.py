@@ -1,9 +1,11 @@
-"""SMTP email delivery for scheduled reports (stdlib only).
+"""Email delivery via Resend (preferred) with SMTP fallback.
 
-Includes exponential-backoff retry for transient SMTP / network failures.
+Resend uses HTTPS (works reliably on Railway).
+SMTP is only used when Resend is not configured.
 """
 from __future__ import annotations
 
+import base64
 import logging
 import random
 import re
@@ -15,16 +17,15 @@ from email.message import EmailMessage
 from email.utils import formataddr, make_msgid
 from typing import Any, Sequence
 
+import httpx
+
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
 _EMAIL_RE = re.compile(r"^[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}$")
 
-# SMTP reply codes treated as temporary (retryable). 4xx = transient.
 _RETRYABLE_SMTP_CODES = frozenset(range(400, 500))
-
-# Exceptions that are almost always transient network / server issues.
 _RETRYABLE_EXC_TYPES = (
     smtplib.SMTPServerDisconnected,
     smtplib.SMTPConnectError,
@@ -33,6 +34,8 @@ _RETRYABLE_EXC_TYPES = (
     ConnectionError,
     OSError,
 )
+
+RESEND_API_URL = "https://api.resend.com/emails"
 
 
 def is_valid_email(addr: str) -> bool:
@@ -60,12 +63,9 @@ def normalize_recipients(raw: Sequence[Any] | None) -> list[str]:
 
 
 def is_retryable_error(exc: BaseException) -> bool:
-    """Return True when the failure is likely transient and worth retrying."""
     if isinstance(exc, smtplib.SMTPResponseException):
-        # 4xx temporary; 5xx permanent (auth, bad recipient, policy, etc.)
         return int(getattr(exc, "smtp_code", 0) or 0) in _RETRYABLE_SMTP_CODES
     if isinstance(exc, smtplib.SMTPRecipientsRefused):
-        # All recipients refused — usually permanent for this payload.
         return False
     if isinstance(exc, smtplib.SMTPAuthenticationError):
         return False
@@ -74,9 +74,12 @@ def is_retryable_error(exc: BaseException) -> bool:
         return code in _RETRYABLE_SMTP_CODES
     if isinstance(exc, _RETRYABLE_EXC_TYPES):
         return True
-    # Generic smtplib failures without a permanent code.
     if isinstance(exc, smtplib.SMTPException):
         return True
+    if isinstance(exc, httpx.TransportError):
+        return True
+    if isinstance(exc, httpx.HTTPStatusError):
+        return exc.response.status_code in (408, 429, 500, 502, 503, 504)
     return False
 
 
@@ -90,10 +93,11 @@ class EmailDeliveryResult:
     attempts: int = 0
     retried: bool = False
     last_error: str | None = None
+    provider: str | None = None
 
 
 class EmailService:
-    """Thin SMTP client driven by Settings, with configurable retries."""
+    """Resend-first email client with optional SMTP fallback."""
 
     def __init__(
         self,
@@ -110,7 +114,30 @@ class EmailService:
         max_retries: int | None = None,
         retry_base_delay: float | None = None,
         retry_max_delay: float | None = None,
+        resend_api_key: str | None = None,
+        resend_from_email: str | None = None,
+        resend_from_name: str | None = None,
+        resend_enabled: bool | None = None,
     ) -> None:
+        self.resend_api_key = (
+            resend_api_key if resend_api_key is not None else settings.RESEND_API_KEY
+        )
+        self.resend_from_email = (
+            resend_from_email
+            if resend_from_email is not None
+            else (settings.RESEND_FROM_EMAIL or settings.SMTP_FROM_EMAIL)
+        )
+        self.resend_from_name = (
+            resend_from_name
+            if resend_from_name is not None
+            else (settings.RESEND_FROM_NAME or settings.SMTP_FROM_NAME or "Bhudi RMM")
+        )
+        self.resend_enabled = (
+            resend_enabled
+            if resend_enabled is not None
+            else settings.RESEND_ENABLED
+        )
+
         self.host = host if host is not None else settings.SMTP_HOST
         self.port = port if port is not None else settings.SMTP_PORT
         self.username = username if username is not None else settings.SMTP_USERNAME
@@ -119,7 +146,7 @@ class EmailService:
         self.use_ssl = use_ssl if use_ssl is not None else settings.SMTP_USE_SSL
         self.from_email = from_email if from_email is not None else settings.SMTP_FROM_EMAIL
         self.from_name = from_name if from_name is not None else settings.SMTP_FROM_NAME
-        self.enabled = enabled if enabled is not None else settings.SMTP_ENABLED
+        self.smtp_enabled = enabled if enabled is not None else settings.SMTP_ENABLED
 
         self.max_retries = (
             max_retries
@@ -138,71 +165,239 @@ class EmailService:
         )
 
     @property
+    def resend_configured(self) -> bool:
+        return bool(
+            self.resend_enabled
+            and self.resend_api_key
+            and self.resend_from_email
+        )
+
+    @property
+    def smtp_configured(self) -> bool:
+        return bool(self.smtp_enabled and self.host and self.from_email)
+
+    @property
     def configured(self) -> bool:
-        return bool(self.enabled and self.host and self.from_email)
+        return self.resend_configured or self.smtp_configured
 
     def _backoff_seconds(self, attempt: int) -> float:
-        """Exponential backoff with full jitter. attempt is 0-based (after first fail)."""
-        # delay = min(max, base * 2^attempt) * random(0, 1]
-        exp = self.retry_base_delay * (2**attempt)
-        capped = min(exp, self.retry_max_delay)
-        return random.uniform(0, capped) if capped > 0 else 0.0
+        delay = min(
+            self.retry_max_delay,
+            self.retry_base_delay * (2 ** max(0, attempt)),
+        )
+        return delay * random.random()
+
+    def _format_from(self, email: str, name: str) -> str:
+        name = (name or "").strip()
+        if name:
+            return formataddr((name, email))
+        return email
 
     def send(
         self,
         *,
-        to: Sequence[str],
+        to: Sequence[Any],
         subject: str,
         body_text: str,
         body_html: str | None = None,
         attachments: list[tuple[str, bytes, str]] | None = None,
         reply_to: str | None = None,
     ) -> EmailDeliveryResult:
-        recipients = normalize_recipients(list(to))
+        recipients = normalize_recipients(to)
         if not recipients:
             return EmailDeliveryResult(
-                ok=False, error="No valid recipients", skipped=True, attempts=0
+                ok=False,
+                error="No valid recipients",
+                skipped=True,
             )
 
         if not self.configured:
-            logger.warning("SMTP not configured; skipping email to %s", recipients)
+            logger.warning(
+                "Email not configured (set RESEND_API_KEY + RESEND_FROM_EMAIL, "
+                "or SMTP_*); skipping send to %s",
+                recipients,
+            )
             return EmailDeliveryResult(
                 ok=False,
                 recipients=recipients,
-                error="SMTP not configured (set SMTP_HOST, SMTP_FROM_EMAIL, SMTP_ENABLED=true)",
+                error="Email not configured",
                 skipped=True,
-                attempts=0,
             )
 
-        msg = EmailMessage()
-        msg["Subject"] = subject
-        msg["From"] = formataddr((self.from_name or "Bhudi Reports", self.from_email))
-        msg["To"] = ", ".join(recipients)
-        domain = (
-            self.from_email.split("@")[-1] if "@" in self.from_email else "bhudi.local"
+        if self.resend_configured:
+            result = self._send_resend(
+                recipients=recipients,
+                subject=subject,
+                body_text=body_text,
+                body_html=body_html,
+                attachments=attachments,
+                reply_to=reply_to,
+            )
+            if result.ok or not self.smtp_configured:
+                return result
+            logger.warning(
+                "Resend failed (%s); falling back to SMTP",
+                result.error,
+            )
+
+        return self._send_smtp(
+            recipients=recipients,
+            subject=subject,
+            body_text=body_text,
+            body_html=body_html,
+            attachments=attachments,
+            reply_to=reply_to,
         )
-        msg["Message-ID"] = make_msgid(domain=domain)
-        if reply_to:
+
+    def _send_resend(
+        self,
+        *,
+        recipients: list[str],
+        subject: str,
+        body_text: str,
+        body_html: str | None,
+        attachments: list[tuple[str, bytes, str]] | None,
+        reply_to: str | None,
+    ) -> EmailDeliveryResult:
+        payload: dict[str, Any] = {
+            "from": self._format_from(self.resend_from_email, self.resend_from_name),
+            "to": recipients,
+            "subject": subject,
+            "text": body_text or "",
+        }
+        if body_html:
+            payload["html"] = body_html
+        if reply_to and is_valid_email(reply_to):
+            payload["reply_to"] = reply_to
+        if attachments:
+            payload["attachments"] = [
+                {
+                    "filename": name,
+                    "content": base64.b64encode(data).decode("ascii"),
+                    "content_type": content_type or "application/octet-stream",
+                }
+                for name, data, content_type in attachments
+            ]
+
+        headers = {
+            "Authorization": f"Bearer {self.resend_api_key}",
+            "Content-Type": "application/json",
+        }
+
+        max_attempts = max(1, self.max_retries + 1)
+        last_exc: BaseException | None = None
+        attempts_done = 0
+
+        for attempt in range(max_attempts):
+            attempts_done = attempt + 1
+            try:
+                with httpx.Client(timeout=30.0) as client:
+                    resp = client.post(RESEND_API_URL, headers=headers, json=payload)
+                    if resp.status_code >= 400:
+                        # Raise for retry logic on transient codes
+                        try:
+                            resp.raise_for_status()
+                        except httpx.HTTPStatusError as exc:
+                            body = (resp.text or "")[:500]
+                            if resp.status_code in (408, 429, 500, 502, 503, 504):
+                                raise
+                            logger.error(
+                                "Resend permanent failure %s: %s",
+                                resp.status_code,
+                                body,
+                            )
+                            return EmailDeliveryResult(
+                                ok=False,
+                                recipients=recipients,
+                                error=f"Resend {resp.status_code}: {body}",
+                                attempts=attempts_done,
+                                provider="resend",
+                            )
+                    data = resp.json() if resp.content else {}
+                    message_id = str(data.get("id") or "")
+                    logger.info(
+                        "Resend send ok attempt %s/%s to %s id=%s",
+                        attempts_done,
+                        max_attempts,
+                        recipients,
+                        message_id,
+                    )
+                    return EmailDeliveryResult(
+                        ok=True,
+                        recipients=recipients,
+                        message_id=message_id or None,
+                        attempts=attempts_done,
+                        retried=attempt > 0,
+                        provider="resend",
+                    )
+            except Exception as exc:
+                last_exc = exc
+                retryable = is_retryable_error(exc)
+                will_retry = retryable and attempt < max_attempts - 1
+                if will_retry:
+                    delay = self._backoff_seconds(attempt)
+                    logger.warning(
+                        "Resend failed (attempt %s/%s, retryable): %s; retrying in %.2fs",
+                        attempts_done,
+                        max_attempts,
+                        exc,
+                        delay,
+                    )
+                    if delay > 0:
+                        time.sleep(delay)
+                    continue
+                logger.exception(
+                    "Resend failed (attempt %s/%s)",
+                    attempts_done,
+                    max_attempts,
+                )
+                break
+
+        err = str(last_exc)[:1000] if last_exc else "Unknown Resend error"
+        return EmailDeliveryResult(
+            ok=False,
+            recipients=recipients,
+            error=err,
+            attempts=attempts_done,
+            retried=attempts_done > 1,
+            last_error=err,
+            provider="resend",
+        )
+
+    def _send_smtp(
+        self,
+        *,
+        recipients: list[str],
+        subject: str,
+        body_text: str,
+        body_html: str | None,
+        attachments: list[tuple[str, bytes, str]] | None,
+        reply_to: str | None,
+    ) -> EmailDeliveryResult:
+        msg = EmailMessage()
+        msg["From"] = self._format_from(self.from_email, self.from_name or "Bhudi RMM")
+        msg["To"] = ", ".join(recipients)
+        msg["Subject"] = subject
+        msg["Message-ID"] = make_msgid(domain=(self.from_email.split("@")[-1] if "@" in self.from_email else "bhudi.online"))
+        if reply_to and is_valid_email(reply_to):
             msg["Reply-To"] = reply_to
 
-        msg.set_content(body_text)
         if body_html:
+            msg.set_content(body_text or "")
             msg.add_alternative(body_html, subtype="html")
+        else:
+            msg.set_content(body_text or "")
 
-        for filename, content, content_type in attachments or []:
-            maintype, _, subtype = (content_type or "application/octet-stream").partition(
-                "/"
-            )
-            if not subtype:
-                maintype, subtype = "application", "octet-stream"
+        for filename, data, content_type in attachments or []:
+            maintype, _, subtype = (content_type or "application/octet-stream").partition("/")
             msg.add_attachment(
-                content,
-                maintype=maintype,
-                subtype=subtype,
+                data,
+                maintype=maintype or "application",
+                subtype=subtype or "octet-stream",
                 filename=filename,
             )
 
-        max_attempts = max(1, self.max_retries + 1)  # first try + retries
+        max_attempts = max(1, self.max_retries + 1)
         last_exc: BaseException | None = None
         attempts_done = 0
 
@@ -210,19 +405,19 @@ class EmailService:
             attempts_done = attempt + 1
             try:
                 self._smtp_send(msg, recipients)
-                if attempt > 0:
-                    logger.info(
-                        "SMTP send succeeded on attempt %s/%s to %s",
-                        attempts_done,
-                        max_attempts,
-                        recipients,
-                    )
+                logger.info(
+                    "SMTP send succeeded on attempt %s/%s to %s",
+                    attempts_done,
+                    max_attempts,
+                    recipients,
+                )
                 return EmailDeliveryResult(
                     ok=True,
                     recipients=recipients,
                     message_id=str(msg["Message-ID"]),
                     attempts=attempts_done,
                     retried=attempt > 0,
+                    provider="smtp",
                 )
             except Exception as exc:
                 last_exc = exc
@@ -257,6 +452,7 @@ class EmailService:
             attempts=attempts_done,
             retried=attempts_done > 1,
             last_error=err,
+            provider="smtp",
         )
 
     def _smtp_send(self, msg: EmailMessage, recipients: list[str]) -> None:

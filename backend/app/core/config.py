@@ -64,7 +64,15 @@ class Settings:
     ARGON2_HASH_LENGTH: int = int(os.getenv("ARGON2_HASH_LENGTH", "32"))
     ARGON2_SALT_LENGTH: int = int(os.getenv("ARGON2_SALT_LENGTH", "16"))
 
-    # SMTP / email delivery
+    # Resend (preferred email delivery — HTTP API, works well on Railway)
+    RESEND_API_KEY: str = os.getenv("RESEND_API_KEY", "")
+    RESEND_FROM_EMAIL: str = os.getenv("RESEND_FROM_EMAIL", "")
+    RESEND_FROM_NAME: str = os.getenv("RESEND_FROM_NAME", "Bhudi RMM")
+    RESEND_ENABLED: bool = os.getenv("RESEND_ENABLED", "true").lower() in (
+        "1", "true", "yes", "on",
+    )
+
+    # SMTP / email delivery (fallback if Resend is not configured)
     SMTP_ENABLED: bool = os.getenv("SMTP_ENABLED", "false").lower() in (
         "1", "true", "yes", "on",
     )
