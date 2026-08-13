@@ -1,0 +1,28 @@
+# Optional: run coturn via Docker
+#   cd deploy/coturn && docker compose -f docker-compose.turn.yml up -d
+#
+# Set TURN_USER / TURN_PASS / PUBLIC_IP in a .env next to this file.
+
+services:
+  coturn:
+    image: coturn/coturn:4.6
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      DETECT_EXTERNAL_IP: "yes"
+    command:
+      - -n
+      - --log-file=stdout
+      - --listening-port=3478
+      - --fingerprint
+      - --lt-cred-mech
+      - --realm=${TURN_REALM:-bhudi.online}
+      - --user=${TURN_USER:-bhudi}:${TURN_PASS:-changeme}
+      - --min-port=49160
+      - --max-port=49200
+      - --no-multicast-peers
+      - --no-cli
+      - --no-tls
+      - --no-dtls
+      # Uncomment and set if auto-detect fails:
+      # - --external-ip=${PUBLIC_IP}
