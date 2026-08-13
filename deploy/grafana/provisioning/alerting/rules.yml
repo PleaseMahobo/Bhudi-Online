@@ -1,0 +1,6 @@
+# Grafana-managed alert rules (optional companion to Prometheus Alertmanager).
+# Requires Grafana 9+ unified alerting.
+apiVersion: 1
+groups: []
+# Prefer Prometheus rules in deploy/prometheus/rules/alerts.yml for source-of-truth.
+# Grafana can also create contact points under Alerting → Contact points.

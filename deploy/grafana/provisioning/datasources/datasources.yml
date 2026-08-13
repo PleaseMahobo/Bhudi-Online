@@ -3,9 +3,10 @@ apiVersion: 1
 deleteDatasources:
   - name: Prometheus
     orgId: 1
+  - name: Loki
+    orgId: 1
 
 datasources:
-  # --- Prometheus (API /metrics scrape) ---
   - name: Prometheus
     type: prometheus
     access: proxy
@@ -16,14 +17,24 @@ datasources:
     jsonData:
       httpMethod: POST
       timeInterval: 15s
+      manageAlerts: true
+      prometheusType: Prometheus
+      prometheusVersion: 2.54.0
 
-  # --- Postgres / Supabase (device_metrics history) ---
-  # Configure via Grafana UI if env substitution is empty, or set:
-  #   BHUDI_PG_HOST=db.xxxxx.supabase.co:5432
-  #   BHUDI_PG_USER=postgres
-  #   BHUDI_PG_PASSWORD=...
-  #   BHUDI_PG_DATABASE=postgres
-  #   BHUDI_PG_SSLMODE=require
+  - name: Loki
+    type: loki
+    access: proxy
+    uid: loki
+    url: http://loki:3100
+    editable: true
+    jsonData:
+      maxLines: 1000
+      derivedFields:
+        - datasourceUid: prometheus
+          matcherRegex: "trace_id=(\\w+)"
+          name: TraceID
+          url: "$${__value.raw}"
+
   - name: Bhudi Postgres
     type: postgres
     access: proxy

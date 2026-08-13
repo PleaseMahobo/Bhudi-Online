@@ -1,0 +1,56 @@
+groups:
+  - name: bhudi_recording
+    interval: 30s
+    rules:
+      # HTTP request rate (all paths)
+      - record: job:bhudi_http_requests:rate5m
+        expr: sum(rate(bhudi_http_requests_total[5m])) by (job)
+
+      - record: job:bhudi_http_requests:rate5m_by_status
+        expr: sum(rate(bhudi_http_requests_total[5m])) by (job, status)
+
+      - record: job:bhudi_http_error_rate:ratio5m
+        expr: |
+          sum(rate(bhudi_http_requests_total{status=~"5.."}[5m])) by (job)
+          /
+          clamp_min(sum(rate(bhudi_http_requests_total[5m])) by (job), 1e-9)
+
+      # Latency quantiles from histogram
+      - record: job:bhudi_http_request_duration:p50
+        expr: |
+          histogram_quantile(
+            0.50,
+            sum(rate(bhudi_http_request_duration_seconds_bucket[5m])) by (job, le)
+          )
+
+      - record: job:bhudi_http_request_duration:p95
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum(rate(bhudi_http_request_duration_seconds_bucket[5m])) by (job, le)
+          )
+
+      - record: job:bhudi_http_request_duration:p99
+        expr: |
+          histogram_quantile(
+            0.99,
+            sum(rate(bhudi_http_request_duration_seconds_bucket[5m])) by (job, le)
+          )
+
+      # Agent health
+      - record: job:bhudi_heartbeats:rate5m
+        expr: sum(rate(bhudi_agent_heartbeats_total[5m])) by (job)
+
+      - record: job:bhudi_agents_online:max
+        expr: max(bhudi_agents_online) by (job)
+
+      # Auth
+      - record: job:bhudi_auth_failures:rate15m
+        expr: sum(rate(bhudi_auth_events_total{event=~"login_fail|register_fail"}[15m])) by (job)
+
+      # Device resource pressure (avg across labeled series)
+      - record: job:bhudi_device_cpu:avg
+        expr: avg(bhudi_device_cpu_percent) by (job)
+
+      - record: job:bhudi_device_memory:avg
+        expr: avg(bhudi_device_memory_percent) by (job)

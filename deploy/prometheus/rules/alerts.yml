@@ -1,0 +1,96 @@
+groups:
+  - name: bhudi_api_alerts
+    rules:
+      - alert: BhudiAPIDown
+        expr: up{job=~"bhudi-api.*"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          summary: "Bhudi API scrape target down"
+          description: "Prometheus cannot scrape {{ $labels.job }} (instance {{ $labels.instance }}) for >2m."
+
+      - alert: BhudiAPIHighErrorRate
+        expr: job:bhudi_http_error_rate:ratio5m > 0.05
+        for: 5m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "HTTP 5xx error rate >5%"
+          description: "Job {{ $labels.job }} 5xx ratio is {{ $value | humanizePercentage }} over 5m."
+
+      - alert: BhudiAPIHighLatencyP95
+        expr: job:bhudi_http_request_duration:p95 > 2
+        for: 5m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "API p95 latency >2s"
+          description: "Job {{ $labels.job }} p95 latency is {{ $value | humanizeDuration }}."
+
+      - alert: BhudiAPIHighLatencyP99
+        expr: job:bhudi_http_request_duration:p99 > 5
+        for: 5m
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          summary: "API p99 latency >5s"
+          description: "Job {{ $labels.job }} p99 latency is {{ $value | humanizeDuration }}."
+
+  - name: bhudi_agent_alerts
+    rules:
+      - alert: BhudiNoAgentsOnline
+        expr: job:bhudi_agents_online:max == 0
+        for: 15m
+        labels:
+          severity: warning
+          team: rmm
+        annotations:
+          summary: "No agents online"
+          description: "bhudi_agents_online has been 0 for 15m. Check agent install/service and API connectivity."
+
+      - alert: BhudiHeartbeatSilence
+        expr: job:bhudi_heartbeats:rate5m == 0 and job:bhudi_agents_online:max > 0
+        for: 10m
+        labels:
+          severity: warning
+          team: rmm
+        annotations:
+          summary: "Agents online but no heartbeats"
+          description: "Online gauge >0 but heartbeat rate is 0 for 10m on {{ $labels.job }}."
+
+      - alert: BhudiDeviceHighCPU
+        expr: bhudi_device_cpu_percent > 90
+        for: 10m
+        labels:
+          severity: warning
+          team: rmm
+        annotations:
+          summary: "Device CPU >90%"
+          description: "Agent {{ $labels.hostname }} ({{ $labels.agent_id }}) CPU is {{ $value }}%."
+
+      - alert: BhudiDeviceHighMemory
+        expr: bhudi_device_memory_percent > 90
+        for: 10m
+        labels:
+          severity: warning
+          team: rmm
+        annotations:
+          summary: "Device memory >90%"
+          description: "Agent {{ $labels.hostname }} ({{ $labels.agent_id }}) memory is {{ $value }}%."
+
+  - name: bhudi_auth_alerts
+    rules:
+      - alert: BhudiAuthFailureSpike
+        expr: job:bhudi_auth_failures:rate15m > 0.2
+        for: 5m
+        labels:
+          severity: warning
+          team: security
+        annotations:
+          summary: "Elevated auth failures"
+          description: "Auth failure rate is {{ $value | humanize }} /s over 15m on {{ $labels.job }}."

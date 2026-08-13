@@ -1,149 +1,148 @@
-# Grafana + Prometheus for Bhudi
+# Bhudi observability (Prometheus + Alertmanager + Loki + Grafana)
 
-## Architecture
+## Stack ports
 
-```
-Agents --heartbeat--> Bhudi API --writes--> Postgres device_metrics
-                         |
-                         +--exposes--> GET /metrics  <--scrape-- Prometheus <-- Grafana
-                         |
-                         +--Grafana Postgres datasource--> historical graphs
-```
-
-| Source | Best for |
-|--------|----------|
-| **Prometheus** | Live rates, latency, online agents, last CPU/RAM gauges |
-| **Postgres** | Long-range history, bucketed averages, fleet rollups |
-
----
-
-## 1. API: Prometheus endpoint
-
-After deploying the backend, verify:
-
-```bash
-curl -sS https://bhudi-online-production.up.railway.app/metrics | head
-```
-
-You should see series such as:
-
-- `bhudi_http_requests_total`
-- `bhudi_http_request_duration_seconds_bucket`
-- `bhudi_agent_heartbeats_total`
-- `bhudi_device_cpu_percent`
-- `bhudi_agents_online`
-
----
-
-## 2. Start stack
+| Service | URL |
+|---------|-----|
+| Grafana | http://localhost:3001 |
+| Prometheus | http://localhost:9090 |
+| Alertmanager | http://localhost:9093 |
+| Loki | http://localhost:3100 |
 
 ```bash
 cd deploy/grafana
-export GRAFANA_ADMIN_PASSWORD='use-a-strong-password'
-# Optional Postgres for historical panels:
-export BHUDI_PG_HOST='db.YOUR_PROJECT.supabase.co:5432'
-export BHUDI_PG_USER='postgres'
-export BHUDI_PG_PASSWORD='YOUR_DB_PASSWORD'
-export BHUDI_PG_DATABASE='postgres'
-export BHUDI_PG_SSLMODE='require'
+export GRAFANA_ADMIN_PASSWORD='strong-password'
 docker compose up -d
 ```
 
-- Grafana: http://localhost:3001 (admin / password above)
-- Prometheus: http://localhost:9090
-
 ---
 
-## 3. Grafana datasource configuration (UI steps)
+## Prometheus recording rules
 
-### A. Prometheus (usually auto-provisioned)
+File: `deploy/prometheus/rules/recording.yml`
 
-1. Grafana → **Connections** → **Data sources**
-2. Open **Prometheus** (or Add → Prometheus)
-3. Settings:
+Pre-aggregated series (faster dashboards/alerts):
 
-| Field | Value |
-|-------|--------|
-| Name | `Prometheus` |
-| URL | `http://prometheus:9090` (inside Compose) or `http://localhost:9090` |
-| Scrape interval | `15s` |
+| Recording metric | Meaning |
+|------------------|---------|
+| `job:bhudi_http_requests:rate5m` | Request rate |
+| `job:bhudi_http_error_rate:ratio5m` | 5xx ratio |
+| `job:bhudi_http_request_duration:p50/p95/p99` | Latency quantiles |
+| `job:bhudi_heartbeats:rate5m` | Heartbeat rate |
+| `job:bhudi_agents_online:max` | Online agents |
+| `job:bhudi_device_cpu:avg` | Fleet avg CPU |
 
-4. **Save & test** → green “Data source is working”.
+Verify in Prometheus → **Graph**:
 
-### B. Postgres / Supabase (historical `device_metrics`)
+```promql
+job:bhudi_http_error_rate:ratio5m
+job:bhudi_http_request_duration:p95
+```
 
-1. **Connections** → **Add data source** → **PostgreSQL**
-2. Settings:
-
-| Field | Value |
-|-------|--------|
-| Name | `Bhudi Postgres` |
-| Host | `db.<project-ref>.supabase.co:5432` |
-| Database | `postgres` |
-| User | `postgres` (or pooler user) |
-| Password | Database password from Supabase |
-| TLS/SSL Mode | `require` |
-| Version | 15+ |
-
-3. **Save & test**.
-
-**Supabase tips**
-
-- Prefer **direct** connection for Grafana (not transaction pooler) if prepared statements fail.
-- Session mode pooler port is often `6543`; direct is `5432`.
-- Allow your Grafana host IP in Supabase network restrictions if enabled.
-
-### C. Production API scrape
-
-Edit `deploy/prometheus/prometheus.yml` job `bhudi-api-production` so `targets` match your Railway host, then:
+Reload after edits:
 
 ```bash
 curl -X POST http://localhost:9090/-/reload
 ```
 
-Or restart: `docker compose restart prometheus`.
+---
 
-Confirm in Prometheus → **Status → Targets** that `bhudi-api-production` is **UP**.
+## Alerting rules
+
+File: `deploy/prometheus/rules/alerts.yml`
+
+| Alert | Condition |
+|-------|-----------|
+| `BhudiAPIDown` | scrape `up == 0` for 2m |
+| `BhudiAPIHighErrorRate` | 5xx ratio >5% for 5m |
+| `BhudiAPIHighLatencyP95` | p95 >2s for 5m |
+| `BhudiAPIHighLatencyP99` | p99 >5s for 5m |
+| `BhudiNoAgentsOnline` | agents == 0 for 15m |
+| `BhudiHeartbeatSilence` | online but no heartbeats 10m |
+| `BhudiDeviceHighCPU` | CPU >90% for 10m |
+| `BhudiDeviceHighMemory` | mem >90% for 10m |
+| `BhudiAuthFailureSpike` | auth fail rate elevated |
+
+Check **Prometheus → Alerts** and **Alertmanager** UI.
+
+### Wire Slack / email
+
+Edit `deploy/prometheus/alertmanager.yml`:
+
+```yaml
+receivers:
+  - name: critical
+    slack_configs:
+      - api_url: 'https://hooks.slack.com/services/XXX'
+        channel: '#bhudi-alerts'
+        send_resolved: true
+```
+
+Restart Alertmanager:
+
+```bash
+docker compose restart alertmanager
+```
 
 ---
 
-## 4. Optimized dashboard queries
+## Grafana Loki (logs)
 
-**Prometheus (live)**
+### How logs flow
 
-```promql
-sum(rate(bhudi_http_requests_total[5m]))
-histogram_quantile(0.95, sum(rate(bhudi_http_request_duration_seconds_bucket[5m])) by (le))
-bhudi_agents_online
-bhudi_device_cpu_percent
+```
+Containers / files → Promtail → Loki → Grafana Explore (Loki)
 ```
 
-**Postgres (bucketed history — avoids scanning every raw point)**
+Promtail tails Docker logs via `/var/run/docker.sock` and optional `/var/log/bhudi/*.log`.
 
-```sql
-SELECT
-  date_trunc('minute', recorded_at) AS time,
-  ROUND(AVG(cpu_usage)::numeric, 2) AS avg_cpu,
-  ROUND(AVG(ram_usage)::numeric, 2) AS avg_mem
-FROM device_metrics
-WHERE $__timeFilter(recorded_at)
-  AND (COALESCE(TRIM('$device_id'), '') = '' OR device_id::text = TRIM('$device_id'))
-GROUP BY 1
-ORDER BY 1;
+### Explore logs
+
+Grafana → **Explore** → datasource **Loki**:
+
+```logql
+{container=~".*api.*"} |= "ERROR"
+{job="bhudi-api"} |~ "(?i)exception|traceback"
+{service="grafana"}
 ```
 
-Indexes (already in `backend/scripts/ensure_auth_and_metrics_schema.sql`):
+Dashboard: **Bhudi Logs & Alerts** (`logs-and-alerts.json`).
 
-- `(device_id, recorded_at DESC)`
-- `BRIN (recorded_at)`
+### Railway / production logs
+
+Railway already stores deploy logs. Options:
+
+1. **Grafana Cloud Loki** free tier + ship with their agent, or  
+2. App → HTTP push to Loki (`/loki/api/v1/push`) from a logging handler, or  
+3. Keep Promtail only on hosts where Docker logs are available.
 
 ---
 
-## 5. App UI vs Grafana
+## Datasource checklist
 
-| Surface | Role |
-|---------|------|
-| Bhudi **Devices** page (Recharts) | Operators inside the product |
-| **Grafana** | NOC, SLA, deep history, PromQL alerting |
+1. **Prometheus** → `http://prometheus:9090` → Save & test  
+2. **Loki** → `http://loki:3100` → Save & test  
+3. **Bhudi Postgres** (optional history) → Supabase host, SSL require  
+4. Confirm production scrape: Prometheus → Status → Targets → `bhudi-api-production` UP  
 
-Both ultimately depend on agents sending heartbeats with CPU/RAM/disk.
+API metrics endpoint:
+
+```bash
+curl -sS https://bhudi-online-production.up.railway.app/metrics | head
+```
+
+---
+
+## Files map
+
+```
+deploy/prometheus/prometheus.yml
+deploy/prometheus/rules/recording.yml
+deploy/prometheus/rules/alerts.yml
+deploy/prometheus/alertmanager.yml
+deploy/loki/loki-config.yml
+deploy/loki/promtail-config.yml
+deploy/grafana/docker-compose.yml
+deploy/grafana/provisioning/datasources/datasources.yml
+deploy/grafana/dashboards/*.json
+```
