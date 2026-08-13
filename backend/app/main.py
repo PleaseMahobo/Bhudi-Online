@@ -36,7 +36,6 @@ try:
 except Exception as e:
     print(f"[startup] Prometheus middleware skipped: {e}")
 
-# OpenTelemetry must instrument the app object before serving traffic
 try:
     from app.core.telemetry import setup_tracing
 
@@ -47,9 +46,9 @@ try:
 except Exception as e:
     print(f"[startup] OpenTelemetry skipped: {e}")
 
-# Optional schema router (ignore if service missing)
 try:
     from app.api.schema_routes import router as schema_router
+
     app.include_router(schema_router)
 except Exception as e:
     print(f"[startup] schema router skipped: {e}")
@@ -64,20 +63,24 @@ async def startup_event():
     print(f"[startup] bootstrap: {bootstrap_result}")
     try:
         from app.core.monitor import monitor_devices
+
         asyncio.create_task(monitor_devices())
     except Exception as e:
         print(f"[startup] monitor_devices skipped: {e}")
     import os
+
     if os.getenv("BHUDI_DISABLE_WORKERS", "0") == "1":
         print("[startup] workers disabled (BHUDI_DISABLE_WORKERS=1)")
     else:
         try:
             from app.workers.command_dispatcher import dispatcher
+
             dispatcher.start()
         except Exception as e:
             print(f"[startup] command_dispatcher skipped: {e}")
         try:
             from app.workers.executor_worker import executor_worker
+
             executor_worker.start()
         except Exception as e:
             print(f"[startup] executor_worker skipped: {e}")
@@ -88,11 +91,13 @@ async def shutdown_event():
     print("Bhudi RMM API shutting down...")
     try:
         from app.workers.command_dispatcher import dispatcher
+
         dispatcher.stop()
     except Exception:
         pass
     try:
         from app.workers.executor_worker import executor_worker
+
         executor_worker.stop()
     except Exception:
         pass
@@ -116,7 +121,9 @@ async def metrics():
         from app.core.prometheus_metrics import set_agents_online
 
         agents = getattr(agent_runtime, "_agents", {}) or {}
-        online = sum(1 for a in agents.values() if (a.get("status") or "").lower() == "online")
+        online = sum(
+            1 for a in agents.values() if (a.get("status") or "").lower() == "online"
+        )
         set_agents_online(online)
     except Exception:
         pass
@@ -136,7 +143,6 @@ async def metrics():
         )
 
 
-# Device heartbeat state (kept for backward compatibility)
 device_heartbeats: Dict[str, dict] = {}
 
 
@@ -192,4 +198,4 @@ async def websocket_device(websocket: WebSocket, device_id: str):
         manager.disconnect(websocket)
 
 
-Bhudi RMM API initialized = True  # noqa: E305 — import side-effect marker for workers
+print("Bhudi RMM API initialized")
