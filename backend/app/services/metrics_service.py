@@ -9,7 +9,6 @@ from decimal import Decimal
 from typing import Any
 
 _lock = threading.Lock()
-# agent_id -> deque of samples (newest last)
 _MEMORY: dict[str, deque[dict[str, Any]]] = defaultdict(lambda: deque(maxlen=720))
 _TABLE_READY = False
 
@@ -28,7 +27,7 @@ def record_heartbeat_metrics(
     ip_address: str | None = None,
     status: str | None = None,
 ) -> None:
-    """Record one sample. Always writes memory; best-effort DB."""
+    """Record one sample. Always writes memory; best-effort DB + Prometheus."""
     if not agent_id:
         return
     if cpu_percent is None and memory_percent is None and disk_percent is None:
@@ -47,6 +46,20 @@ def record_heartbeat_metrics(
     }
     with _lock:
         _MEMORY[agent_id].append(sample)
+
+    try:
+        from app.core.prometheus_metrics import record_heartbeat as prom_heartbeat
+
+        prom_heartbeat(
+            status=status or "online",
+            agent_id=agent_id,
+            hostname=hostname,
+            cpu=cpu_percent,
+            memory=memory_percent,
+            disk=disk_percent,
+        )
+    except Exception:
+        pass
 
     try:
         _persist_db(
@@ -86,7 +99,12 @@ def _ensure_table(conn) -> None:
         ON device_metrics (device_id, recorded_at DESC)
         """
     )
-    # Soft device row so FK-less installs still have an identity
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_device_metrics_recorded_brin
+        ON device_metrics USING BRIN (recorded_at)
+        """
+    )
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS devices (
@@ -132,7 +150,6 @@ def _persist_db(
     session = SessionLocal()
     try:
         _ensure_table(session.connection())
-        # Upsert lightweight device snapshot
         session.execute(
             text(
                 """
@@ -189,14 +206,12 @@ def get_metrics(
     minutes: int = 60,
     limit: int = 500,
 ) -> list[dict[str, Any]]:
-    """Return metrics newest-last for charts."""
     minutes = max(5, min(int(minutes or 60), 60 * 24 * 7))
     limit = max(10, min(int(limit or 500), 5000))
     cutoff = _utcnow() - timedelta(minutes=minutes)
 
     rows: list[dict[str, Any]] = []
 
-    # Memory buffer
     with _lock:
         for s in list(_MEMORY.get(device_id, [])):
             ts = s.get("ts")
@@ -213,7 +228,6 @@ def get_metrics(
                 }
             )
 
-    # DB history
     try:
         from sqlalchemy import text
 
@@ -241,10 +255,7 @@ def get_metrics(
                     {"device_id": device_uuid, "cutoff": cutoff, "limit": limit},
                 )
                 for cpu, ram, disk, recorded_at in result:
-                    if hasattr(recorded_at, "isoformat"):
-                        ra = recorded_at.isoformat()
-                    else:
-                        ra = str(recorded_at)
+                    ra = recorded_at.isoformat() if hasattr(recorded_at, "isoformat") else str(recorded_at)
                     rows.append(
                         {
                             "device_id": device_id,
@@ -260,13 +271,11 @@ def get_metrics(
     except Exception as exc:
         print(f"[metrics] db query failed: {exc}")
 
-    # Dedupe by recorded_at, sort ascending
     by_ts: dict[str, dict[str, Any]] = {}
     for r in rows:
         key = str(r.get("recorded_at") or "")
-        if not key:
-            continue
-        by_ts[key] = r
+        if key:
+            by_ts[key] = r
     ordered = [by_ts[k] for k in sorted(by_ts.keys())]
     if len(ordered) > limit:
         ordered = ordered[-limit:]
