@@ -1,0 +1,17 @@
+apiVersion: 1
+
+datasources:
+  - name: Bhudi Postgres
+    type: postgres
+    access: proxy
+    url: ${BHUDI_PG_HOST:db:5432}
+    user: ${BHUDI_PG_USER:postgres}
+    secureJsonData:
+      password: ${BHUDI_PG_PASSWORD:}
+    jsonData:
+      database: ${BHUDI_PG_DATABASE:postgres}
+      sslmode: ${BHUDI_PG_SSLMODE:require}
+      postgresVersion: 1500
+      timescaledb: false
+    isDefault: true
+    editable: true

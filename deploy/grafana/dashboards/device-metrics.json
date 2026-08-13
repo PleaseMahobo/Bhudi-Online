@@ -1,0 +1,92 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "datasource": { "type": "postgres", "uid": "${DS_BHUDI}" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 0 },
+      "id": 1,
+      "targets": [
+        {
+          "format": "time_series",
+          "rawSql": "SELECT\n  recorded_at AS time,\n  cpu_usage AS \"CPU %\",\n  ram_usage AS \"Memory %\",\n  disk_usage AS \"Disk %\"\nFROM device_metrics\nWHERE\n  recorded_at BETWEEN $__timeFrom() AND $__timeTo()\n  AND ($device_id = '' OR device_id::text = $device_id)\nORDER BY recorded_at",
+          "refId": "A"
+        }
+      ],
+      "title": "Device CPU / Memory / Disk",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "postgres", "uid": "${DS_BHUDI}" },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 10 },
+      "id": 2,
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT count(*) AS samples FROM device_metrics WHERE recorded_at > now() - interval '1 hour'",
+          "refId": "A"
+        }
+      ],
+      "title": "Samples (1h)",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "postgres", "uid": "${DS_BHUDI}" },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 10 },
+      "id": 3,
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT count(DISTINCT device_id) AS devices FROM device_metrics WHERE recorded_at > now() - interval '1 hour'",
+          "refId": "A"
+        }
+      ],
+      "title": "Active devices (1h)",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "postgres", "uid": "${DS_BHUDI}" },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 10 },
+      "id": 4,
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT round(avg(cpu_usage)::numeric, 1) AS avg_cpu FROM device_metrics WHERE recorded_at > now() - interval '1 hour'",
+          "refId": "A"
+        }
+      ],
+      "title": "Avg CPU % (1h)",
+      "type": "stat"
+    }
+  ],
+  "schemaVersion": 39,
+  "tags": ["bhudi", "metrics"],
+  "templating": {
+    "list": [
+      {
+        "name": "device_id",
+        "type": "textbox",
+        "label": "Device ID",
+        "current": { "text": "", "value": "" },
+        "options": [],
+        "query": ""
+      }
+    ]
+  },
+  "time": { "from": "now-6h", "to": "now" },
+  "title": "Bhudi Device Metrics",
+  "uid": "bhudi-device-metrics",
+  "version": 1
+}

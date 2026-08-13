@@ -1,0 +1,39 @@
+# Grafana + Prometheus for Bhudi device metrics
+# Usage:
+#   cd deploy/grafana
+#   docker compose up -d
+# Open http://localhost:3001 (admin / admin — change immediately)
+#
+# Point Grafana Postgres datasource at your Supabase/Railway DATABASE_URL
+# (use the pooler host, SSL required for Supabase).
+
+services:
+  grafana:
+    image: grafana/grafana:11.2.0
+    restart: unless-stopped
+    ports:
+      - "3001:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-changeme}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_SERVER_ROOT_URL: ${GRAFANA_ROOT_URL:-http://localhost:3001}
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./provisioning:/etc/grafana/provisioning:ro
+      - ./dashboards:/var/lib/grafana/dashboards:ro
+
+  # Optional local Prometheus if you later export /metrics from the API
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    restart: unless-stopped
+    profiles: ["prometheus"]
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+
+volumes:
+  grafana-data:
+  prometheus-data:

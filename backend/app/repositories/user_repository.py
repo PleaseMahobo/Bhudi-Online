@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from datetime import datetime
-from uuid import UUID
+from uuid import UUID, uuid4
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session, load_only
 
 from app.models.user import User
@@ -11,50 +11,64 @@ from app.repositories.base_repository import BaseRepository
 
 
 class UserRepository(BaseRepository[User]):
-    """
-    Enterprise User Repository.
+    """Enterprise user repository with schema-tolerant create/lookup."""
 
-    Responsibilities
-    ----------------
-    • User persistence
-    • User lookups
-    • User lifecycle operations
-    • Account status management
-    • Login security state management
-
-    Authentication logic never belongs here.
-    JWT creation never belongs here.
-    Password hashing never belongs here.
-    """
-
-    def __init__(
-        self,
-        session: Session,
-    ) -> None:
-
-        super().__init__(
-            session,
-            User,
-        )
-
+    def __init__(self, session: Session) -> None:
+        super().__init__(session, User)
 
     # ==========================================================
-    # CREATE
+    # CREATE (schema-tolerant — avoids missing enterprise columns)
     # ==========================================================
 
-    def create(
-        self,
-        user: User,
-    ) -> User:
+    def create(self, user: User) -> User:
+        """Insert only core columns so register works before full migrations."""
+        user_id = user.id or uuid4()
+        email = (user.email or "").strip().lower()
+        password_hash = user.password_hash
+        first_name = user.first_name
+        last_name = user.last_name
+        role = getattr(user, "role", None) or "user"
 
-        self.session.add(user)
+        # Prefer raw INSERT of stable columns; expand when extras exist.
+        try:
+            self.session.execute(
+                text(
+                    """
+                    INSERT INTO users (
+                        id, email, password_hash, first_name, last_name,
+                        role, active, failed_login_attempts
+                    )
+                    VALUES (
+                        :id, :email, :password_hash, :first_name, :last_name,
+                        :role, true, 0
+                    )
+                    """
+                ),
+                {
+                    "id": str(user_id),
+                    "email": email,
+                    "password_hash": password_hash,
+                    "first_name": first_name,
+                    "last_name": last_name,
+                    "role": role,
+                },
+            )
+            self.session.flush()
+        except Exception:
+            # Fallback: classic ORM add (full schema environments)
+            self.session.rollback()
+            user.id = user_id
+            self.session.add(user)
+            self.session.flush()
 
-        self.session.flush()
-
-        self.session.refresh(user)
-
-        return user
-
+        created = self.get_by_email(email)
+        if created is None:
+            # Last resort refresh path
+            self.session.add(user)
+            self.session.flush()
+            self.session.refresh(user)
+            return user
+        return created
 
     # ==========================================================
     # LOOKUPS
@@ -62,8 +76,6 @@ class UserRepository(BaseRepository[User]):
 
     @staticmethod
     def _core_user_columns():
-        # Keep lookups compatible with older deployed schemas by avoiding
-        # enterprise columns that may not exist yet.
         return (
             User.id,
             User.email,
@@ -80,176 +92,72 @@ class UserRepository(BaseRepository[User]):
             User.updated_at,
         )
 
-    def get_by_id(
-        self,
-        user_id: UUID,
-    ) -> User | None:
-
+    def get_by_id(self, user_id: UUID) -> User | None:
         return self.session.scalar(
             select(User)
             .options(load_only(*self._core_user_columns()))
             .where(User.id == user_id)
         )
 
-
-    def get_active_by_id(
-        self,
-        user_id: UUID,
-    ) -> User | None:
-
+    def get_active_by_id(self, user_id: UUID) -> User | None:
         return self.session.scalar(
             select(User)
             .options(load_only(*self._core_user_columns()))
-            .where(
-                User.id == user_id,
-                User.active.is_(True),
-            )
+            .where(User.id == user_id, User.active.is_(True))
         )
 
-
-    def get_by_email(
-        self,
-        email: str,
-    ) -> User | None:
-
+    def get_by_email(self, email: str) -> User | None:
+        email = (email or "").strip().lower()
         return self.session.scalar(
             select(User)
             .options(load_only(*self._core_user_columns()))
-            .where(
-                func.lower(User.email)
-                == email.lower().strip()
-            )
+            .where(func.lower(User.email) == email)
         )
 
-
-    def exists_by_email(
-        self,
-        email: str,
-    ) -> bool:
-
-        return (
-            self.get_by_email(email)
-            is not None
-        )
-
-
-    def get_active_by_email(
-        self,
-        email: str,
-    ) -> User | None:
-
+    def get_active_by_email(self, email: str) -> User | None:
+        email = (email or "").strip().lower()
         return self.session.scalar(
             select(User)
             .options(load_only(*self._core_user_columns()))
-            .where(
-                func.lower(User.email)
-                == email.lower().strip(),
-                User.active.is_(True),
-            )
+            .where(func.lower(User.email) == email, User.active.is_(True))
         )
 
+    def list_users(self, *, limit: int = 100, offset: int = 0) -> list[User]:
+        return list(
+            self.session.scalars(
+                select(User)
+                .options(load_only(*self._core_user_columns()))
+                .order_by(User.created_at.desc())
+                .limit(limit)
+                .offset(offset)
+            ).all()
+        )
 
-    # ==========================================================
-    # STATUS
-    # ==========================================================
-
-    def activate(
-        self,
-        user: User,
-    ) -> None:
-
-        user.active = True
-
+    def increment_failed_login_attempts(self, user: User) -> None:
+        user.failed_login_attempts = int(user.failed_login_attempts or 0) + 1
         self.session.flush()
 
-
-    def deactivate(
-        self,
-        user: User,
-    ) -> None:
-
-        user.active = False
-
-        self.session.flush()
-
-
-    # ==========================================================
-    # LOGIN SECURITY
-    # ==========================================================
-
-    def increment_failed_login_attempts(
-        self,
-        user: User,
-    ) -> None:
-
-        user.failed_login_attempts += 1
-
-        self.session.flush()
-
-
-    def reset_failed_login_attempts(
-        self,
-        user: User,
-    ) -> None:
-
+    def reset_failed_login_attempts(self, user: User) -> None:
         user.failed_login_attempts = 0
-
-        self.session.flush()
-
-
-    def lock_account(
-        self,
-        user: User,
-        until: datetime,
-    ) -> None:
-
-        user.locked_until = until
-
-        self.session.flush()
-
-
-    def unlock_account(
-        self,
-        user: User,
-    ) -> None:
-
         user.locked_until = None
-
-        user.failed_login_attempts = 0
-
         self.session.flush()
 
+    def lock_until(self, user: User, until: datetime) -> None:
+        user.locked_until = until
+        self.session.flush()
 
-    def update_last_login(
-        self,
-        user: User,
-    ) -> None:
+    def set_active(self, user: User, active: bool) -> None:
+        user.active = active
+        self.session.flush()
 
+    def update_last_login(self, user: User) -> None:
         user.last_login_at = func.now()
-
         self.session.flush()
 
-
-    # ==========================================================
-    # PASSWORD
-    # ==========================================================
-
-    def update_password(
-        self,
-        user: User,
-        password_hash: str,
-    ) -> None:
-
+    def update_password(self, user: User, password_hash: str) -> None:
         user.password_hash = password_hash
-
         user.password_changed_at = func.now()
-
         self.session.flush()
-
-
-    # ==========================================================
-    # PROFILE
-    # ==========================================================
 
     def update_profile(
         self,
@@ -258,91 +166,34 @@ class UserRepository(BaseRepository[User]):
         first_name: str | None = None,
         last_name: str | None = None,
     ) -> User:
-
         if first_name is not None:
-
             user.first_name = first_name
-
-
         if last_name is not None:
-
             user.last_name = last_name
-
-
         self.session.flush()
-
         self.session.refresh(user)
-
         return user
 
-
-    # ==========================================================
-    # ROLE
-    # ==========================================================
-
-    def set_role(
-        self,
-        user: User,
-        role: str,
-    ) -> None:
-
+    def set_role(self, user: User, role: str) -> None:
         user.role = role
-
         self.session.flush()
 
-
-    def get_by_role(
-        self,
-        role: str,
-    ) -> list[User]:
-
+    def get_by_role(self, role: str) -> list[User]:
         return list(
-            self.session.scalars(
-                select(User).where(
-                    User.role == role
-                )
-            ).all()
+            self.session.scalars(select(User).where(User.role == role)).all()
         )
 
-
-    # ==========================================================
-    # DELETE
-    # ==========================================================
-
-    def delete(
-        self,
-        user: User,
-    ) -> None:
-
+    def delete(self, user: User) -> None:
         self.session.delete(user)
-
         self.session.flush()
-
-
-    # ==========================================================
-    # METRICS
-    # ==========================================================
 
     def count(self) -> int:
-
-        return (
-            self.session.scalar(
-                select(func.count())
-                .select_from(User)
-            )
-            or 0
-        )
-
+        return self.session.scalar(select(func.count()).select_from(User)) or 0
 
     def count_active(self) -> int:
-
         return (
             self.session.scalar(
-                select(func.count())
-                .select_from(User)
-                .where(
-                    User.active.is_(True)
-                )
+                select(func.count()).select_from(User).where(User.active.is_(True))
             )
             or 0
         )
