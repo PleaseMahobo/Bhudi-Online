@@ -33,27 +33,13 @@ class AuthService:
         self.users = UserRepository(db)
         self.refresh_tokens = RefreshTokenRepository(db)
 
-    def register(
-        self,
-        *,
-        email: str,
-        password: str,
-        first_name: str | None = None,
-        last_name: str | None = None,
-    ) -> User:
+    def register(self, *, email: str, password: str, first_name: str | None = None, last_name: str | None = None) -> User:
         email = self._normalize_email(email)
         if self.users.get_by_email(email):
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
         self._validate_password(password)
         password_hash = hash_password(password)
-        # Trial tier: open signup, no MFA required yet
-        user = User(
-            email=email,
-            password_hash=password_hash,
-            first_name=first_name,
-            last_name=last_name,
-            role="trial",
-        )
+        user = User(email=email, password_hash=password_hash, first_name=first_name, last_name=last_name, role="trial")
         try:
             self.users.create(user)
             self.db.commit()
@@ -61,11 +47,8 @@ class AuthService:
             self.db.rollback()
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=(
-                    "Registration failed due to database schema. "
-                    "Run backend/scripts/ensure_auth_and_metrics_schema.sql "
-                    f"in Supabase SQL Editor. ({type(exc).__name__})"
-                ),
+                detail=("Registration failed due to database schema. Run backend/scripts/ensure_auth_and_metrics_schema.sql "
+                        f"in Supabase SQL Editor. ({type(exc).__name__})"),
             ) from exc
         return self.users.get_by_email(email) or user
 
@@ -94,63 +77,28 @@ class AuthService:
         self.db.commit()
         return user
 
-    def login(
-        self,
-        user: User,
-        *,
-        ip_address: str | None = None,
-        user_agent: str | None = None,
-        device_name: str | None = None,
-    ) -> dict[str, Any]:
+    def login(self, user: User, *, ip_address: str | None = None, user_agent: str | None = None, device_name: str | None = None) -> dict[str, Any]:
         session_id = uuid.uuid4()
         family = uuid.uuid4()
         access_token = create_access_token(subject=str(user.id))
-        refresh_token = create_refresh_token(
-            subject=str(user.id),
-            session_id=str(session_id),
-            token_family=str(family),
-            generation=1,
-        )
+        refresh_token = create_refresh_token(subject=str(user.id), session_id=str(session_id), token_family=str(family), generation=1)
         refresh_details = get_refresh_token_details(refresh_token)
         refresh_record = RefreshToken(
-            user_id=user.id,
-            token_hash=hash_refresh_token(refresh_token),
-            jwt_id=refresh_details["jti"],
-            session_id=session_id,
-            token_family=str(family),
-            generation=1,
-            expires_at=refresh_details["expires_at"],
-            ip_address=ip_address,
-            user_agent=user_agent,
-            device_name=device_name,
+            user_id=user.id, token_hash=hash_refresh_token(refresh_token), jwt_id=refresh_details["jti"],
+            session_id=session_id, token_family=str(family), generation=1, expires_at=refresh_details["expires_at"],
+            ip_address=ip_address, user_agent=user_agent, device_name=device_name,
         )
         self.refresh_tokens.create(refresh_record)
         self.db.commit()
         return {
-            "access_token": access_token,
-            "refresh_token": refresh_token,
-            "token_type": "bearer",
-            "user": {
-                "id": user.id,
-                "email": user.email,
-                "first_name": user.first_name,
-                "last_name": user.last_name,
-                "role": getattr(user, "role", None) or "trial",
-                "active": getattr(user, "active", True),
-                "mfa_enabled": bool(getattr(user, "mfa_enabled", False)),
-            },
-            "session_id": session_id,
-            "token_family": family,
+            "access_token": access_token, "refresh_token": refresh_token, "token_type": "bearer",
+            "user": {"id": user.id, "email": user.email, "first_name": user.first_name, "last_name": user.last_name,
+                     "role": getattr(user, "role", None) or "trial", "active": getattr(user, "active", True),
+                     "mfa_enabled": bool(getattr(user, "mfa_enabled", False))},
+            "session_id": session_id, "token_family": family,
         }
 
-    def refresh_access_token(
-        self,
-        refresh_token: str,
-        *,
-        ip_address: str | None = None,
-        user_agent: str | None = None,
-        device_name: str | None = None,
-    ) -> dict[str, Any]:
+    def refresh_access_token(self, refresh_token: str, *, ip_address: str | None = None, user_agent: str | None = None, device_name: str | None = None) -> dict[str, Any]:
         verify_refresh_token(refresh_token)
         token_hash = hash_refresh_token(refresh_token)
         current_token = self.refresh_tokens.get_by_token_hash(token_hash)
@@ -173,20 +121,14 @@ class AuthService:
 
         access_token = create_access_token(subject=str(current_token.user_id))
         new_refresh_token = create_refresh_token(
-            subject=str(current_token.user_id),
-            session_id=str(current_token.session_id),
-            token_family=str(current_token.token_family),
-            generation=int(getattr(current_token, "generation", 1) or 1) + 1,
+            subject=str(current_token.user_id), session_id=str(current_token.session_id),
+            token_family=str(current_token.token_family), generation=int(getattr(current_token, "generation", 1) or 1) + 1,
         )
         new_claims = get_refresh_token_details(new_refresh_token)
         replacement = RefreshToken(
-            user_id=current_token.user_id,
-            token_hash=hash_refresh_token(new_refresh_token),
-            jwt_id=new_claims["jti"],
-            session_id=current_token.session_id,
-            token_family=current_token.token_family,
-            generation=int(getattr(current_token, "generation", 1) or 1) + 1,
-            expires_at=new_claims["expires_at"],
+            user_id=current_token.user_id, token_hash=hash_refresh_token(new_refresh_token), jwt_id=new_claims["jti"],
+            session_id=current_token.session_id, token_family=current_token.token_family,
+            generation=int(getattr(current_token, "generation", 1) or 1) + 1, expires_at=new_claims["expires_at"],
             ip_address=getattr(current_token, "ip_address", None) or ip_address,
             user_agent=getattr(current_token, "user_agent", None) or user_agent,
             device_name=getattr(current_token, "device_name", None) or device_name,
@@ -202,17 +144,12 @@ class AuthService:
         except Exception:
             pass
         self.db.commit()
-        return {
-            "access_token": access_token,
-            "refresh_token": new_refresh_token,
-            "token_type": "bearer",
-            "session_id": str(current_token.session_id) if current_token.session_id else None,
-            "token_family": str(current_token.token_family) if current_token.token_family else None,
-        }
+        return {"access_token": access_token, "refresh_token": new_refresh_token, "token_type": "bearer",
+                "session_id": str(current_token.session_id) if current_token.session_id else None,
+                "token_family": str(current_token.token_family) if current_token.token_family else None}
 
     def logout(self, refresh_token: str) -> None:
-        token_hash = hash_refresh_token(refresh_token)
-        token = self.refresh_tokens.get_by_token_hash(token_hash)
+        token = self.refresh_tokens.get_by_token_hash(hash_refresh_token(refresh_token))
         if token is None:
             return
         if hasattr(token, "revoke"):
@@ -237,6 +174,54 @@ class AuthService:
         if user is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
         return user
+
+    def _is_password_reused(self, user: User, password: str) -> bool:
+        """Return True when the candidate matches a stored history value or hash.
+
+        Plaintext history is supported only as a legacy migration format; newly
+        written password history must contain password hashes.
+        """
+        for stored in getattr(user, "password_history", None) or []:
+            if not stored:
+                continue
+            if stored == password:
+                return True
+            try:
+                valid, _ = verify_and_upgrade_password(password, stored)
+                if valid:
+                    return True
+            except Exception:
+                continue
+        return False
+
+    @staticmethod
+    def _assess_login_risk(*, ip_address: str | None, user_agent: str | None, device_name: str | None,
+                           previous_login_at: datetime | None, current_login_at: datetime | None,
+                           password_history: list[str] | None = None) -> int:
+        score = 0
+        if not ip_address:
+            score += 15
+        if not user_agent:
+            score += 10
+        if not device_name:
+            score += 10
+        if previous_login_at and current_login_at:
+            previous = previous_login_at if previous_login_at.tzinfo else previous_login_at.replace(tzinfo=timezone.utc)
+            current = current_login_at if current_login_at.tzinfo else current_login_at.replace(tzinfo=timezone.utc)
+            if current < previous:
+                score += 30
+        if password_history:
+            score += min(10, len(password_history))
+        return max(0, min(100, score))
+
+    @staticmethod
+    def _is_session_anomalous(token: Any, *, ip_address: str | None, user_agent: str | None, device_name: str | None) -> bool:
+        for supplied, stored in ((ip_address, getattr(token, "ip_address", None)),
+                                 (user_agent, getattr(token, "user_agent", None)),
+                                 (device_name, getattr(token, "device_name", None))):
+            if supplied and stored and supplied != stored:
+                return True
+        return False
 
     @staticmethod
     def _normalize_email(email: str) -> str:

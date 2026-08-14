@@ -24,7 +24,7 @@ jobs:
           pip install pytest fastapi uvicorn sqlalchemy pydantic python-dotenv
       - name: Unit tests
         run: |
-          if [ -d tests ]; then pytest -q || true; fi
+          pytest -q
 
   docker:
     needs: test

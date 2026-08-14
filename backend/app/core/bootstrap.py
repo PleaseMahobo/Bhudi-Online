@@ -10,6 +10,8 @@ from sqlalchemy.orm import Session
 from app.database.session import SessionLocal, engine
 from app.models.audit_trail import AuditTrail
 from app.models.base import Base
+from app.models.alert_rule import AlertRule
+from app.models.escalation_policy import EscalationPolicy
 from app.models.device_management import (
     ConfigurationProfile,
     DeviceGroup,
@@ -65,6 +67,8 @@ def _bootstrap_metadata_for_engine() -> MetaData:
             MaintenanceWindow,
             PatchRing,
             PatchRollout,
+            EscalationPolicy,
+            AlertRule,
             MonitoringCheck,
             MonitoringAlert,
             Device,
@@ -94,22 +98,10 @@ def initialize_database() -> dict[str, Any]:
         seed_rbac(db)
         admin_email = os.getenv("BHUDI_ADMIN_EMAIL", "admin@example.com")
         admin_password = os.getenv("BHUDI_ADMIN_PASSWORD", "StrongPassword123!")
-
         existing = db.query(User).filter(User.email == admin_email).first()
-        force_reset = os.getenv("BHUDI_ADMIN_FORCE_RESET", "").strip().lower() in (
-            "1",
-            "true",
-            "yes",
-        )
+        force_reset = os.getenv("BHUDI_ADMIN_FORCE_RESET", "").strip().lower() in ("1", "true", "yes")
         if existing is None:
-            admin_user = User(
-                email=admin_email,
-                password_hash=hash_password(admin_password),
-                first_name="System",
-                last_name="Admin",
-                role="admin",
-                active=True,
-            )
+            admin_user = User(email=admin_email, password_hash=hash_password(admin_password), first_name="System", last_name="Admin", role="admin", active=True)
             db.add(admin_user)
             db.flush()
             db.refresh(admin_user)
@@ -124,20 +116,11 @@ def initialize_database() -> dict[str, Any]:
                 if hasattr(admin_user, "locked_until"):
                     admin_user.locked_until = None
                 print(f"[bootstrap] forced password reset for {admin_email}")
-
         admin_role = db.query(Role).filter(Role.name == "admin").first()
         if admin_role is not None:
-            existing_assignment = (
-                db.query(UserRole)
-                .filter(
-                    UserRole.user_id == admin_user.id,
-                    UserRole.role_id == admin_role.id,
-                )
-                .first()
-            )
+            existing_assignment = db.query(UserRole).filter(UserRole.user_id == admin_user.id, UserRole.role_id == admin_role.id).first()
             if existing_assignment is None:
                 db.add(UserRole(user_id=admin_user.id, role_id=admin_role.id))
-
         db.commit()
         return {"status": "initialized", "admin_email": admin_email}
     except SQLAlchemyError as exc:
