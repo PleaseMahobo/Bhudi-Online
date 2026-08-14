@@ -11,7 +11,7 @@ from app.database.session import SessionLocal, engine
 from app.models.audit_trail import AuditTrail
 from app.models.base import Base
 from app.models.alert_rule import AlertRule
-from app.models.escalation_policy import EscalationPolicy
+from app.models.asset_management import Asset, Contract, Vendor
 from app.models.device_management import (
     ConfigurationProfile,
     DeviceGroup,
@@ -29,6 +29,7 @@ from app.models.agent import Agent
 from app.models.agent_command import AgentCommand
 from app.models.automation_log import AutomationLog
 from app.models.device import Device
+from app.models.escalation_policy import EscalationPolicy
 from app.models.incident import Incident
 from app.models.response_action import ResponseAction
 from app.models.script import Script
@@ -41,6 +42,15 @@ from app.models.secret_entry import SecretEntry
 from app.models.tenant import Tenant
 from app.models.user import User
 from app.models.user_role import UserRole
+from app.models.msp import Organization, Technician
+from app.models.itsm import ServiceTicket, TicketAssetLink, TicketWorkNote
+from app.models.itsm_extended import (
+    ITSMSLAPolicy,
+    ITSMAssignmentGroup,
+    ITSMTicketHistory,
+    ITSMTicketAttachment,
+)
+from app.models.itsm_operational import ITSMTicketAssignment, ITSMSLAEscalation
 from app.db.seeds.rbac_seed import seed_rbac
 from app.core.security import hash_password
 
@@ -80,6 +90,22 @@ def _bootstrap_metadata_for_engine() -> MetaData:
             ResponseAction,
             Script,
             ScriptTask,
+            # ITSM core and operational tables.
+            ServiceTicket,
+            TicketAssetLink,
+            TicketWorkNote,
+            ITSMSLAPolicy,
+            ITSMAssignmentGroup,
+            ITSMTicketHistory,
+            ITSMTicketAttachment,
+            ITSMTicketAssignment,
+            ITSMSLAEscalation,
+            # Direct foreign-key dependencies of the ITSM models.
+            Asset,
+            Contract,
+            Vendor,
+            Organization,
+            Technician,
         ]:
             model.__table__.to_metadata(metadata)
         return metadata

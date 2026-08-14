@@ -1,26 +1,17 @@
 """API v1 router — Phase A+B: guaranteed runtime routes + best-effort enterprise routes."""
 from fastapi import APIRouter
-
 api_router = APIRouter()
-
 from app.api.v1.endpoints import health, devices, agent_runtime
-
 api_router.include_router(health.router, prefix="/health", tags=["health"])
 api_router.include_router(devices.router, prefix="/devices", tags=["devices"])
 api_router.include_router(agent_runtime.router, tags=["agent-runtime"])
 
-
 def _safe_include(mod_path: str, attr: str = "router", **kwargs):
     try:
         import importlib
-
-        mod = importlib.import_module(mod_path)
-        router = getattr(mod, attr)
-        api_router.include_router(router, **kwargs)
-        print(f"[router] included {mod_path}")
+        mod = importlib.import_module(mod_path); router = getattr(mod, attr); api_router.include_router(router, **kwargs); print(f"[router] included {mod_path}")
     except Exception as e:
         print(f"[router] skipped {mod_path}: {e}")
-
 
 _safe_include("app.api.v1.endpoints.agents", tags=["agents"])
 _safe_include("app.api.v1.endpoints.auth", tags=["auth"])
@@ -43,7 +34,9 @@ _safe_include("app.api.v1.endpoints.device_metrics", tags=["metrics"])
 _safe_include("app.api.v1.endpoints.telemetry", tags=["telemetry"])
 _safe_include("app.api.v1.endpoints.alert_engine", tags=["Alert Engine"])
 _safe_include("app.api.v1.endpoints.asset_management", tags=["Asset Management"])
-_safe_include("app.api.v1.endpoints.itsm", tags=["ITSM"])
+_safe_include("app.api.v1.endpoints.itsm_secure", tags=["ITSM"])
+_safe_include("app.api.v1.endpoints.itsm_extended", tags=["ITSM Extended"])
+_safe_include("app.api.v1.endpoints.itsm_operational", tags=["ITSM Operations"])
 _safe_include("app.api.v1.endpoints.software_deployment", tags=["Software Deployment"])
 _safe_include("app.api.v1.endpoints.endpoint_security", tags=["Endpoint Security"])
 _safe_include("app.api.v1.endpoints.backup_integration", tags=["Backup Integration"])
