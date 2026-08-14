@@ -10,6 +10,7 @@ from app.core.dependencies import get_current_user
 from app.database.session import get_db
 from app.models.itsm import ServiceTicket
 from app.models.itsm_extended import ITSMTicketAttachment
+from app.models.itsm_operational import ITSMSLAEscalation
 from app.schemas.itsm_operational import AttachmentUploadResponse, SLAEscalationResponse, TicketAssignmentRequest, TicketAssignmentResponse
 from app.services.itsm_incident_sync_service import ITSMIncidentSyncService
 from app.services.itsm_operational_service import ITSMOperationalService
@@ -47,11 +48,10 @@ def list_assignments(ticket_id: UUID, db: Session = Depends(get_db), user=Depend
 @router.get("/tickets/{ticket_id}/sla-escalations", response_model=list[SLAEscalationResponse])
 def list_sla_escalations(ticket_id: UUID, db: Session = Depends(get_db), user=Depends(get_current_user)):
     ticket_or_404(db, ticket_id, user)
-    from app.models.itsm_operational import ITSMSLAEscalation
-    q = db.query(ITSMSLAEscalation).filter(ITSMSLAEscalation.ticket_id == ticket_id)
+    query = db.query(ITSMSLAEscalation).filter(ITSMSLAEscalation.ticket_id == ticket_id)
     if tenant_id(user) is not None:
-        q = q.filter(ITSMSLAEscalation.tenant_id == tenant_id(user))
-    return q.order_by(ITSMSLAEscalation.created_at.desc()).all()
+        query = query.filter(ITSMSLAEscalation.tenant_id == tenant_id(user))
+    return query.order_by(ITSMSLAEscalation.created_at.desc()).all()
 
 
 @router.post("/sla/escalate", response_model=list[SLAEscalationResponse])
@@ -66,17 +66,19 @@ async def upload_attachment(ticket_id: UUID, file: UploadFile = File(...), db: S
     try:
         row = ITSMOperationalService(db).save_attachment(ticket, file.filename or "attachment", file.content_type, data, getattr(user, "email", None) or str(user.id))
     except ValueError as exc:
-        raise HTTPException(413, str(exc)) from exc
+        message = str(exc)
+        code = status.HTTP_413_REQUEST_ENTITY_TOO_LARGE if message.startswith("Attachment exceeds") else status.HTTP_400_BAD_REQUEST
+        raise HTTPException(code, message) from exc
     return AttachmentUploadResponse.model_validate({"id": row.id, "ticket_id": row.ticket_id, "tenant_id": row.tenant_id, "filename": row.filename, "content_type": row.content_type, "size_bytes": row.size_bytes, "uploaded_by": row.uploaded_by, "created_at": row.created_at, "download_url": f"/api/v1/itsm/tickets/{ticket.id}/attachment-files/{row.id}"})
 
 
 @router.get("/tickets/{ticket_id}/attachment-files", response_model=list[AttachmentUploadResponse])
 def list_attachments(ticket_id: UUID, db: Session = Depends(get_db), user=Depends(get_current_user)):
     ticket = ticket_or_404(db, ticket_id, user)
-    q = db.query(ITSMTicketAttachment).filter(ITSMTicketAttachment.ticket_id == ticket.id)
+    query = db.query(ITSMTicketAttachment).filter(ITSMTicketAttachment.ticket_id == ticket.id)
     if tenant_id(user) is not None:
-        q = q.filter(ITSMTicketAttachment.tenant_id == tenant_id(user))
-    rows = q.order_by(ITSMTicketAttachment.created_at.asc()).all()
+        query = query.filter(ITSMTicketAttachment.tenant_id == tenant_id(user))
+    rows = query.order_by(ITSMTicketAttachment.created_at.asc()).all()
     return [AttachmentUploadResponse.model_validate({"id": r.id, "ticket_id": r.ticket_id, "tenant_id": r.tenant_id, "filename": r.filename, "content_type": r.content_type, "size_bytes": r.size_bytes, "uploaded_by": r.uploaded_by, "created_at": r.created_at, "download_url": f"/api/v1/itsm/tickets/{ticket_id}/attachment-files/{r.id}"}) for r in rows]
 
 
