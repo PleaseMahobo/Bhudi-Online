@@ -16,20 +16,15 @@ class UserRepository(BaseRepository[User]):
     def __init__(self, session: Session) -> None:
         super().__init__(session, User)
 
-    # ==========================================================
-    # CREATE (schema-tolerant — avoids missing enterprise columns)
-    # ==========================================================
-
     def create(self, user: User) -> User:
-        """Insert only core columns so register works before full migrations."""
+        """Insert core columns so trial register works before full migrations."""
         user_id = user.id or uuid4()
         email = (user.email or "").strip().lower()
         password_hash = user.password_hash
         first_name = user.first_name
         last_name = user.last_name
-        role = getattr(user, "role", None) or "user"
+        role = getattr(user, "role", None) or "trial"
 
-        # Prefer raw INSERT of stable columns; expand when extras exist.
         try:
             self.session.execute(
                 text(
@@ -55,7 +50,6 @@ class UserRepository(BaseRepository[User]):
             )
             self.session.flush()
         except Exception:
-            # Fallback: classic ORM add (full schema environments)
             self.session.rollback()
             user.id = user_id
             self.session.add(user)
@@ -63,16 +57,11 @@ class UserRepository(BaseRepository[User]):
 
         created = self.get_by_email(email)
         if created is None:
-            # Last resort refresh path
             self.session.add(user)
             self.session.flush()
             self.session.refresh(user)
             return user
         return created
-
-    # ==========================================================
-    # LOOKUPS
-    # ==========================================================
 
     @staticmethod
     def _core_user_columns():
@@ -94,9 +83,7 @@ class UserRepository(BaseRepository[User]):
 
     def get_by_id(self, user_id: UUID) -> User | None:
         return self.session.scalar(
-            select(User)
-            .options(load_only(*self._core_user_columns()))
-            .where(User.id == user_id)
+            select(User).options(load_only(*self._core_user_columns())).where(User.id == user_id)
         )
 
     def get_active_by_id(self, user_id: UUID) -> User | None:
@@ -179,9 +166,7 @@ class UserRepository(BaseRepository[User]):
         self.session.flush()
 
     def get_by_role(self, role: str) -> list[User]:
-        return list(
-            self.session.scalars(select(User).where(User.role == role)).all()
-        )
+        return list(self.session.scalars(select(User).where(User.role == role)).all())
 
     def delete(self, user: User) -> None:
         self.session.delete(user)
