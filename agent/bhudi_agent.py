@@ -41,8 +41,10 @@ except ImportError:
     print("Install requests: pip install requests")
     sys.exit(1)
 
-CONFIG_PATH = Path(os.getenv("BHUDI_CONFIG_PATH", str(Path(__file__).with_name("agent_config.json")))
-IDENTITY_PATH = Path(os.getenv("BHUDI_IDENTITY_PATH", str(Path(__file__).with_name("agent_identity.json")))
+DEFAULT_CONFIG_PATH = Path(__file__).with_name("agent_config.json")
+DEFAULT_IDENTITY_PATH = Path(__file__).with_name("agent_identity.json")
+CONFIG_PATH = Path(os.getenv("BHUDI_CONFIG_PATH") or DEFAULT_CONFIG_PATH)
+IDENTITY_PATH = Path(os.getenv("BHUDI_IDENTITY_PATH") or DEFAULT_IDENTITY_PATH)
 
 
 def load_json(path: Path) -> dict:
