@@ -77,11 +77,19 @@ class RemoteSessionManager:
 
     async def connect_dashboard(self, session_id: UUID | str, websocket: WebSocket) -> RemoteSessionState | None:
         state = self.get_session(session_id)
+        await websocket.accept()
         if state is None:
+            print(f"[remote-session] dashboard connect: unknown session_id={session_id}")
+            try:
+                await websocket.send_json({
+                    "type": "error",
+                    "message": "Session not found (expired, or different API instance). Start remote again.",
+                })
+            except Exception:
+                pass
             await websocket.close(code=1008)
             return None
 
-        await websocket.accept()
         state.dashboard_connections.append(websocket)
         await websocket.send_json({
             "type": "session_state",
@@ -92,11 +100,22 @@ class RemoteSessionManager:
 
     async def connect_agent(self, session_id: UUID | str, agent_id: UUID | str, websocket: WebSocket) -> RemoteSessionState | None:
         state = self.get_session(session_id)
+        await websocket.accept()
         if state is None or state.agent_id != str(agent_id):
+            print(
+                f"[remote-session] agent connect rejected session={session_id} "
+                f"agent={agent_id} known={state.agent_id if state else None}"
+            )
+            try:
+                await websocket.send_json({
+                    "type": "error",
+                    "message": "Session not found or agent mismatch. Re-enroll agent and retry.",
+                })
+            except Exception:
+                pass
             await websocket.close(code=1008)
             return None
 
-        await websocket.accept()
         if state.agent_connection is not None:
             try:
                 await state.agent_connection.close(code=1012)
