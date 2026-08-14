@@ -9,6 +9,9 @@ from app.api.v1.endpoints import agent_runtime
 def _build_client() -> TestClient:
     app = FastAPI()
     app.include_router(agent_runtime.router)
+    # Command execution is MFA-protected in production. This unit test isolates
+    # platform-profile generation, so replace only the auth dependency.
+    app.dependency_overrides[agent_runtime.require_mfa_for_actions] = lambda: object()
     return TestClient(app)
 
 
@@ -26,6 +29,7 @@ def test_linux_and_macos_commands_use_platform_specific_defaults() -> None:
             f"/runtime/agents/{agent_id}/commands",
             json={"command": "install package", "shell": True},
         )
+        assert queue.status_code == 200
         command_id = queue.json()["command_id"]
 
         details = client.get(f"/runtime/agents/{agent_id}/commands/{command_id}")
