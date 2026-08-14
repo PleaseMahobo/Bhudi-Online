@@ -102,7 +102,6 @@ class PasswordResetService:
             body_html=body_html,
         )
         if not result.ok:
-            # Do not leave a live reset token when email delivery fails.
             token.used_at = datetime.now(timezone.utc)
             self.db.commit()
             raise RuntimeError("Password reset email could not be delivered")
@@ -147,11 +146,13 @@ class PasswordResetService:
         user.password_history = history[:5]
         user.password_changed_at = datetime.now(timezone.utc)
 
-        # Password reset invalidates every active login session.
-        self.auth.refresh_tokens.revoke_all_for_user(
-            user.id,
-            reason="password_reset",
-        )
+        try:
+            self.auth.refresh_tokens.revoke_all_for_user(
+                user.id,
+                reason="password_reset",
+            )
+        except Exception as exc:
+            print(f"[password-reset] revoke sessions failed (continuing): {exc}")
 
         row.used_at = datetime.now(timezone.utc)
         self.db.commit()
