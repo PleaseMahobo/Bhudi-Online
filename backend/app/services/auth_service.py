@@ -4,8 +4,6 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from ipaddress import ip_address as ipaddress_ip
-
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
@@ -20,7 +18,6 @@ from app.core.security import (
     hash_refresh_token,
     validate_password,
     verify_and_upgrade_password,
-    verify_password,
 )
 from app.models.refresh_token import RefreshToken
 from app.models.user import User
@@ -29,7 +26,7 @@ from app.repositories.user_repository import UserRepository
 
 
 class AuthService:
-    """Enterprise authentication: register, login, refresh rotation, logout."""
+    """Enterprise authentication: register (trial), login, refresh, logout."""
 
     def __init__(self, db: Session) -> None:
         self.db = db
@@ -49,11 +46,13 @@ class AuthService:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
         self._validate_password(password)
         password_hash = hash_password(password)
+        # Trial tier: open signup, no MFA required yet
         user = User(
             email=email,
             password_hash=password_hash,
             first_name=first_name,
             last_name=last_name,
+            role="trial",
         )
         try:
             self.users.create(user)
@@ -136,8 +135,9 @@ class AuthService:
                 "email": user.email,
                 "first_name": user.first_name,
                 "last_name": user.last_name,
-                "role": user.role,
-                "active": user.active,
+                "role": getattr(user, "role", None) or "trial",
+                "active": getattr(user, "active", True),
+                "mfa_enabled": bool(getattr(user, "mfa_enabled", False)),
             },
             "session_id": session_id,
             "token_family": family,
@@ -270,22 +270,6 @@ class AuthService:
         user.failed_login_attempts = int(getattr(user, "failed_login_attempts", 0) or 0) + 1
         if user.failed_login_attempts >= max_attempts:
             user.locked_until = datetime.now(timezone.utc) + timedelta(minutes=lockout_minutes)
-
-    def _is_password_reused(self, user: User, password: str) -> bool:
-        """True if password matches current hash or any entry in password_history."""
-        current = getattr(user, "password_hash", None) or ""
-        if current and verify_password(password, current):
-            return True
-        history = list(getattr(user, "password_history", None) or [])
-        for old_hash in history:
-            if not old_hash:
-                continue
-            try:
-                if verify_password(password, old_hash):
-                    return True
-            except Exception:
-                continue
-        return False
 
 
 __all__ = ["AuthService"]
