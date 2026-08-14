@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import secrets
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from uuid import UUID
 
+from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload
 
 from app.models.asset_management import Asset, AssetLifecycleEvent
@@ -26,6 +27,10 @@ PREFIX_MAP = {
     "maintenance": "MNT",
 }
 
+VALID_STATUSES = {"new", "open", "in_progress", "on_hold", "resolved", "closed", "cancelled"}
+VALID_TYPES = set(PREFIX_MAP)
+VALID_PRIORITIES = {"low", "medium", "high", "critical"}
+
 
 class ITSMService:
     def __init__(self, db: Session) -> None:
@@ -37,8 +42,28 @@ class ITSMService:
         day = datetime.now(timezone.utc).strftime("%Y%m%d")
         return f"{prefix}-{day}-{secrets.token_hex(2).upper()}"
 
+    @staticmethod
+    def _validate_ticket_fields(ticket_type: str, status: str, priority: str) -> None:
+        if ticket_type not in VALID_TYPES:
+            raise ValueError(f"Invalid ticket type: {ticket_type}")
+        if status not in VALID_STATUSES:
+            raise ValueError(f"Invalid ticket status: {status}")
+        if priority not in VALID_PRIORITIES:
+            raise ValueError(f"Invalid ticket priority: {priority}")
+
+    @staticmethod
+    def _refresh_sla(ticket: ServiceTicket) -> ServiceTicket:
+        """Calculate SLA breach state from persisted SLA targets without a worker."""
+        if ticket.sla_resolve_minutes is None or ticket.sla_breached:
+            return ticket
+        if ticket.status in {"resolved", "closed", "cancelled"}:
+            return ticket
+        elapsed = datetime.now(timezone.utc) - ticket.created_at
+        ticket.sla_breached = elapsed.total_seconds() >= ticket.sla_resolve_minutes * 60
+        return ticket
+
     def _enrich_links(self, ticket: ServiceTicket) -> ServiceTicket:
-        # Load asset summaries onto link objects for response shaping
+        self._refresh_sla(ticket)
         for link in ticket.asset_links or []:
             if link.asset is not None:
                 setattr(link, "asset_name", link.asset.name)
@@ -72,6 +97,7 @@ class ITSMService:
     # ---------- CRUD ----------
 
     def create_ticket(self, payload: ServiceTicketCreate) -> ServiceTicket:
+        self._validate_ticket_fields(payload.ticket_type, payload.status, payload.priority)
         data = payload.model_dump(exclude={"asset_ids", "asset_links"})
         ticket = ServiceTicket(
             **data,
@@ -80,15 +106,12 @@ class ITSMService:
         self.db.add(ticket)
         self.db.flush()
 
-        # Link assets from asset_ids (primary) and explicit links
         seen: set[UUID] = set()
         for aid in payload.asset_ids:
             if aid in seen:
                 continue
             seen.add(aid)
-            self.db.add(
-                TicketAssetLink(ticket_id=ticket.id, asset_id=aid, role="primary")
-            )
+            self.db.add(TicketAssetLink(ticket_id=ticket.id, asset_id=aid, role="primary"))
             self._log_asset_lifecycle(
                 aid,
                 "itsm_linked",
@@ -123,7 +146,6 @@ class ITSMService:
                 is_public=False,
             )
         )
-
         self.db.commit()
         return self.get_ticket(ticket.id)  # type: ignore[return-value]
 
@@ -135,74 +157,105 @@ class ITSMService:
         asset_id: UUID | None = None,
         device_id: UUID | None = None,
         priority: str | None = None,
+        q: str | None = None,
+        tenant_id: UUID | None = None,
     ) -> list[ServiceTicket]:
-        q = self.db.query(ServiceTicket).options(
+        query = self.db.query(ServiceTicket).options(
             joinedload(ServiceTicket.asset_links).joinedload(TicketAssetLink.asset)
         )
+        if tenant_id is not None:
+            query = query.filter(ServiceTicket.tenant_id == tenant_id)
         if status:
-            q = q.filter(ServiceTicket.status == status)
+            query = query.filter(ServiceTicket.status == status)
         if ticket_type:
-            q = q.filter(ServiceTicket.ticket_type == ticket_type)
+            query = query.filter(ServiceTicket.ticket_type == ticket_type)
         if device_id:
-            q = q.filter(ServiceTicket.device_id == device_id)
+            query = query.filter(ServiceTicket.device_id == device_id)
         if priority:
-            q = q.filter(ServiceTicket.priority == priority)
+            query = query.filter(ServiceTicket.priority == priority)
         if asset_id:
-            q = q.join(TicketAssetLink).filter(TicketAssetLink.asset_id == asset_id)
-        tickets = q.order_by(ServiceTicket.created_at.desc()).all()
+            query = query.join(TicketAssetLink).filter(TicketAssetLink.asset_id == asset_id)
+        if q and q.strip():
+            term = f"%{q.strip()}%"
+            query = query.filter(
+                or_(
+                    ServiceTicket.number.ilike(term),
+                    ServiceTicket.title.ilike(term),
+                    ServiceTicket.description.ilike(term),
+                    ServiceTicket.requester.ilike(term),
+                    ServiceTicket.assignee.ilike(term),
+                )
+            )
+        tickets = query.order_by(ServiceTicket.created_at.desc()).all()
         return [self._enrich_links(t) for t in tickets]
 
-    def get_ticket(self, ticket_id: UUID) -> ServiceTicket | None:
-        ticket = (
+    def get_ticket(self, ticket_id: UUID, tenant_id: UUID | None = None) -> ServiceTicket | None:
+        query = (
             self.db.query(ServiceTicket)
             .options(
                 joinedload(ServiceTicket.asset_links).joinedload(TicketAssetLink.asset),
                 joinedload(ServiceTicket.work_notes),
             )
             .filter(ServiceTicket.id == ticket_id)
-            .first()
         )
+        if tenant_id is not None:
+            query = query.filter(ServiceTicket.tenant_id == tenant_id)
+        ticket = query.first()
         if ticket:
             self._enrich_links(ticket)
         return ticket
 
-    def get_ticket_by_number(self, number: str) -> ServiceTicket | None:
-        ticket = (
+    def get_ticket_by_number(self, number: str, tenant_id: UUID | None = None) -> ServiceTicket | None:
+        query = (
             self.db.query(ServiceTicket)
-            .options(
-                joinedload(ServiceTicket.asset_links).joinedload(TicketAssetLink.asset)
-            )
+            .options(joinedload(ServiceTicket.asset_links).joinedload(TicketAssetLink.asset))
             .filter(ServiceTicket.number == number)
-            .first()
         )
+        if tenant_id is not None:
+            query = query.filter(ServiceTicket.tenant_id == tenant_id)
+        ticket = query.first()
         if ticket:
             self._enrich_links(ticket)
         return ticket
 
     def update_ticket(
-        self, ticket_id: UUID, payload: ServiceTicketUpdate
+        self, ticket_id: UUID, payload: ServiceTicketUpdate, tenant_id: UUID | None = None
     ) -> ServiceTicket | None:
-        ticket = self.db.get(ServiceTicket, ticket_id)
+        ticket = self.get_ticket(ticket_id, tenant_id=tenant_id)
         if not ticket:
             return None
         data = payload.model_dump(exclude_unset=True)
+        new_type = data.get("ticket_type", ticket.ticket_type)
+        new_status = data.get("status", ticket.status)
+        new_priority = data.get("priority", ticket.priority)
+        self._validate_ticket_fields(new_type, new_status, new_priority)
         old_status = ticket.status
         for k, v in data.items():
             setattr(ticket, k, v)
-
         if "status" in data and data["status"] != old_status:
             self._apply_status_side_effects(ticket, old_status, data["status"], actor=None)
-
+            self.db.add(
+                TicketWorkNote(
+                    ticket_id=ticket.id,
+                    author="system",
+                    body=f"Status changed {old_status} → {data['status']}",
+                    is_public=False,
+                )
+            )
         self.db.commit()
-        return self.get_ticket(ticket_id)
+        return self.get_ticket(ticket_id, tenant_id=tenant_id)
 
     def set_status(
-        self, ticket_id: UUID, payload: TicketStatusUpdate
+        self, ticket_id: UUID, payload: TicketStatusUpdate, tenant_id: UUID | None = None
     ) -> ServiceTicket | None:
-        ticket = self.db.get(ServiceTicket, ticket_id)
+        if payload.status not in VALID_STATUSES:
+            raise ValueError(f"Invalid ticket status: {payload.status}")
+        ticket = self.get_ticket(ticket_id, tenant_id=tenant_id)
         if not ticket:
             return None
         old = ticket.status
+        if old == payload.status and payload.resolution is None:
+            return ticket
         ticket.status = payload.status
         if payload.resolution is not None:
             ticket.resolution = payload.resolution
@@ -216,7 +269,7 @@ class ITSMService:
             )
         )
         self.db.commit()
-        return self.get_ticket(ticket_id)
+        return self.get_ticket(ticket_id, tenant_id=tenant_id)
 
     def _apply_status_side_effects(
         self,
@@ -232,18 +285,8 @@ class ITSMService:
             ticket.closed_at = now
             if ticket.resolved_at is None:
                 ticket.resolved_at = now
-
-        # When repair/maintenance ticket closes, return linked assets from in_repair → deployed/in_stock
-        if new_status in ("resolved", "closed") and ticket.ticket_type in (
-            "maintenance",
-            "incident",
-            "change",
-        ):
-            links = (
-                self.db.query(TicketAssetLink)
-                .filter(TicketAssetLink.ticket_id == ticket.id)
-                .all()
-            )
+        if new_status in ("resolved", "closed") and ticket.ticket_type in ("maintenance", "incident", "change"):
+            links = self.db.query(TicketAssetLink).filter(TicketAssetLink.ticket_id == ticket.id).all()
             for link in links:
                 asset = self.db.get(Asset, link.asset_id)
                 if asset and asset.status == "in_repair":
@@ -259,8 +302,8 @@ class ITSMService:
                         metadata={"ticket_number": ticket.number},
                     )
 
-    def delete_ticket(self, ticket_id: UUID) -> bool:
-        ticket = self.db.get(ServiceTicket, ticket_id)
+    def delete_ticket(self, ticket_id: UUID, tenant_id: UUID | None = None) -> bool:
+        ticket = self.get_ticket(ticket_id, tenant_id=tenant_id)
         if not ticket:
             return False
         self.db.delete(ticket)
@@ -270,16 +313,14 @@ class ITSMService:
     # ---------- Asset integration ----------
 
     def create_ticket_for_asset(
-        self, asset_id: UUID, payload: AssetTicketCreateRequest
+        self, asset_id: UUID, payload: AssetTicketCreateRequest, tenant_id: UUID | None = None
     ) -> ServiceTicket:
         asset = self.db.get(Asset, asset_id)
-        if not asset:
+        if not asset or (tenant_id is not None and asset.tenant_id != tenant_id):
             raise ValueError("Asset not found")
-
         create = ServiceTicketCreate(
             title=payload.title,
-            description=payload.description
-            or f"Asset: {asset.name} ({asset.asset_tag or asset.serial_number or asset.id})",
+            description=payload.description or f"Asset: {asset.name} ({asset.asset_tag or asset.serial_number or asset.id})",
             ticket_type=payload.ticket_type,
             priority=payload.priority,
             category=payload.category or "asset",
@@ -292,7 +333,6 @@ class ITSMService:
             asset_ids=[asset.id],
         )
         ticket = self.create_ticket(create)
-
         if payload.set_asset_in_repair and asset.status != "in_repair":
             prev = asset.status
             asset.status = "in_repair"
@@ -306,39 +346,27 @@ class ITSMService:
                 metadata={"ticket_number": ticket.number},
             )
             self.db.commit()
-
-        return self.get_ticket(ticket.id)  # type: ignore[return-value]
+        return self.get_ticket(ticket.id, tenant_id=tenant_id)  # type: ignore[return-value]
 
     def link_asset(
-        self, ticket_id: UUID, link: TicketAssetLinkCreate
+        self, ticket_id: UUID, link: TicketAssetLinkCreate, tenant_id: UUID | None = None
     ) -> TicketAssetLink:
-        ticket = self.db.get(ServiceTicket, ticket_id)
+        ticket = self.get_ticket(ticket_id, tenant_id=tenant_id)
         if not ticket:
             raise ValueError("Ticket not found")
         asset = self.db.get(Asset, link.asset_id)
-        if not asset:
+        if not asset or (tenant_id is not None and asset.tenant_id != tenant_id):
             raise ValueError("Asset not found")
-
-        existing = (
-            self.db.query(TicketAssetLink)
-            .filter(
-                TicketAssetLink.ticket_id == ticket_id,
-                TicketAssetLink.asset_id == link.asset_id,
-            )
-            .first()
-        )
+        existing = self.db.query(TicketAssetLink).filter(
+            TicketAssetLink.ticket_id == ticket_id,
+            TicketAssetLink.asset_id == link.asset_id,
+        ).first()
         if existing:
             existing.role = link.role
             existing.notes = link.notes
             self.db.commit()
             return existing
-
-        row = TicketAssetLink(
-            ticket_id=ticket_id,
-            asset_id=link.asset_id,
-            role=link.role,
-            notes=link.notes,
-        )
+        row = TicketAssetLink(ticket_id=ticket_id, asset_id=link.asset_id, role=link.role, notes=link.notes)
         self.db.add(row)
         self._log_asset_lifecycle(
             link.asset_id,
@@ -350,36 +378,31 @@ class ITSMService:
         self.db.refresh(row)
         return row
 
-    def unlink_asset(self, ticket_id: UUID, asset_id: UUID) -> bool:
-        row = (
-            self.db.query(TicketAssetLink)
-            .filter(
-                TicketAssetLink.ticket_id == ticket_id,
-                TicketAssetLink.asset_id == asset_id,
-            )
-            .first()
-        )
+    def unlink_asset(self, ticket_id: UUID, asset_id: UUID, tenant_id: UUID | None = None) -> bool:
+        if not self.get_ticket(ticket_id, tenant_id=tenant_id):
+            return False
+        row = self.db.query(TicketAssetLink).filter(
+            TicketAssetLink.ticket_id == ticket_id,
+            TicketAssetLink.asset_id == asset_id,
+        ).first()
         if not row:
             return False
         self.db.delete(row)
         self.db.commit()
         return True
 
-    def add_work_note(self, ticket_id: UUID, payload: WorkNoteCreate) -> TicketWorkNote:
-        if not self.db.get(ServiceTicket, ticket_id):
+    def add_work_note(self, ticket_id: UUID, payload: WorkNoteCreate, tenant_id: UUID | None = None) -> TicketWorkNote:
+        if not self.get_ticket(ticket_id, tenant_id=tenant_id):
             raise ValueError("Ticket not found")
-        note = TicketWorkNote(
-            ticket_id=ticket_id,
-            author=payload.author,
-            body=payload.body,
-            is_public=payload.is_public,
-        )
+        note = TicketWorkNote(ticket_id=ticket_id, author=payload.author, body=payload.body, is_public=payload.is_public)
         self.db.add(note)
         self.db.commit()
         self.db.refresh(note)
         return note
 
-    def list_work_notes(self, ticket_id: UUID) -> list[TicketWorkNote]:
+    def list_work_notes(self, ticket_id: UUID, tenant_id: UUID | None = None) -> list[TicketWorkNote]:
+        if not self.get_ticket(ticket_id, tenant_id=tenant_id):
+            return []
         return (
             self.db.query(TicketWorkNote)
             .filter(TicketWorkNote.ticket_id == ticket_id)
@@ -387,8 +410,8 @@ class ITSMService:
             .all()
         )
 
-    def tickets_for_asset(self, asset_id: UUID) -> list[ServiceTicket]:
-        return self.list_tickets(asset_id=asset_id)
+    def tickets_for_asset(self, asset_id: UUID, tenant_id: UUID | None = None) -> list[ServiceTicket]:
+        return self.list_tickets(asset_id=asset_id, tenant_id=tenant_id)
 
     # ---------- Automated integrations ----------
 
@@ -399,18 +422,11 @@ class ITSMService:
         to_status: str,
         actor: str | None = None,
     ) -> ServiceTicket | None:
-        """
-        Called from AssetService when status changes.
-        Creates ITSM tickets for operationally meaningful transitions.
-        """
         if to_status == "in_repair":
             return self.create_ticket(
                 ServiceTicketCreate(
                     title=f"Repair: {asset.name}",
-                    description=(
-                        f"Asset moved to in_repair from {from_status}.\n"
-                        f"Tag: {asset.asset_tag} | SN: {asset.serial_number}"
-                    ),
+                    description=f"Asset moved to in_repair from {from_status}.\nTag: {asset.asset_tag} | SN: {asset.serial_number}",
                     ticket_type="maintenance",
                     priority="high",
                     category="repair",
@@ -422,7 +438,6 @@ class ITSMService:
                     asset_ids=[asset.id],
                 )
             )
-
         if to_status == "disposed":
             return self.create_ticket(
                 ServiceTicketCreate(
@@ -439,14 +454,13 @@ class ITSMService:
                     asset_ids=[asset.id],
                 )
             )
-
         return None
 
     def open_warranty_expiry_tickets(self, within_days: int = 30) -> list[ServiceTicket]:
         """Create service requests for assets whose warranty ends within N days."""
+        if within_days < 0 or within_days > 3650:
+            raise ValueError("within_days must be between 0 and 3650")
         today = date.today()
-        from datetime import timedelta
-
         cutoff = today + timedelta(days=within_days)
         assets = (
             self.db.query(Asset)
@@ -458,10 +472,8 @@ class ITSMService:
             )
             .all()
         )
-
         created: list[ServiceTicket] = []
         for asset in assets:
-            # Skip if an open warranty ticket already exists for this asset
             existing = (
                 self.db.query(ServiceTicket)
                 .join(TicketAssetLink)
@@ -474,24 +486,20 @@ class ITSMService:
             )
             if existing:
                 continue
-
-            ticket = self.create_ticket(
-                ServiceTicketCreate(
-                    title=f"Warranty expiring: {asset.name}",
-                    description=(
-                        f"Warranty ends {asset.warranty_end}. "
-                        f"Provider: {asset.warranty_provider or 'n/a'}. "
-                        f"Ref: {asset.warranty_lookup_ref or 'n/a'}."
-                    ),
-                    ticket_type="service_request",
-                    priority="medium",
-                    category="warranty",
-                    device_id=asset.device_id,
-                    tenant_id=asset.tenant_id,
-                    source="warranty",
-                    source_ref=str(asset.id),
-                    asset_ids=[asset.id],
+            created.append(
+                self.create_ticket(
+                    ServiceTicketCreate(
+                        title=f"Warranty expiring: {asset.name}",
+                        description=f"Warranty ends {asset.warranty_end}. Provider: {asset.warranty_provider or 'n/a'}. Ref: {asset.warranty_lookup_ref or 'n/a'}.",
+                        ticket_type="service_request",
+                        priority="medium",
+                        category="warranty",
+                        device_id=asset.device_id,
+                        tenant_id=asset.tenant_id,
+                        source="warranty",
+                        source_ref=str(asset.id),
+                        asset_ids=[asset.id],
+                    )
                 )
             )
-            created.append(ticket)
         return created
