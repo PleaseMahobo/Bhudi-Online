@@ -3,10 +3,15 @@
 import { useEffect, useRef, useState } from 'react';
 import { Loader2, ScreenShare, X } from 'lucide-react';
 
-const API_BASE = (
-  process.env.NEXT_PUBLIC_API_URL ||
-  'https://bhudi-online-production.up.railway.app'
-).replace(/\/$/, '');
+function apiHttpBase(): string {
+  let raw = (process.env.NEXT_PUBLIC_API_URL || 'https://bhudi-online-production.up.railway.app').trim();
+  raw = raw.split(/\s+/)[0] || raw;
+  raw = raw.replace(/\/api\/v1\/?$/i, '').replace(/\/$/, '');
+  if (!/^https?:\/\//i.test(raw)) raw = 'https://' + raw;
+  return raw;
+}
+
+const API_BASE = apiHttpBase();
 
 function authHeaders(): HeadersInit {
   const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') || '' : '';
@@ -16,13 +21,10 @@ function authHeaders(): HeadersInit {
 }
 
 function wsBase(): string {
-  try {
-    const u = new URL(API_BASE);
-    u.protocol = u.protocol === 'https:' ? 'wss:' : 'ws:';
-    return u.origin;
-  } catch {
-    return API_BASE.replace(/^http/, 'ws');
-  }
+  const http = API_BASE;
+  if (http.startsWith('https://')) return 'wss://' + http.slice('https://'.length);
+  if (http.startsWith('http://')) return 'ws://' + http.slice('http://'.length);
+  return 'wss://' + http;
 }
 
 export default function RemoteSessionModal({
@@ -87,7 +89,7 @@ export default function RemoteSessionModal({
             /* ignore */
           }
         };
-        ws.onerror = () => setError('WebSocket error');
+        ws.onerror = () => setError('WebSocket error — agent must be online and enrolled');
         ws.onclose = () => setStatus((s) => (s.includes('ended') ? s : 'Disconnected'));
       } catch (e: any) {
         setError(e?.message || 'Failed to start remote session');
@@ -101,40 +103,28 @@ export default function RemoteSessionModal({
   }, [agentId]);
 
   return (
-    <div
-      className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/50 p-4"
-      onClick={onClose}
-    >
-      <div
-        className="flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <header className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
-          <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
-            <ScreenShare size={16} className="text-indigo-600" />
-            Remote — {hostname || agentId.slice(0, 8)}
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+      <div className="flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl">
+        <div className="flex items-center justify-between border-b border-slate-700 px-4 py-3">
+          <div className="flex items-center gap-2 text-sm text-white">
+            <ScreenShare size={16} className="text-indigo-400" />
+            Remote — {hostname || agentId}
           </div>
-          <div className="flex items-center gap-3">
-            <span className="text-xs text-slate-500">{status}</span>
-            <button
-              type="button"
-              onClick={onClose}
-              className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100"
-            >
-              <X size={18} />
-            </button>
-          </div>
-        </header>
-        {error && (
-          <div className="border-b border-red-100 bg-red-50 px-4 py-2 text-sm text-red-700">{error}</div>
-        )}
-        <div className="relative flex min-h-[360px] flex-1 items-center justify-center overflow-auto bg-slate-950">
-          <canvas ref={canvasRef} className="max-h-full max-w-full" />
+          <button type="button" onClick={onClose} className="rounded-lg p-1 text-slate-400 hover:bg-slate-800 hover:text-white">
+            <X size={18} />
+          </button>
+        </div>
+        <div className="flex items-center gap-2 border-b border-slate-800 px-4 py-2 text-xs text-slate-400">
+          {status === 'Starting…' || status.includes('waiting') ? <Loader2 size={12} className="animate-spin" /> : null}
+          {status}
+          {error ? <span className="text-red-400">{error}</span> : null}
+        </div>
+        <div className="relative min-h-[320px] flex-1 bg-black">
+          <canvas ref={canvasRef} className="mx-auto max-h-[70vh] max-w-full" />
           {!frameUrl && !error && (
-            <div className="absolute flex items-center gap-2 text-sm text-slate-400">
-              <Loader2 className="animate-spin" size={16} />
-              Waiting for frames (agent must be online on an interactive desktop)…
-            </div>
+            <p className="absolute inset-0 flex items-center justify-center text-sm text-slate-500">
+              Waiting for desktop frames…
+            </p>
           )}
         </div>
       </div>
