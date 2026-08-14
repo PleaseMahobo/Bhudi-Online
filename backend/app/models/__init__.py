@@ -35,6 +35,7 @@ from .incident_timeline import IncidentTimeline
 from .itsm import ServiceTicket, TicketAssetLink, TicketWorkNote
 from .itsm_extended import ITSMSLAPolicy, ITSMAssignmentGroup, ITSMTicketHistory, ITSMTicketAttachment
 from .itsm_operational import ITSMTicketAssignment, ITSMSLAEscalation
+from . import itsm_datetime_normalization  # noqa: F401
 from .msp import BillingPlan, Contact, Department, Organization, Site, Technician, TenantBranding, TenantSubscription
 from .notification import NotificationChannel, NotificationDelivery, NotificationTemplate
 from .password_reset_token import PasswordResetToken
