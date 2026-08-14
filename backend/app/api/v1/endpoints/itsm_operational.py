@@ -58,7 +58,7 @@ def run_sla_escalation(db: Session = Depends(get_db), user=Depends(get_current_u
     return ITSMOperationalService(db).escalate_sla(tenant_id(user))
 
 
-@router.post("/tickets/{ticket_id}/attachments", response_model=AttachmentUploadResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/tickets/{ticket_id}/attachment-files", response_model=AttachmentUploadResponse, status_code=status.HTTP_201_CREATED)
 async def upload_attachment(ticket_id: UUID, file: UploadFile = File(...), db: Session = Depends(get_db), user=Depends(get_current_user)):
     ticket = ticket_or_404(db, ticket_id, user)
     data = await file.read()
@@ -66,20 +66,20 @@ async def upload_attachment(ticket_id: UUID, file: UploadFile = File(...), db: S
         row = ITSMOperationalService(db).save_attachment(ticket, file.filename or "attachment", file.content_type, data, getattr(user, "email", None) or str(user.id))
     except ValueError as exc:
         raise HTTPException(413, str(exc)) from exc
-    return AttachmentUploadResponse.model_validate({"id": row.id, "ticket_id": row.ticket_id, "tenant_id": row.tenant_id, "filename": row.filename, "content_type": row.content_type, "size_bytes": row.size_bytes, "uploaded_by": row.uploaded_by, "created_at": row.created_at, "download_url": f"/api/v1/itsm/tickets/{ticket.id}/attachments/{row.id}"})
+    return AttachmentUploadResponse.model_validate({"id": row.id, "ticket_id": row.ticket_id, "tenant_id": row.tenant_id, "filename": row.filename, "content_type": row.content_type, "size_bytes": row.size_bytes, "uploaded_by": row.uploaded_by, "created_at": row.created_at, "download_url": f"/api/v1/itsm/tickets/{ticket.id}/attachment-files/{row.id}"})
 
 
-@router.get("/tickets/{ticket_id}/attachments", response_model=list[AttachmentUploadResponse])
+@router.get("/tickets/{ticket_id}/attachment-files", response_model=list[AttachmentUploadResponse])
 def list_attachments(ticket_id: UUID, db: Session = Depends(get_db), user=Depends(get_current_user)):
     ticket = ticket_or_404(db, ticket_id, user)
     q = db.query(ITSMTicketAttachment).filter(ITSMTicketAttachment.ticket_id == ticket.id)
     if tenant_id(user) is not None:
         q = q.filter(ITSMTicketAttachment.tenant_id == tenant_id(user))
     rows = q.order_by(ITSMTicketAttachment.created_at.asc()).all()
-    return [AttachmentUploadResponse.model_validate({"id": r.id, "ticket_id": r.ticket_id, "tenant_id": r.tenant_id, "filename": r.filename, "content_type": r.content_type, "size_bytes": r.size_bytes, "uploaded_by": r.uploaded_by, "created_at": r.created_at, "download_url": f"/api/v1/itsm/tickets/{ticket_id}/attachments/{r.id}"}) for r in rows]
+    return [AttachmentUploadResponse.model_validate({"id": r.id, "ticket_id": r.ticket_id, "tenant_id": r.tenant_id, "filename": r.filename, "content_type": r.content_type, "size_bytes": r.size_bytes, "uploaded_by": r.uploaded_by, "created_at": r.created_at, "download_url": f"/api/v1/itsm/tickets/{ticket_id}/attachment-files/{r.id}"}) for r in rows]
 
 
-@router.get("/tickets/{ticket_id}/attachments/{attachment_id}")
+@router.get("/tickets/{ticket_id}/attachment-files/{attachment_id}")
 def download_attachment(ticket_id: UUID, attachment_id: UUID, db: Session = Depends(get_db), user=Depends(get_current_user)):
     ticket = ticket_or_404(db, ticket_id, user)
     row = db.query(ITSMTicketAttachment).filter(ITSMTicketAttachment.id == attachment_id, ITSMTicketAttachment.ticket_id == ticket.id, ITSMTicketAttachment.tenant_id == ticket.tenant_id).first()
@@ -98,7 +98,7 @@ def sync_alert_ticket(alert_id: UUID, db: Session = Depends(get_db), user=Depend
         ticket = ITSMOperationalService(db).sync_alert(alert_id, tenant_id(user))
     except ValueError as exc:
         raise HTTPException(404, str(exc)) from exc
-    return {"ticket_id": str(ticket.id), "ticket_number": ticket.number, "created": ticket.source_ref == str(alert_id)}
+    return {"ticket_id": str(ticket.id), "ticket_number": ticket.number, "alert_id": str(alert_id)}
 
 
 @router.post("/incidents/{incident_id}/sync-ticket", response_model=dict)
