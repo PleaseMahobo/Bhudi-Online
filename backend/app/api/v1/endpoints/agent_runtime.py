@@ -123,6 +123,16 @@ def _translate_command(platform: str | None, command: str) -> str:
     return command
 
 
+def _require_agent_token(agent_id: str, agent_token: str | None) -> dict[str, Any]:
+    """Authenticate an agent-to-server callback before reading or mutating commands."""
+    agent = _agents.get(agent_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    if not agent_token or agent_token != agent.get("agent_token"):
+        raise HTTPException(status_code=401, detail="Invalid agent credentials")
+    return agent
+
+
 @router.post("/enroll", response_model=EnrollResponse)
 def enroll(req: EnrollRequest):
     agent_id = str(uuid.uuid4())
@@ -143,9 +153,7 @@ def enroll(req: EnrollRequest):
 
 @router.post("/heartbeat")
 def heartbeat(req: HeartbeatRequest):
-    agent = _agents.get(req.agent_id)
-    if not agent or agent["agent_token"] != req.agent_token:
-        raise HTTPException(status_code=401, detail="Invalid agent credentials")
+    agent = _require_agent_token(req.agent_id, req.agent_token)
     agent["status"] = req.status
     agent["last_seen"] = datetime.now(timezone.utc).isoformat()
     for field in ("cpu_percent", "memory_percent", "disk_percent", "ip_address", "hostname"):
@@ -219,11 +227,7 @@ def command_history(agent_id: str):
 
 @router.get("/agents/{agent_id}/commands/pending")
 def pending_commands(agent_id: str, agent_token: str | None = None):
-    agent = _agents.get(agent_id)
-    if not agent:
-        raise HTTPException(status_code=404, detail="Agent not found")
-    if agent_token is not None and agent_token != agent.get("agent_token"):
-        raise HTTPException(status_code=401, detail="Invalid agent credentials")
+    _require_agent_token(agent_id, agent_token)
     pending = [c for c in _commands.get(agent_id, []) if c.get("status") == "pending"]
     for command in pending:
         command["status"] = "dispatched"
@@ -241,11 +245,7 @@ def command_details(agent_id: str, command_id: str):
 
 @router.post("/agents/{agent_id}/commands/{command_id}/ack")
 def acknowledge_command(agent_id: str, command_id: str, body: CommandAck, agent_token: str | None = None):
-    agent = _agents.get(agent_id)
-    if not agent:
-        raise HTTPException(status_code=404, detail="Agent not found")
-    if agent_token is not None and agent_token != agent.get("agent_token"):
-        raise HTTPException(status_code=401, detail="Invalid agent credentials")
+    _require_agent_token(agent_id, agent_token)
     for command in _commands.get(agent_id, []):
         if command.get("id") == command_id:
             command["status"] = body.status
@@ -257,11 +257,7 @@ def acknowledge_command(agent_id: str, command_id: str, body: CommandAck, agent_
 
 @router.post("/agents/{agent_id}/commands/{command_id}/result")
 def command_result(agent_id: str, command_id: str, body: CommandResult, agent_token: str | None = None):
-    agent = _agents.get(agent_id)
-    if not agent:
-        raise HTTPException(status_code=404, detail="Agent not found")
-    if agent_token is not None and agent_token != agent.get("agent_token"):
-        raise HTTPException(status_code=401, detail="Invalid agent credentials")
+    agent = _require_agent_token(agent_id, agent_token)
     for command in _commands.get(agent_id, []):
         if command.get("id") == command_id:
             command["exit_code"] = body.exit_code
@@ -280,9 +276,9 @@ def command_result(agent_id: str, command_id: str, body: CommandResult, agent_to
 
 
 @router.websocket("/agents/{agent_id}/stream")
-async def agent_stream(websocket: WebSocket, agent_id: str):
-    if agent_id not in _agents:
-        await websocket.close(code=4404)
+async def agent_stream(websocket: WebSocket, agent_id: str, agent_token: str | None = None):
+    if agent_id not in _agents or not agent_token or agent_token != _agents[agent_id].get("agent_token"):
+        await websocket.close(code=4401)
         return
     await websocket.accept()
     try:

@@ -30,9 +30,15 @@ def test_agent_platform_exposes_agent_details_and_command_history() -> None:
     assert queue_response.status_code == 200
     command_id = queue_response.json()["command_id"]
 
+    unauthorized_pending = client.get(f"/runtime/agents/{agent_id}/commands/pending")
+    assert unauthorized_pending.status_code == 401
+
     pending_response = client.get(f"/runtime/agents/{agent_id}/commands/pending", params={"agent_token": agent_token})
     assert pending_response.status_code == 200
     assert pending_response.json()["commands"][0]["command_id"] == command_id
+
+    unauthorized_result = client.post(f"/runtime/agents/{agent_id}/commands/{command_id}/result", json={"exit_code": 0, "stdout": "spoof", "stderr": ""})
+    assert unauthorized_result.status_code == 401
 
     result_response = client.post(f"/runtime/agents/{agent_id}/commands/{command_id}/result", params={"agent_token": agent_token}, json={"exit_code": 0, "stdout": "hello", "stderr": ""})
     assert result_response.status_code == 200
@@ -51,6 +57,9 @@ def test_agent_commands_support_acknowledgement_and_retry_tracking() -> None:
     agent_token = body["agent_token"]
 
     command_id = client.post(f"/runtime/agents/{agent_id}/commands", json={"command": "python -c 'exit(1)'", "shell": True}).json()["command_id"]
+    unauthorized_ack = client.post(f"/runtime/agents/{agent_id}/commands/{command_id}/ack", json={"status": "running"})
+    assert unauthorized_ack.status_code == 401
+
     ack_response = client.post(f"/runtime/agents/{agent_id}/commands/{command_id}/ack", params={"agent_token": agent_token}, json={"status": "running"})
     assert ack_response.status_code == 200
     assert ack_response.json()["acknowledged"] is True
@@ -62,9 +71,12 @@ def test_agent_commands_support_acknowledgement_and_retry_tracking() -> None:
     assert command["retry_count"] == 1
 
 
-def test_agent_stream_endpoint_accepts_connections() -> None:
+def test_agent_stream_endpoint_requires_agent_token() -> None:
     client = _build_client()
-    agent_id = client.post("/runtime/enroll", json={"hostname": "agent-03", "agent_version": "1.0.0", "platform": "linux"}).json()["agent_id"]
-    with client.websocket_connect(f"/runtime/agents/{agent_id}/stream") as websocket:
+    body = client.post("/runtime/enroll", json={"hostname": "agent-03", "agent_version": "1.0.0", "platform": "linux"}).json()
+    agent_id = body["agent_id"]
+    agent_token = body["agent_token"]
+
+    with client.websocket_connect(f"/runtime/agents/{agent_id}/stream?agent_token={agent_token}") as websocket:
         payload = websocket.receive_json()
         assert payload["event"] == "connected"
