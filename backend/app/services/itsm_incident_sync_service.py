@@ -6,9 +6,8 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 
 from app.models.incident import Incident
-from app.models.itsm import ServiceTicket
+from app.models.itsm import ServiceTicket, TicketWorkNote
 from app.models.itsm_extended import ITSMTicketHistory
-from app.models.itsm import TicketWorkNote
 
 
 class ITSMIncidentSyncService:
@@ -32,7 +31,7 @@ class ITSMIncidentSyncService:
         incident = self.db.query(Incident).filter(Incident.id == str(ticket.incident_id), Incident.tenant_id == tenant_id).first()
         if not incident:
             raise ValueError("Linked incident not found")
-        mapped = self.TICKET_TO_INCIDENT.get(ticket.status)
+        mapped = self.TICKET_TO_INCIDENT.get(str(ticket.status).lower())
         if mapped and incident.status != mapped:
             incident.status = mapped
             incident.updated_at = datetime.now(timezone.utc)
