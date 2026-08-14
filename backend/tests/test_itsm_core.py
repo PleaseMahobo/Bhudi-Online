@@ -9,7 +9,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app.api.v1.endpoints import itsm
+from app.api.v1.endpoints import itsm_secure as itsm
 from app.core.bootstrap import _bootstrap_metadata_for_engine
 from app.core.dependencies import get_current_user
 from app.database.session import get_db
@@ -20,12 +20,7 @@ TENANT_B = "00000000-0000-0000-0000-0000000000b1"
 
 
 def _client(tenant_id: str):
-    engine = create_engine(
-        "sqlite:///:memory:",
-        future=True,
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
+    engine = create_engine("sqlite:///:memory:", future=True, connect_args={"check_same_thread": False}, poolclass=StaticPool)
     session_local = sessionmaker(bind=engine, autoflush=False, autocommit=False, expire_on_commit=False)
     _bootstrap_metadata_for_engine().create_all(bind=engine)
 
@@ -50,18 +45,14 @@ def _client(tenant_id: str):
 
 def test_ticket_lifecycle_search_and_status_note() -> None:
     client = _client(TENANT_A)
-
-    create = client.post(
-        "/api/itsm/tickets",
-        json={
-            "title": "Printer offline",
-            "description": "Kyocera is unreachable",
-            "ticket_type": "incident",
-            "priority": "high",
-            "requester": "user@example.test",
-            "sla_resolve_minutes": 60,
-        },
-    )
+    create = client.post("/api/itsm/tickets", json={
+        "title": "Printer offline",
+        "description": "Kyocera is unreachable",
+        "ticket_type": "incident",
+        "priority": "high",
+        "requester": "user@example.test",
+        "sla_resolve_minutes": 60,
+    })
     assert create.status_code == 201, create.text
     ticket = create.json()
     assert ticket["number"].startswith("INC-")
@@ -71,10 +62,7 @@ def test_ticket_lifecycle_search_and_status_note() -> None:
     assert search.status_code == 200
     assert [row["id"] for row in search.json()] == [ticket["id"]]
 
-    transition = client.post(
-        f"/api/itsm/tickets/{ticket['id']}/status",
-        json={"status": "resolved", "resolution": "Printer recovered"},
-    )
+    transition = client.post(f"/api/itsm/tickets/{ticket['id']}/status", json={"status": "resolved", "resolution": "Printer recovered"})
     assert transition.status_code == 200, transition.text
     assert transition.json()["status"] == "resolved"
     assert transition.json()["resolved_at"] is not None
@@ -86,10 +74,7 @@ def test_ticket_lifecycle_search_and_status_note() -> None:
 
 def test_ticket_tenant_isolation() -> None:
     client_a = _client(TENANT_A)
-    create = client_a.post(
-        "/api/itsm/tickets",
-        json={"title": "Tenant A ticket", "ticket_type": "incident", "priority": "medium"},
-    )
+    create = client_a.post("/api/itsm/tickets", json={"title": "Tenant A ticket", "ticket_type": "incident", "priority": "medium"})
     assert create.status_code == 201, create.text
     ticket_id = create.json()["id"]
 
@@ -100,8 +85,5 @@ def test_ticket_tenant_isolation() -> None:
 
 def test_invalid_status_is_rejected() -> None:
     client = _client(TENANT_A)
-    response = client.post(
-        "/api/itsm/tickets",
-        json={"title": "Invalid", "ticket_type": "incident", "status": "bogus"},
-    )
+    response = client.post("/api/itsm/tickets", json={"title": "Invalid", "ticket_type": "incident", "status": "bogus"})
     assert response.status_code == 400
