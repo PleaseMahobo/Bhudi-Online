@@ -24,14 +24,12 @@ setup_cors(app)
 
 try:
     from app.core.rate_limit import RateLimitMiddleware
-
     app.add_middleware(RateLimitMiddleware)
 except Exception as e:
     print(f"[startup] rate limit middleware skipped: {e}")
 
 try:
     from app.middleware.prometheus_middleware import PrometheusMiddleware
-
     app.add_middleware(PrometheusMiddleware)
     print("[startup] Prometheus HTTP metrics middleware enabled")
 except Exception as e:
@@ -39,7 +37,6 @@ except Exception as e:
 
 try:
     from app.core.telemetry import setup_tracing
-
     if setup_tracing(app):
         print("[startup] OpenTelemetry tracing enabled")
     else:
@@ -49,7 +46,6 @@ except Exception as e:
 
 try:
     from app.api.schema_routes import router as schema_router
-
     app.include_router(schema_router)
 except Exception as e:
     print(f"[startup] schema router skipped: {e}")
@@ -64,27 +60,29 @@ async def startup_event():
     print(f"[startup] bootstrap: {bootstrap_result}")
     try:
         from app.core.monitor import monitor_devices
-
         asyncio.create_task(monitor_devices())
     except Exception as e:
         print(f"[startup] monitor_devices skipped: {e}")
     import os
-
     if os.getenv("BHUDI_DISABLE_WORKERS", "0") == "1":
         print("[startup] workers disabled (BHUDI_DISABLE_WORKERS=1)")
     else:
         try:
             from app.workers.command_dispatcher import dispatcher
-
             dispatcher.start()
         except Exception as e:
             print(f"[startup] command_dispatcher skipped: {e}")
         try:
             from app.workers.executor_worker import executor_worker
-
             executor_worker.start()
         except Exception as e:
             print(f"[startup] executor_worker skipped: {e}")
+        try:
+            from app.workers.itsm_sla_worker import itsm_sla_worker
+            itsm_sla_worker.start()
+            print("[startup] ITSM SLA escalation worker started")
+        except Exception as e:
+            print(f"[startup] itsm_sla_worker skipped: {e}")
 
 
 @app.on_event("shutdown")
@@ -92,14 +90,17 @@ async def shutdown_event():
     print("Bhudi RMM API shutting down...")
     try:
         from app.workers.command_dispatcher import dispatcher
-
         dispatcher.stop()
     except Exception:
         pass
     try:
         from app.workers.executor_worker import executor_worker
-
         executor_worker.stop()
+    except Exception:
+        pass
+    try:
+        from app.workers.itsm_sla_worker import itsm_sla_worker
+        itsm_sla_worker.stop()
     except Exception:
         pass
 
@@ -116,50 +117,28 @@ async def root():
 
 @app.get("/metrics", tags=["Observability"])
 async def metrics():
-    """Prometheus text exposition."""
     try:
         from app.api.v1.endpoints import agent_runtime
         from app.core.prometheus_metrics import set_agents_online
-
         agents = getattr(agent_runtime, "_agents", {}) or {}
-        online = sum(
-            1 for a in agents.values() if (a.get("status") or "").lower() == "online"
-        )
+        online = sum(1 for a in agents.values() if (a.get("status") or "").lower() == "online")
         set_agents_online(online)
     except Exception:
         pass
     try:
         from app.core.prometheus_metrics import render_metrics
-
         body, ctype = render_metrics()
         return Response(content=body, media_type=ctype)
     except Exception:
-        return Response(
-            content=(
-                "# HELP bhudi_up 1 if process is up\n"
-                "# TYPE bhudi_up gauge\n"
-                "bhudi_up 1\n"
-            ),
-            media_type="text/plain; version=0.0.4",
-        )
+        return Response(content="# HELP bhudi_up 1 if process is up\n# TYPE bhudi_up gauge\nbhudi_up 1\n", media_type="text/plain; version=0.0.4")
 
 
 device_heartbeats: Dict[str, dict] = {}
 
 
 async def handle_heartbeat(device_id: str, data: dict):
-    device_heartbeats[device_id] = {
-        "status": "online",
-        "timestamp": data.get("timestamp"),
-        **data,
-    }
-    await manager.broadcast(
-        {
-            "type": "heartbeat",
-            "device_id": device_id,
-            "data": device_heartbeats[device_id],
-        }
-    )
+    device_heartbeats[device_id] = {"status": "online", "timestamp": data.get("timestamp"), **data}
+    await manager.broadcast({"type": "heartbeat", "device_id": device_id, "data": device_heartbeats[device_id]})
 
 
 @app.websocket("/ws")
@@ -194,9 +173,7 @@ async def websocket_device(websocket: WebSocket, device_id: str):
     try:
         while True:
             data = await websocket.receive_json()
-            await manager.broadcast(
-                {"type": "device", "device_id": device_id, "data": data}
-            )
+            await manager.broadcast({"type": "device", "device_id": device_id, "data": data})
     except WebSocketDisconnect:
         manager.disconnect(websocket)
 
