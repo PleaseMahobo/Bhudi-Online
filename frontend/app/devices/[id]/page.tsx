@@ -14,6 +14,7 @@ import {
   Cpu,
 } from 'lucide-react';
 import ModuleShell from '@/shared/components/ModuleShell';
+import DeviceMetricsChart from '@/shared/components/DeviceMetricsChart';
 import {
   getDevice,
   requestInventory,
@@ -183,23 +184,32 @@ export default function DeviceDetailPage() {
           </div>
 
           {tab === 'overview' && (
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-              {[
-                ['Hostname', device.hostname || device.name],
-                ['Last seen', device.last_seen || '—'],
-                ['Agent version', device.agent_version || '—'],
-                ['Source', device.source || '—'],
-                ['CPU', device.cpu_percent != null ? Math.round(device.cpu_percent) + '%' : '—'],
-                ['Memory', device.memory_percent != null ? Math.round(device.memory_percent) + '%' : '—'],
-                ['Disk', device.disk_percent != null ? Math.round(device.disk_percent) + '%' : '—'],
-                ['Organization', device.organization_name || 'Unassigned'],
-              ].map(([k, v]) => (
-                <div key={String(k)} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-                  <p className="text-[11px] font-medium uppercase tracking-wide text-slate-400">{k}</p>
-                  <p className="mt-1 break-all text-sm font-semibold text-slate-900">{v}</p>
-                </div>
-              ))}
-            </div>
+            <>
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                {[
+                  ['Hostname', device.hostname || device.name],
+                  ['Last seen', device.last_seen || '—'],
+                  ['Agent version', device.agent_version || '—'],
+                  ['Source', device.source || '—'],
+                  ['CPU', device.cpu_percent != null ? Math.round(device.cpu_percent) + '%' : '—'],
+                  ['Memory', device.memory_percent != null ? Math.round(device.memory_percent) + '%' : '—'],
+                  ['Disk', device.disk_percent != null ? Math.round(device.disk_percent) + '%' : '—'],
+                  ['Organization', device.organization_name || 'Unassigned'],
+                ].map(([k, v]) => (
+                  <div key={String(k)} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                    <p className="text-[11px] font-medium uppercase tracking-wide text-slate-400">{k}</p>
+                    <p className="mt-1 break-all text-sm font-semibold text-slate-900">{v}</p>
+                  </div>
+                ))}
+              </div>
+
+              <DeviceMetricsChart
+                deviceId={String(device.agent_id || device.device_id || device.id)}
+                hostname={device.hostname || device.name}
+                minutes={60}
+                pollMs={15000}
+              />
+            </>
           )}
 
           {(tab === 'processes' || tab === 'software') && (
