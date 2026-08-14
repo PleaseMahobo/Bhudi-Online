@@ -3,16 +3,15 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { ShieldCheck, Sparkles } from 'lucide-react';
+import { MailCheck, ShieldCheck, Sparkles } from 'lucide-react';
 import { mfaSetup, mfaVerify } from '@/lib/auth-client';
 
 /**
- * MFA is configured here — after trial signup, when the user needs privileged access.
+ * Standard Bhudi MFA enrollment: the provisioning QR code is delivered by
+ * email and is never exposed as a raw secret in the browser UI.
  */
 export default function MfaSetupPage() {
   const router = useRouter();
-  const [secret, setSecret] = useState('');
-  const [otpauth, setOtpauth] = useState('');
   const [code, setCode] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -23,12 +22,14 @@ export default function MfaSetupPage() {
     setError('');
     setLoading(true);
     try {
-      const mfa = await mfaSetup();
-      setSecret(mfa.secret);
-      setOtpauth(mfa.otpauth_uri);
+      const result = await mfaSetup();
+      if (!result.email_sent) {
+        setError('We could not send the MFA setup email. Please try again.');
+        return;
+      }
       setStarted(true);
     } catch (err: any) {
-      setError(err?.message || 'Could not start MFA setup');
+      setError(err?.message || 'Could not send the MFA setup email');
     } finally {
       setLoading(false);
     }
@@ -85,6 +86,13 @@ export default function MfaSetupPage() {
           </div>
         ) : !started ? (
           <div className="space-y-4">
+            <div className="rounded-xl border border-slate-700 bg-slate-950 p-4 text-center">
+              <MailCheck className="mx-auto mb-3 text-indigo-400" size={32} />
+              <p className="text-sm font-medium text-white">We'll email your authenticator QR code</p>
+              <p className="mt-2 text-xs leading-5 text-slate-400">
+                The QR code will be sent to your registered Bhudi email address. We never display your authenticator secret on this page.
+              </p>
+            </div>
             {error && <p className="text-sm text-red-300">{error}</p>}
             <button
               type="button"
@@ -92,7 +100,7 @@ export default function MfaSetupPage() {
               onClick={() => void startSetup()}
               className="w-full rounded-xl bg-indigo-600 py-3 text-sm font-semibold text-white hover:bg-indigo-500 disabled:opacity-50"
             >
-              {loading ? 'Preparing…' : 'Set up authenticator'}
+              {loading ? 'Sending QR code…' : 'Email me the QR code'}
             </button>
             <Link href="/dashboard" className="block text-center text-xs text-slate-500 hover:text-slate-300">
               Continue browsing without MFA
@@ -100,22 +108,20 @@ export default function MfaSetupPage() {
           </div>
         ) : (
           <form onSubmit={onVerify} className="space-y-4">
-            <p className="text-sm text-slate-300">
-              Add Bhudi to Google Authenticator, Authy, or 1Password using the secret below.
-            </p>
-            <div className="rounded-xl border border-slate-700 bg-slate-950 p-3">
-              <p className="text-[11px] text-slate-500">Secret</p>
-              <p className="break-all font-mono text-xs text-emerald-300">{secret}</p>
-              <p className="mt-2 text-[11px] text-slate-500">otpauth URI</p>
-              <p className="break-all font-mono text-[10px] text-slate-400">{otpauth}</p>
+            <div className="rounded-xl border border-emerald-900/60 bg-emerald-950/30 p-4">
+              <p className="text-sm font-medium text-emerald-300">Check your email</p>
+              <p className="mt-1 text-xs leading-5 text-slate-400">
+                We sent your Bhudi MFA QR code by email. Scan it with Google Authenticator, Microsoft Authenticator, Authy, 1Password, or another compatible authenticator app.
+              </p>
             </div>
             <div>
               <label className="text-xs text-slate-400">6-digit code</label>
               <input
                 value={code}
-                onChange={(e) => setCode(e.target.value)}
+                onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
                 inputMode="numeric"
-                maxLength={8}
+                autoComplete="one-time-code"
+                maxLength={6}
                 required
                 className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-800 px-3 py-2.5 text-center font-mono text-lg tracking-widest text-white outline-none focus:border-indigo-500"
               />
@@ -123,10 +129,18 @@ export default function MfaSetupPage() {
             {error && <p className="text-sm text-red-300">{error}</p>}
             <button
               type="submit"
-              disabled={loading}
+              disabled={loading || code.length !== 6}
               className="w-full rounded-xl bg-indigo-600 py-3 text-sm font-semibold text-white hover:bg-indigo-500 disabled:opacity-50"
             >
               {loading ? 'Verifying…' : 'Enable MFA'}
+            </button>
+            <button
+              type="button"
+              disabled={loading}
+              onClick={() => void startSetup()}
+              className="w-full rounded-xl border border-slate-700 py-3 text-sm font-semibold text-slate-300 hover:bg-slate-800 disabled:opacity-50"
+            >
+              Send a new QR code
             </button>
           </form>
         )}
