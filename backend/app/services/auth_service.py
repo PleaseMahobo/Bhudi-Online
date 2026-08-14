@@ -271,5 +271,21 @@ class AuthService:
         if user.failed_login_attempts >= max_attempts:
             user.locked_until = datetime.now(timezone.utc) + timedelta(minutes=lockout_minutes)
 
+    def _is_password_reused(self, user: User, password: str) -> bool:
+        """True if password matches current hash or any entry in password_history."""
+        current = getattr(user, "password_hash", None) or ""
+        if current and verify_password(password, current):
+            return True
+        history = list(getattr(user, "password_history", None) or [])
+        for old_hash in history:
+            if not old_hash:
+                continue
+            try:
+                if verify_password(password, old_hash):
+                    return True
+            except Exception:
+                continue
+        return False
+
 
 __all__ = ["AuthService"]
