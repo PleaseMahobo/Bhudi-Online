@@ -124,11 +124,9 @@ def _translate_command(platform: str | None, command: str) -> str:
 
 
 def _require_agent_token(agent_id: str, agent_token: str | None) -> dict[str, Any]:
-    """Authenticate an agent-to-server callback before reading or mutating commands."""
+    """Authenticate an agent callback without revealing whether an agent ID exists."""
     agent = _agents.get(agent_id)
-    if not agent:
-        raise HTTPException(status_code=404, detail="Agent not found")
-    if not agent_token or agent_token != agent.get("agent_token"):
+    if not agent or not agent_token or agent_token != agent.get("agent_token"):
         raise HTTPException(status_code=401, detail="Invalid agent credentials")
     return agent
 
