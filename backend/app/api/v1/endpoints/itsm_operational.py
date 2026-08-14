@@ -11,6 +11,7 @@ from app.database.session import get_db
 from app.models.itsm import ServiceTicket
 from app.models.itsm_extended import ITSMTicketAttachment
 from app.schemas.itsm_operational import AttachmentUploadResponse, SLAEscalationResponse, TicketAssignmentRequest, TicketAssignmentResponse
+from app.services.itsm_incident_sync_service import ITSMIncidentSyncService
 from app.services.itsm_operational_service import ITSMOperationalService
 from app.services.itsm_service import ITSMService
 
@@ -108,3 +109,12 @@ def sync_incident_ticket(incident_id: str, db: Session = Depends(get_db), user=D
     except ValueError as exc:
         raise HTTPException(404, str(exc)) from exc
     return {"ticket_id": str(ticket.id), "ticket_number": ticket.number, "incident_id": incident_id, "status": ticket.status}
+
+
+@router.post("/tickets/{ticket_id}/sync-incident", response_model=dict)
+def sync_ticket_incident(ticket_id: UUID, db: Session = Depends(get_db), user=Depends(get_current_user)):
+    try:
+        incident = ITSMIncidentSyncService(db).ticket_to_incident(ticket_id, tenant_id(user), getattr(user, "email", None) or str(user.id))
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    return {"incident_id": str(incident.id), "ticket_id": str(ticket_id), "status": incident.status}
