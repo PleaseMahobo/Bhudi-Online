@@ -10,69 +10,49 @@ const BACKEND_URL = (
   .replace(/\/$/, '')
   .replace(/\/api\/v1$/, '');
 
-export async function GET(request: NextRequest) {
-  return proxyRequest(request);
-}
+export async function GET(request: NextRequest) { return proxyRequest(request); }
+export async function POST(request: NextRequest) { return proxyRequest(request); }
+export async function PUT(request: NextRequest) { return proxyRequest(request); }
+export async function PATCH(request: NextRequest) { return proxyRequest(request); }
+export async function DELETE(request: NextRequest) { return proxyRequest(request); }
 
-export async function POST(request: NextRequest) {
-  return proxyRequest(request);
-}
-
-export async function PUT(request: NextRequest) {
-  return proxyRequest(request);
-}
-
-export async function PATCH(request: NextRequest) {
-  return proxyRequest(request);
-}
-
-export async function DELETE(request: NextRequest) {
-  return proxyRequest(request);
+function forwardSetCookies(upstream: Response, response: NextResponse) {
+  const cookies = upstream.headers.getSetCookie?.() ?? [];
+  for (const cookie of cookies) response.headers.append('set-cookie', cookie);
 }
 
 async function proxyRequest(request: NextRequest) {
   try {
-    // /api/auth/login → backend /api/v1/auth/login
-    // /api/v1/devices → backend /api/v1/devices (no double prefix)
     let pathname = request.nextUrl.pathname;
-    if (pathname.startsWith('/api/v1/')) {
-      // already versioned
-    } else if (pathname.startsWith('/api/')) {
+    if (!pathname.startsWith('/api/v1/') && pathname.startsWith('/api/')) {
       pathname = `/api/v1/${pathname.slice('/api/'.length)}`;
     }
 
     const target = `${BACKEND_URL}${pathname}${request.nextUrl.search}`;
-
     const headers = new Headers();
-    const contentType = request.headers.get('content-type');
-    if (contentType) headers.set('content-type', contentType);
-    const auth = request.headers.get('authorization');
-    if (auth) headers.set('authorization', auth);
-    const cookie = request.headers.get('cookie');
-    if (cookie) headers.set('cookie', cookie);
-    const accept = request.headers.get('accept');
-    if (accept) headers.set('accept', accept);
+    for (const name of ['content-type', 'authorization', 'cookie', 'accept']) {
+      const value = request.headers.get(name);
+      if (value) headers.set(name, value);
+    }
 
-    const init: RequestInit = {
-      method: request.method,
-      headers,
-      cache: 'no-store',
-    };
-
+    const init: RequestInit = { method: request.method, headers, cache: 'no-store' };
     if (request.method !== 'GET' && request.method !== 'HEAD') {
       init.body = await request.arrayBuffer();
     }
 
-    const response = await fetch(target, init);
-    const data = await response.arrayBuffer();
-
-    return new NextResponse(data, {
-      status: response.status,
+    const upstream = await fetch(target, init);
+    const data = await upstream.arrayBuffer();
+    const response = new NextResponse(data, {
+      status: upstream.status,
       headers: {
-        'Content-Type':
-          response.headers.get('Content-Type') || 'application/json',
+        'Content-Type': upstream.headers.get('Content-Type') || 'application/json',
       },
     });
+
+    // Forward FastAPI Set-Cookie headers so refresh/login/logout cookie
+    // rotation reaches the browser through the same-origin proxy.
+    forwardSetCookies(upstream, response);
+    return response;
   } catch (error) {
     console.error('Proxy error:', error);
     return NextResponse.json(
