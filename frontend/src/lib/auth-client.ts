@@ -2,6 +2,8 @@ const API_BASE = '';
 
 type ApiError = { detail?: unknown; error?: string; message?: string };
 
+type PostResult<T> = { response: Response; data: T };
+
 function errorMessage(data: ApiError, statusText: string, status: number): string {
   const detail = data?.detail;
   if (typeof detail === 'string' && detail.trim()) return detail.trim();
@@ -13,7 +15,7 @@ function errorMessage(data: ApiError, statusText: string, status: number): strin
   return String(data?.error || data?.message || statusText || `Request failed (${status})`);
 }
 
-async function postJson<T>(path: string, body?: unknown): Promise<T> {
+async function postJsonRaw<T>(path: string, body?: unknown): Promise<PostResult<T>> {
   const res = await fetch(`${API_BASE}${path}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
@@ -22,8 +24,13 @@ async function postJson<T>(path: string, body?: unknown): Promise<T> {
     body: JSON.stringify(body ?? {}),
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(errorMessage(data, res.statusText, res.status));
-  return data as T;
+  return { response: res, data: data as T };
+}
+
+async function postJson<T>(path: string, body?: unknown): Promise<T> {
+  const { response, data } = await postJsonRaw<T>(path, body);
+  if (!response.ok) throw new Error(errorMessage(data as ApiError, response.statusText, response.status));
+  return data;
 }
 
 export async function registerUser(input: { email: string; password: string; first_name?: string; last_name?: string }) {
@@ -59,5 +66,21 @@ export async function mfaSetup() {
 }
 
 export async function mfaVerify(code: string) {
-  return postJson<{ enabled: boolean }>('/api/auth/mfa/verify', { code });
+  let result = await postJsonRaw<{ enabled: boolean }>('/api/auth/mfa/verify', { code });
+
+  // The access cookie is short-lived. If MFA verification is attempted after
+  // it expires, use the refresh cookie to rotate the session and retry once.
+  if (result.response.status === 401) {
+    try {
+      await refreshSession();
+      result = await postJsonRaw<{ enabled: boolean }>('/api/auth/mfa/verify', { code });
+    } catch {
+      // Fall through to the normal error below so the UI remains consistent.
+    }
+  }
+
+  if (!result.response.ok) {
+    throw new Error(errorMessage(result.data as ApiError, result.response.statusText, result.response.status));
+  }
+  return result.data;
 }
