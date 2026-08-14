@@ -41,8 +41,8 @@ except ImportError:
     print("Install requests: pip install requests")
     sys.exit(1)
 
-CONFIG_PATH = Path(__file__).with_name("agent_config.json")
-IDENTITY_PATH = Path(__file__).with_name("agent_identity.json")
+CONFIG_PATH = Path(os.getenv("BHUDI_CONFIG_PATH", str(Path(__file__).with_name("agent_config.json")))
+IDENTITY_PATH = Path(os.getenv("BHUDI_IDENTITY_PATH", str(Path(__file__).with_name("agent_identity.json")))
 
 
 def load_json(path: Path) -> dict:
@@ -52,6 +52,7 @@ def load_json(path: Path) -> dict:
 
 
 def save_json(path: Path, data: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
 
@@ -242,6 +243,9 @@ def main() -> None:
     ident = load_identity()
     print(f"[bhudi-agent] agent_id={ident['agent_id']} host={agent_hostname()}")
     interval = int(os.getenv("BHUDI_HEARTBEAT_INTERVAL", "10"))
+    run_once(ident)
+    if os.getenv("BHUDI_RUN_ONCE", "0").lower() in {"1", "true", "yes"}:
+        return
     while True:
         try: run_once(ident)
         except Exception as e: print(f"[error] {e}")
