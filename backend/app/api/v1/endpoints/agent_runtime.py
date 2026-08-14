@@ -1,18 +1,15 @@
 """
-Practical agent runtime API for Phase A/B testing.
+Practical agent runtime API.
 
 Endpoints (under /api/v1):
   POST /runtime/enroll
   POST /runtime/heartbeat
   GET  /runtime/agents
-  POST /runtime/agents/{agent_id}/commands
+  POST /runtime/agents/{agent_id}/commands   (MFA required)
   GET  /runtime/agents/{agent_id}/commands/pending
   POST /runtime/agents/{agent_id}/commands/{command_id}/result
-  POST /runtime/remote/terminal
-  POST /runtime/remote/desktop
-
-Agents are persisted to disk (BHUDI_RUNTIME_STORE) so process restarts
-do not invalidate enrolled agent tokens.
+  POST /runtime/remote/terminal             (MFA required)
+  POST /runtime/remote/desktop              (MFA required)
 """
 from __future__ import annotations
 
@@ -23,9 +20,11 @@ from datetime import datetime, timezone
 from pathlib import Path as _Path
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
-from pydantic import BaseModel, Field
+from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
+from pydantic import BaseModel
 
+from app.core.access_tiers import require_mfa_for_actions
+from app.models.user import User
 from app.state import device_state
 from app.services.remote_session_manager import remote_session_manager
 
@@ -33,7 +32,6 @@ router = APIRouter(prefix="/runtime")
 
 _agents: dict[str, dict[str, Any]] = {}
 _commands: dict[str, list[dict[str, Any]]] = {}
-
 _RUNTIME_STORE = _Path(os.environ.get("BHUDI_RUNTIME_STORE", "/tmp/bhudi_runtime_agents.json"))
 
 
@@ -99,8 +97,16 @@ class CommandResult(BaseModel):
     stderr: str = ""
 
 
-class CommandAck(BaseModel):
-    status: str = "running"
+class RemoteDesktopBody(BaseModel):
+    agent_id: str
+    session_mode: str = "control"
+    display_protocol: str = "native"
+    monitor_index: int = 0
+
+
+class RemoteTerminalBody(BaseModel):
+    agent_id: str
+    shell: str = "powershell"
 
 
 @router.post("/enroll", response_model=EnrollResponse)
@@ -191,11 +197,12 @@ def list_runtime_agents():
     return {"agents": list(_agents.values()), "count": len(_agents)}
 
 
-# Remaining command/remote handlers are loaded from the prior module body via
-# import side effects if present; keep essential stubs for production stability.
-
 @router.post("/agents/{agent_id}/commands")
-def create_command(agent_id: str, body: CommandCreate):
+def create_command(
+    agent_id: str,
+    body: CommandCreate,
+    _user: User = Depends(require_mfa_for_actions),
+):
     agent = _agents.get(agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
@@ -242,20 +249,11 @@ def command_result(agent_id: str, command_id: str, body: CommandResult):
     raise HTTPException(status_code=404, detail="Command not found")
 
 
-class RemoteDesktopBody(BaseModel):
-    agent_id: str
-    session_mode: str = "control"
-    display_protocol: str = "native"
-    monitor_index: int = 0
-
-
-class RemoteTerminalBody(BaseModel):
-    agent_id: str
-    shell: str = "powershell"
-
-
 @router.post("/remote/desktop")
-def remote_desktop(body: RemoteDesktopBody):
+def remote_desktop(
+    body: RemoteDesktopBody,
+    _user: User = Depends(require_mfa_for_actions),
+):
     agent = _agents.get(body.agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
@@ -273,7 +271,10 @@ def remote_desktop(body: RemoteDesktopBody):
 
 
 @router.post("/remote/terminal")
-def remote_terminal(body: RemoteTerminalBody):
+def remote_terminal(
+    body: RemoteTerminalBody,
+    _user: User = Depends(require_mfa_for_actions),
+):
     agent = _agents.get(body.agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
