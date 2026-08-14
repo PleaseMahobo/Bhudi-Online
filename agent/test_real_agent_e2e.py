@@ -53,7 +53,7 @@ def run_agent(identity_path: Path) -> subprocess.CompletedProcess[str]:
     )
 
 
-def main() -> None:
+def test_real_agent_e2e() -> None:
     server_env = os.environ.copy()
     server_env["PYTHONPATH"] = str(ROOT / "backend")
     server = subprocess.Popen(
@@ -74,7 +74,6 @@ def main() -> None:
             assert identity.exists(), "real agent did not persist enrollment identity"
             enrolled = json.loads(identity.read_text(encoding="utf-8"))
             agent_id = enrolled["agent_id"]
-            agent_token = enrolled["agent_token"]
 
             details = requests.get(f"{API}/runtime/agents/{agent_id}", timeout=5)
             assert details.ok, details.text
@@ -119,4 +118,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    test_real_agent_e2e()
