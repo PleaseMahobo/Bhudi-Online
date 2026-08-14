@@ -101,6 +101,15 @@ class RemoteTerminalBody(BaseModel):
     shell: str = "powershell"
 
 
+def _platform_metadata(platform: str | None) -> dict[str, str]:
+    normalized = (platform or "windows").strip().lower()
+    if normalized in {"darwin", "macos", "mac"}:
+        return {"platform_family": "macos", "default_shell": "/bin/zsh", "package_manager": "brew"}
+    if normalized in {"linux", "ubuntu", "debian", "rhel", "centos", "fedora"}:
+        return {"platform_family": "linux", "default_shell": "/bin/bash", "package_manager": "apt"}
+    return {"platform_family": "windows", "default_shell": "powershell.exe", "package_manager": "winget"}
+
+
 def _translate_command(platform: str | None, command: str) -> str:
     normalized = " ".join(command.strip().lower().split())
     platform = (platform or "windows").lower()
@@ -120,10 +129,10 @@ def enroll(req: EnrollRequest):
     token = str(uuid.uuid4())
     _agents[agent_id] = {
         "agent_id": agent_id, "agent_token": token, "hostname": req.hostname, "agent_version": req.agent_version,
-        "platform": req.platform, "status": "online", "registered_at": datetime.now(timezone.utc).isoformat(),
-        "last_seen": datetime.now(timezone.utc).isoformat(), "cpu_percent": None, "memory_percent": None,
-        "disk_percent": None, "ip_address": None, "enrollment_secret": req.enrollment_secret,
-        "commands_completed": 0, "commands_failed": 0,
+        "platform": req.platform, "platform_metadata": _platform_metadata(req.platform), "status": "online",
+        "registered_at": datetime.now(timezone.utc).isoformat(), "last_seen": datetime.now(timezone.utc).isoformat(),
+        "cpu_percent": None, "memory_percent": None, "disk_percent": None, "ip_address": None,
+        "enrollment_secret": req.enrollment_secret, "commands_completed": 0, "commands_failed": 0,
     }
     _commands[agent_id] = []
     device_state.register_device(agent_id)
@@ -175,16 +184,25 @@ def agent_details(agent_id: str):
     return agent
 
 
+@router.get("/agents/{agent_id}/platform")
+def agent_platform(agent_id: str):
+    agent = _agents.get(agent_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    return {"agent_id": agent_id, "platform": agent.get("platform"), **_platform_metadata(agent.get("platform"))}
+
+
 @router.post("/agents/{agent_id}/commands")
 def create_command(agent_id: str, body: CommandCreate, _user: User = Depends(require_mfa_for_actions)):
     agent = _agents.get(agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
     command_id = str(uuid.uuid4())
+    profile = _platform_metadata(agent.get("platform"))
     cmd = {
         "id": command_id, "command_id": command_id, "agent_id": agent_id, "command": body.command, "shell": body.shell,
         "status": "pending", "retry_count": 0,
-        "execution_profile": {"platform": agent.get("platform"), "translated_command": _translate_command(agent.get("platform"), body.command)},
+        "execution_profile": {**profile, "platform": agent.get("platform"), "translated_command": _translate_command(agent.get("platform"), body.command)},
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     _commands.setdefault(agent_id, []).append(cmd)
