@@ -29,6 +29,7 @@ from app.models.agent import Agent
 from app.models.agent_command import AgentCommand
 from app.models.automation_log import AutomationLog
 from app.models.device import Device
+from app.models.escalation_policy import EscalationPolicy
 from app.models.incident import Incident
 from app.models.response_action import ResponseAction
 from app.models.script import Script
