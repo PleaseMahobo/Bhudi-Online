@@ -33,14 +33,7 @@ class AuthService:
         self.users = UserRepository(db)
         self.refresh_tokens = RefreshTokenRepository(db)
 
-    def register(
-        self,
-        *,
-        email: str,
-        password: str,
-        first_name: str | None = None,
-        last_name: str | None = None,
-    ) -> User:
+    def register(self, *, email: str, password: str, first_name: str | None = None, last_name: str | None = None) -> User:
         email = self._normalize_email(email)
         if self.users.get_by_email(email):
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
@@ -183,25 +176,28 @@ class AuthService:
         return user
 
     def _is_password_reused(self, user: User, password: str) -> bool:
-        """Return True when the candidate matches any stored password-history hash."""
+        """Return True when the candidate matches a stored history value or hash.
+
+        Plaintext history is supported only as a legacy migration format; newly
+        written password history must contain password hashes.
+        """
         for stored in getattr(user, "password_history", None) or []:
             if not stored:
                 continue
+            if stored == password:
+                return True
             try:
                 valid, _ = verify_and_upgrade_password(password, stored)
                 if valid:
                     return True
             except Exception:
-                # Legacy plaintext history entries are tolerated during migration.
-                if stored == password:
-                    return True
+                continue
         return False
 
     @staticmethod
     def _assess_login_risk(*, ip_address: str | None, user_agent: str | None, device_name: str | None,
                            previous_login_at: datetime | None, current_login_at: datetime | None,
                            password_history: list[str] | None = None) -> int:
-        """Score obvious login-context anomalies from 0 (low) to 100 (high)."""
         score = 0
         if not ip_address:
             score += 15
@@ -220,12 +216,9 @@ class AuthService:
 
     @staticmethod
     def _is_session_anomalous(token: Any, *, ip_address: str | None, user_agent: str | None, device_name: str | None) -> bool:
-        """Detect session reuse from a materially different client context."""
-        for supplied, stored in (
-            (ip_address, getattr(token, "ip_address", None)),
-            (user_agent, getattr(token, "user_agent", None)),
-            (device_name, getattr(token, "device_name", None)),
-        ):
+        for supplied, stored in ((ip_address, getattr(token, "ip_address", None)),
+                                 (user_agent, getattr(token, "user_agent", None)),
+                                 (device_name, getattr(token, "device_name", None))):
             if supplied and stored and supplied != stored:
                 return True
         return False
