@@ -1,7 +1,6 @@
 const API_BASE = '';
 
 type ApiError = { detail?: unknown; error?: string; message?: string };
-
 type PostResult<T> = { response: Response; data: T };
 
 function errorMessage(data: ApiError, statusText: string, status: number): string {
@@ -62,23 +61,19 @@ export async function confirmPasswordReset(token: string, new_password: string) 
 }
 
 export async function mfaSetup() {
-  return postJson<{ secret: string; otpauth_uri: string; enabled: boolean }>('/api/auth/mfa/setup');
+  return postJson<{ enabled: boolean; email_sent: boolean }>('/api/auth/mfa/setup');
 }
 
 export async function mfaVerify(code: string) {
   let result = await postJsonRaw<{ enabled: boolean }>('/api/auth/mfa/verify', { code });
-
-  // The access cookie is short-lived. If MFA verification is attempted after
-  // it expires, use the refresh cookie to rotate the session and retry once.
   if (result.response.status === 401) {
     try {
       await refreshSession();
       result = await postJsonRaw<{ enabled: boolean }>('/api/auth/mfa/verify', { code });
     } catch {
-      // Fall through to the normal error below so the UI remains consistent.
+      // Fall through to the normal error below.
     }
   }
-
   if (!result.response.ok) {
     throw new Error(errorMessage(result.data as ApiError, result.response.statusText, result.response.status));
   }
