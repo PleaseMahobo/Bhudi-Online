@@ -102,24 +102,15 @@ class RemoteTerminalBody(BaseModel):
 
 
 def _translate_command(platform: str | None, command: str) -> str:
-    """Translate a small set of common package operations to the agent OS."""
     normalized = " ".join(command.strip().lower().split())
     platform = (platform or "windows").lower()
     parts = normalized.split()
-    if len(parts) == 2 and parts[0] in {"install", "update", "uninstall"}:
-        action, package = parts
-        if platform == "linux" and package == "nginx":
-            return {
-                "install": "sudo apt-get update && sudo apt-get install -y nginx",
-                "update": "sudo apt-get update && sudo apt-get install -y nginx",
-                "uninstall": "sudo apt-get remove -y nginx",
-            }[action]
-        if platform in {"darwin", "macos"} and package == "nginx":
-            return {
-                "install": "brew update && brew install nginx",
-                "update": "brew update && brew upgrade nginx",
-                "uninstall": "brew uninstall nginx",
-            }[action]
+    if len(parts) == 2 and parts[0] in {"install", "update", "uninstall"} and parts[1] == "nginx":
+        action = parts[0]
+        if platform == "linux":
+            return {"install": "sudo apt-get update && sudo apt-get install -y nginx", "update": "sudo apt-get update && sudo apt-get install -y nginx", "uninstall": "sudo apt-get remove -y nginx"}[action]
+        if platform in {"darwin", "macos"}:
+            return {"install": "brew update && brew install nginx", "update": "brew update && brew upgrade nginx", "uninstall": "brew uninstall nginx"}[action]
     return command
 
 
@@ -128,11 +119,11 @@ def enroll(req: EnrollRequest):
     agent_id = str(uuid.uuid4())
     token = str(uuid.uuid4())
     _agents[agent_id] = {
-        "agent_id": agent_id, "agent_token": token, "hostname": req.hostname,
-        "agent_version": req.agent_version, "platform": req.platform, "status": "online",
-        "registered_at": datetime.now(timezone.utc).isoformat(), "last_seen": datetime.now(timezone.utc).isoformat(),
-        "cpu_percent": None, "memory_percent": None, "disk_percent": None, "ip_address": None,
-        "enrollment_secret": req.enrollment_secret, "commands_completed": 0, "commands_failed": 0,
+        "agent_id": agent_id, "agent_token": token, "hostname": req.hostname, "agent_version": req.agent_version,
+        "platform": req.platform, "status": "online", "registered_at": datetime.now(timezone.utc).isoformat(),
+        "last_seen": datetime.now(timezone.utc).isoformat(), "cpu_percent": None, "memory_percent": None,
+        "disk_percent": None, "ip_address": None, "enrollment_secret": req.enrollment_secret,
+        "commands_completed": 0, "commands_failed": 0,
     }
     _commands[agent_id] = []
     device_state.register_device(agent_id)
@@ -160,17 +151,15 @@ def heartbeat(req: HeartbeatRequest):
             device_state.devices[req.agent_id]["ip_address"] = req.ip_address
     try:
         from app.services.metrics_service import record_heartbeat_metrics
-        record_heartbeat_metrics(agent_id=req.agent_id, hostname=req.hostname or agent.get("hostname"),
-                                 cpu_percent=req.cpu_percent, memory_percent=req.memory_percent,
-                                 disk_percent=req.disk_percent, ip_address=req.ip_address or agent.get("ip_address"),
-                                 status=req.status)
+        record_heartbeat_metrics(agent_id=req.agent_id, hostname=req.hostname or agent.get("hostname"), cpu_percent=req.cpu_percent,
+                                 memory_percent=req.memory_percent, disk_percent=req.disk_percent,
+                                 ip_address=req.ip_address or agent.get("ip_address"), status=req.status)
     except Exception as exc:
         print(f"[runtime] metrics persist skipped: {exc}")
     pending = sum(1 for c in _commands.get(req.agent_id, []) if c["status"] in ("pending", "dispatched"))
     _persist_agents()
-    return {"ok": True, "pending_commands": pending, "heartbeat_interval": 30,
-            "cpu_percent": agent.get("cpu_percent"), "memory_percent": agent.get("memory_percent"),
-            "disk_percent": agent.get("disk_percent")}
+    return {"ok": True, "pending_commands": pending, "heartbeat_interval": 30, "cpu_percent": agent.get("cpu_percent"),
+            "memory_percent": agent.get("memory_percent"), "disk_percent": agent.get("disk_percent")}
 
 
 @router.get("/agents")
@@ -193,8 +182,8 @@ def create_command(agent_id: str, body: CommandCreate, _user: User = Depends(req
         raise HTTPException(status_code=404, detail="Agent not found")
     command_id = str(uuid.uuid4())
     cmd = {
-        "id": command_id, "command_id": command_id, "agent_id": agent_id, "command": body.command,
-        "shell": body.shell, "status": "pending", "retry_count": 0,
+        "id": command_id, "command_id": command_id, "agent_id": agent_id, "command": body.command, "shell": body.shell,
+        "status": "pending", "retry_count": 0,
         "execution_profile": {"platform": agent.get("platform"), "translated_command": _translate_command(agent.get("platform"), body.command)},
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
@@ -210,14 +199,6 @@ def command_history(agent_id: str):
     return {"commands": list(reversed(_commands.get(agent_id, [])))}
 
 
-@router.get("/agents/{agent_id}/commands/{command_id}")
-def command_details(agent_id: str, command_id: str):
-    for command in _commands.get(agent_id, []):
-        if command.get("id") == command_id or command.get("command_id") == command_id:
-            return command
-    raise HTTPException(status_code=404, detail="Command not found")
-
-
 @router.get("/agents/{agent_id}/commands/pending")
 def pending_commands(agent_id: str, agent_token: str | None = None):
     agent = _agents.get(agent_id)
@@ -226,10 +207,18 @@ def pending_commands(agent_id: str, agent_token: str | None = None):
     if agent_token is not None and agent_token != agent.get("agent_token"):
         raise HTTPException(status_code=401, detail="Invalid agent credentials")
     pending = [c for c in _commands.get(agent_id, []) if c.get("status") == "pending"]
-    for c in pending:
-        c["status"] = "dispatched"
+    for command in pending:
+        command["status"] = "dispatched"
     _persist_agents()
     return {"commands": pending}
+
+
+@router.get("/agents/{agent_id}/commands/{command_id}")
+def command_details(agent_id: str, command_id: str):
+    for command in _commands.get(agent_id, []):
+        if command.get("id") == command_id or command.get("command_id") == command_id:
+            return command
+    raise HTTPException(status_code=404, detail="Command not found")
 
 
 @router.post("/agents/{agent_id}/commands/{command_id}/ack")
@@ -294,8 +283,7 @@ def remote_desktop(body: RemoteDesktopBody, _user: User = Depends(require_mfa_fo
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
     session = remote_session_manager.create_session(agent_id=body.agent_id, session_type="desktop", metadata=body.model_dump())
-    return {"session_id": session.session_id, "session_type": "desktop",
-            "stream_path": f"/api/v1/remote-access/sessions/{session.session_id}/dashboard", "status": session.status}
+    return {"session_id": session.session_id, "session_type": "desktop", "stream_path": f"/api/v1/remote-access/sessions/{session.session_id}/dashboard", "status": session.status}
 
 
 @router.post("/remote/terminal")
@@ -304,5 +292,4 @@ def remote_terminal(body: RemoteTerminalBody, _user: User = Depends(require_mfa_
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
     session = remote_session_manager.create_session(agent_id=body.agent_id, session_type="terminal", metadata=body.model_dump())
-    return {"session_id": session.session_id, "session_type": "terminal",
-            "stream_path": f"/api/v1/remote-access/sessions/{session.session_id}/dashboard", "status": session.status}
+    return {"session_id": session.session_id, "session_type": "terminal", "stream_path": f"/api/v1/remote-access/sessions/{session.session_id}/dashboard", "status": session.status}
