@@ -1,13 +1,20 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import ForeignKey, String, Uuid, func
 from sqlalchemy.dialects.postgresql import TIMESTAMP
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
+
+
+def _as_utc(dt: datetime) -> datetime:
+    """Normalize DB timestamps so naive/aware compares never TypeError (→ HTTP 500)."""
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
 
 
 class PasswordResetToken(Base):
@@ -39,8 +46,7 @@ class PasswordResetToken(Base):
 
     @property
     def is_expired(self) -> bool:
-        from datetime import datetime, timezone
-        return self.expires_at <= datetime.now(timezone.utc)
+        return _as_utc(self.expires_at) <= datetime.now(timezone.utc)
 
     @property
     def is_used(self) -> bool:
