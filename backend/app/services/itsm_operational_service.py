@@ -9,7 +9,6 @@ from uuid import UUID, uuid4
 from sqlalchemy.orm import Session
 
 from app.models.alert import Alert
-from app.models.escalation_policy import EscalationPolicy
 from app.models.incident import Incident
 from app.models.itsm import ServiceTicket, TicketWorkNote
 from app.models.itsm_extended import ITSMAssignmentGroup, ITSMTicketHistory, ITSMTicketAttachment
@@ -28,11 +27,6 @@ class ITSMOperationalService:
     @staticmethod
     def _now() -> datetime:
         return datetime.now(timezone.utc)
-
-    @staticmethod
-    def _tenant(ticket: ServiceTicket, tenant_id: UUID | None) -> None:
-        if tenant_id is not None and ticket.tenant_id != tenant_id:
-            raise ValueError("Ticket not found")
 
     def assign_ticket(self, ticket: ServiceTicket, technician_id: UUID, group_id: UUID | None, actor: str | None) -> ITSMTicketAssignment:
         technician = self.db.query(Technician).filter(Technician.id == technician_id, Technician.tenant_id == ticket.tenant_id, Technician.status == "active").first()
