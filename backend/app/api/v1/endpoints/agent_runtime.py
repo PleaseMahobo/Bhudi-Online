@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import secrets
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path as _Path
@@ -126,7 +127,8 @@ def _translate_command(platform: str | None, command: str) -> str:
 def _require_agent_token(agent_id: str, agent_token: str | None) -> dict[str, Any]:
     """Authenticate an agent callback without revealing whether an agent ID exists."""
     agent = _agents.get(agent_id)
-    if not agent or not agent_token or agent_token != agent.get("agent_token"):
+    stored_token = agent.get("agent_token") if agent else None
+    if not agent or not agent_token or not stored_token or not secrets.compare_digest(agent_token, stored_token):
         raise HTTPException(status_code=401, detail="Invalid agent credentials")
     return agent
 
@@ -275,7 +277,9 @@ def command_result(agent_id: str, command_id: str, body: CommandResult, agent_to
 
 @router.websocket("/agents/{agent_id}/stream")
 async def agent_stream(websocket: WebSocket, agent_id: str, agent_token: str | None = None):
-    if agent_id not in _agents or not agent_token or agent_token != _agents[agent_id].get("agent_token"):
+    agent = _agents.get(agent_id)
+    stored_token = agent.get("agent_token") if agent else None
+    if not agent or not agent_token or not stored_token or not secrets.compare_digest(agent_token, stored_token):
         await websocket.close(code=4401)
         return
     await websocket.accept()
