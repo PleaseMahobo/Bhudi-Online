@@ -1,61 +1,37 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-  Bhudi RMM Agent installer for Windows.
-
+  Bhudi RMM Agent Windows service installer.
 .DESCRIPTION
-  Downloads the agent from GitHub (or uses a local source), installs to
-  Program Files\BhudiAgent, creates a venv, writes config, and registers a
-  Scheduled Task to run at startup.
-
-.PARAMETER ServerUrl
-  Backend base URL (no trailing slash). Example:
-  https://bhudi-online-production.up.railway.app
-
-.PARAMETER InstallDir
-  Install directory. Default: $env:ProgramFiles\BhudiAgent
-
-.PARAMETER SkipTask
-  Do not create the Scheduled Task (manual run only).
-
-.EXAMPLE
-  irm https://your-app.vercel.app/api/agent/download?os=windows | iex
-
-.EXAMPLE
-  .\install.ps1 -ServerUrl "https://bhudi-online-production.up.railway.app"
+  Installs the agent under Program Files, creates an isolated virtual
+  environment, installs dependencies, registers BhudiAgent as a native
+  Windows service through pywin32, configures automatic startup/recovery,
+  and starts the service.
+  ServerUrl is required deliberately so a new endpoint can never silently
+  point at production.
 #>
 [CmdletBinding()]
 param(
-  [string]$ServerUrl = $env:BHUDI_SERVER_URL,
+  [Parameter(Mandatory=$true)]
+  [ValidatePattern('^https://')]
+  [string]$ServerUrl,
   [string]$InstallDir = $(Join-Path ${env:ProgramFiles} "BhudiAgent"),
   [string]$RepoZipUrl = "https://github.com/PleaseMahobo/Bhudi-Online/archive/refs/heads/main.zip",
-  [switch]$SkipTask,
-  [switch]$StartNow
+  [switch]$Force
 )
-
 $ErrorActionPreference = "Stop"
-
+$ServiceName = "BhudiAgent"
 function Write-Step($msg) { Write-Host "[Bhudi] $msg" -ForegroundColor Cyan }
-function Write-Ok($msg)   { Write-Host "[Bhudi] $msg" -ForegroundColor Green }
-function Write-Warn($msg) { Write-Host "[Bhudi] $msg" -ForegroundColor Yellow }
+function Write-Ok($msg) { Write-Host "[Bhudi] $msg" -ForegroundColor Green }
 
-if (-not $ServerUrl -or $ServerUrl.Trim() -eq "") {
-  $ServerUrl = "https://bhudi-online-production.up.railway.app"
-}
-$ServerUrl = $ServerUrl.TrimEnd("/")
-
-# Prefer elevation for Program Files + Scheduled Task
 $principal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
-$isAdmin = $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-if (-not $isAdmin) {
-  Write-Warn "Not running as Administrator. Install will use user profile and a per-user startup task."
-  $InstallDir = Join-Path $env:LOCALAPPDATA "BhudiAgent"
+if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+  throw "Run this installer from an elevated PowerShell window (Run as Administrator)."
 }
-
+$ServerUrl = $ServerUrl.TrimEnd('/')
 Write-Step "Server URL: $ServerUrl"
 Write-Step "Install dir: $InstallDir"
 
-# --- Python ---
 $python = $null
 foreach ($cand in @("py", "python", "python3")) {
   try {
@@ -63,106 +39,63 @@ foreach ($cand in @("py", "python", "python3")) {
     if ($LASTEXITCODE -eq 0 -and $v) { $python = $v.Trim(); break }
   } catch {}
 }
-if (-not $python) {
-  throw "Python 3 was not found. Install Python 3.11+ from https://www.python.org/downloads/ (check 'Add python.exe to PATH') and re-run."
-}
+if (-not $python) { throw "Python 3.11+ was not found. Install Python and rerun the installer." }
 Write-Ok "Python: $python"
 
-# --- Fetch agent sources ---
 $temp = Join-Path $env:TEMP ("bhudi-agent-" + [guid]::NewGuid().ToString("n"))
-New-Item -ItemType Directory -Path $temp -Force | Out-Null
 $zipPath = Join-Path $temp "repo.zip"
-
-Write-Step "Downloading agent package..."
+New-Item -ItemType Directory -Path $temp -Force | Out-Null
 try {
+  Write-Step "Downloading Bhudi agent package..."
   [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
   Invoke-WebRequest -Uri $RepoZipUrl -OutFile $zipPath -UseBasicParsing
-} catch {
-  throw "Failed to download agent package from $RepoZipUrl. $_"
-}
-
-Expand-Archive -Path $zipPath -DestinationPath $temp -Force
-$agentSrc = Get-ChildItem -Path $temp -Directory | Where-Object { $_.Name -like "Bhudi-Online-*" } | ForEach-Object { Join-Path $_.FullName "agent" } | Select-Object -First 1
-if (-not $agentSrc -or -not (Test-Path (Join-Path $agentSrc "main.py"))) {
-  throw "Could not locate agent/main.py inside the downloaded archive."
-}
-
-# --- Install files ---
-if (Test-Path $InstallDir) {
-  Write-Step "Updating existing install at $InstallDir"
-} else {
-  New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
-}
-
-Copy-Item -Path (Join-Path $agentSrc "*") -Destination $InstallDir -Recurse -Force
-
-$config = @{
-  server_url          = $ServerUrl
-  heartbeat_interval  = 10
-}
-$config | ConvertTo-Json | Set-Content -Path (Join-Path $InstallDir "agent_config.json") -Encoding UTF8
-
-# --- venv + deps ---
-$venvDir = Join-Path $InstallDir ".venv"
-Write-Step "Creating virtual environment..."
-& $python -m venv $venvDir
-$venvPython = Join-Path $venvDir "Scripts\python.exe"
-$req = Join-Path $InstallDir "requirements.txt"
-Write-Step "Installing dependencies..."
-& $venvPython -m pip install --upgrade pip | Out-Null
-& $venvPython -m pip install -r $req
-if ($LASTEXITCODE -ne 0) { throw "pip install failed" }
-
-# Runner script used by the scheduled task
-$runner = @"
-@echo off
-set BHUDI_SERVER_URL=$ServerUrl
-cd /d "$InstallDir"
-"$venvPython" main.py
-"@
-$runnerPath = Join-Path $InstallDir "run-agent.bat"
-Set-Content -Path $runnerPath -Value $runner -Encoding ASCII
-
-# --- Scheduled Task ---
-if (-not $SkipTask) {
-  $taskName = "BhudiAgent"
-  Write-Step "Registering Scheduled Task '$taskName'..."
-  try {
-    Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
-  } catch {}
-
-  $action = New-ScheduledTaskAction -Execute $runnerPath
-  if ($isAdmin) {
-    $taskPrincipal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
-  } else {
-    $taskPrincipal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
+  Expand-Archive -Path $zipPath -DestinationPath $temp -Force
+  $root = Get-ChildItem -Path $temp -Directory | Where-Object { $_.Name -like "Bhudi-Online-*" } | Select-Object -First 1
+  $agentSrc = if ($root) { Join-Path $root.FullName "agent" } else { $null }
+  if (-not $agentSrc -or -not (Test-Path (Join-Path $agentSrc "bhudi_agent.py"))) {
+    throw "Downloaded package does not contain agent/bhudi_agent.py."
   }
-  $trigger = New-ScheduledTaskTrigger -AtStartup
-  $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit ([TimeSpan]::Zero)
-  Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $taskPrincipal -Settings $settings -Force | Out-Null
-  Write-Ok "Scheduled Task registered (runs at startup)."
 
-  if ($StartNow -or $true) {
-    try {
-      Start-ScheduledTask -TaskName $taskName
-      Write-Ok "Agent task started."
-    } catch {
-      Write-Warn "Could not start task immediately: $_"
-      Write-Step "Starting agent in background..."
-      Start-Process -FilePath $runnerPath -WindowStyle Hidden
+  if (Test-Path $InstallDir) {
+    if (-not $Force) { throw "$InstallDir already exists. Use -Force to replace it." }
+    Stop-Service -Name $ServiceName -Force -ErrorAction SilentlyContinue
+    if (Test-Path (Join-Path $InstallDir "windows_service.py")) {
+      & $python (Join-Path $InstallDir "windows_service.py") remove 2>$null
     }
   }
-} else {
-  Write-Warn "SkipTask set — start manually with: $runnerPath"
+  New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
+  Copy-Item -Path (Join-Path $agentSrc "*") -Destination $InstallDir -Recurse -Force
+
+  @{ server_url = $ServerUrl; heartbeat_interval = 30 } | ConvertTo-Json | Set-Content -Path (Join-Path $InstallDir "agent_config.json") -Encoding UTF8
+  $venvDir = Join-Path $InstallDir ".venv"
+  Write-Step "Creating isolated Python environment..."
+  & $python -m venv $venvDir
+  if ($LASTEXITCODE -ne 0) { throw "Python virtual environment creation failed." }
+  $venvPython = Join-Path $venvDir "Scripts\python.exe"
+
+  Write-Step "Installing agent dependencies..."
+  & $venvPython -m pip install --disable-pip-version-check --upgrade pip
+  & $venvPython -m pip install --disable-pip-version-check -r (Join-Path $InstallDir "requirements.txt")
+  if ($LASTEXITCODE -ne 0) { throw "Agent dependency installation failed." }
+
+  Write-Step "Installing BhudiAgent Windows service..."
+  & $venvPython (Join-Path $InstallDir "windows_service.py") install
+  if ($LASTEXITCODE -ne 0) { throw "Windows service registration failed." }
+  & $venvPython (Join-Path $InstallDir "windows_service.py") --startup auto update
+  & sc.exe description $ServiceName "Bhudi remote monitoring, management and security agent." | Out-Null
+  & sc.exe failure $ServiceName reset= 86400 actions= restart/5000/restart/10000/restart/30000 | Out-Null
+
+  Write-Step "Starting BhudiAgent..."
+  & $venvPython (Join-Path $InstallDir "windows_service.py") start
+  if ($LASTEXITCODE -ne 0) { throw "BhudiAgent service failed to start." }
+  Start-Sleep -Seconds 3
+  $svc = Get-Service -Name $ServiceName -ErrorAction Stop
+  if ($svc.Status -ne "Running") { throw "BhudiAgent is not running. Inspect $InstallDir\agent-service.log." }
+
+  Write-Ok "Bhudi Agent installed and running as a Windows service."
+  Write-Host "  Service : $ServiceName"
+  Write-Host "  Server  : $ServerUrl"
+  Write-Host "  Install : $InstallDir"
+} finally {
+  Remove-Item -Path $temp -Recurse -Force -ErrorAction SilentlyContinue
 }
-
-# Cleanup
-Remove-Item -Path $temp -Recurse -Force -ErrorAction SilentlyContinue
-
-Write-Host ""
-Write-Ok "Bhudi Agent installed successfully."
-Write-Host "  Directory : $InstallDir"
-Write-Host "  Server    : $ServerUrl"
-Write-Host "  Runner    : $runnerPath"
-Write-Host ""
-Write-Host "The agent will enroll on first heartbeat and appear under Devices / Assets." -ForegroundColor Gray
