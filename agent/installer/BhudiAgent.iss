@@ -1,17 +1,19 @@
 #define MyAppName "Bhudi Agent"
-#define MyAppVersion "2.5.0"
+#define MyAppVersion "2.5.1"
 #define MyAppPublisher "Bhudi"
 #define MyAppExeName "bhudi-agent.exe"
 
 [Setup]
-AppId={{8A2B4E1C-6B3A-4A74-9E7D-BHUDIAGENT01}
+AppId={{8A2B4E1C-6B3A-4A74-9E7D-1A6D1A9E0101}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
 DefaultDirName={autopf}\Bhudi\Agent
 DefaultGroupName=Bhudi Agent
 PrivilegesRequired=admin
-ArchitecturesInstallIn64BitMode=x64
+ArchitecturesAllowed=x64compatible
+ArchitecturesInstallIn64BitMode=x64compatible
+DefaultDirName={autopf}\Bhudi\Agent
 OutputDir=..\dist
 OutputBaseFilename=BhudiAgent-Setup
 Compression=lzma2
@@ -23,7 +25,7 @@ UninstallDisplayIcon={app}\{#MyAppExeName}
 Source: "..\native\dist\bhudi-agent.exe"; DestDir: "{app}"; Flags: ignoreversion
 
 [UninstallRun]
-Filename: "{app}\{#MyAppExeName}"; Parameters: "uninstall"; Flags: runhidden waituntilterminated
+Filename: "{app}\{#MyAppExeName}"; Parameters: "uninstall"; Flags: runhidden waituntilterminated; RunOnceId: "BhudiAgentUninstall"
 
 [Code]
 var
@@ -55,7 +57,7 @@ begin
     'Enter the Bhudi backend URL for this customer.');
   ServerPage.Add('Server URL:', False);
   Server := CmdLineValue('SERVER');
-  if Server = '' then Server := 'https://bhudi-online-production.up.railway.app';
+  if Server = '' then Server := 'https://generous-presence-production-b237.up.railway.app';
   ServerPage.Values[0] := Server;
 
   TokenPage := CreateInputQueryPage(ServerPage.ID,
