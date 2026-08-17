@@ -1,33 +1,66 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import { MailCheck, ShieldCheck, Sparkles } from 'lucide-react';
-import { mfaSetup, mfaVerify } from '@/lib/auth-client';
+import { mfaVerify } from '@/lib/auth-client';
 
-/**
- * Standard Bhudi MFA enrollment: the provisioning QR code is delivered by
- * email and is never exposed as a raw secret in the browser UI.
- */
 export default function MfaSetupPage() {
-  const router = useRouter();
   const [code, setCode] = useState('');
   const [error, setError] = useState('');
+  const [info, setInfo] = useState('');
   const [loading, setLoading] = useState(false);
   const [started, setStarted] = useState(false);
   const [done, setDone] = useState(false);
+  const [alreadyEnabled, setAlreadyEnabled] = useState(false);
 
-  async function startSetup() {
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch('/api/auth/me', { credentials: 'include', cache: 'no-store' });
+        const data = await res.json().catch(() => ({}));
+        if (data?.mfa_enabled || data?.user?.mfa_enabled) {
+          setAlreadyEnabled(true);
+          setDone(true);
+        }
+      } catch {
+        /* ignore */
+      }
+    })();
+  }, []);
+
+  async function startSetup(forceNew = false) {
     setError('');
+    setInfo('');
     setLoading(true);
     try {
-      const result = await mfaSetup();
+      const path = forceNew ? '/api/auth/mfa/setup?force_new=1' : '/api/auth/mfa/setup';
+      const res = await fetch(path, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+        body: '{}',
+      });
+      const result = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(
+          typeof result?.detail === 'string'
+            ? result.detail
+            : result?.message || 'Could not start MFA setup'
+        );
+      }
+      if (result.already_enabled) {
+        setAlreadyEnabled(true);
+        setDone(true);
+        setInfo(result.message || 'MFA is already enabled.');
+        return;
+      }
       if (!result.email_sent) {
         setError('We could not send the MFA setup email. Please try again.');
         return;
       }
       setStarted(true);
+      setInfo(result.message || 'Check your email for the QR code.');
     } catch (err: any) {
       setError(err?.message || 'Could not send the MFA setup email');
     } finally {
@@ -42,13 +75,15 @@ export default function MfaSetupPage() {
     try {
       const res = await mfaVerify(code.trim());
       if (!res.enabled) {
-        setError('Invalid code — try again.');
+        setError('Invalid code — use the current code from the authenticator entry you scanned.');
         return;
       }
       if (typeof window !== 'undefined') {
         localStorage.setItem('bhudi_access_tier', 'secured');
+        localStorage.setItem('bhudi_mfa_enabled', '1');
       }
       setDone(true);
+      setAlreadyEnabled(true);
     } catch (err: any) {
       setError(err?.message || 'Verification failed');
     } finally {
@@ -68,50 +103,73 @@ export default function MfaSetupPage() {
           </Link>
           <p className="mt-3 text-sm text-slate-400">Secure your account</p>
           <p className="mt-1 text-xs text-slate-500">
-            Multi-factor authentication is required before remote access and command execution.
+            Scan the QR once. After that, login only needs the 6-digit authenticator code.
           </p>
         </div>
 
-        {done ? (
+        {done || alreadyEnabled ? (
           <div className="space-y-4 text-center">
-            <ShieldCheck className="mx-auto text-emerald-400" size={40} />
-            <p className="text-sm text-slate-300">MFA enabled. Privileged actions are unlocked.</p>
-            <button
-              type="button"
-              onClick={() => router.push('/dashboard')}
-              className="w-full rounded-xl bg-indigo-600 py-3 text-sm font-semibold text-white hover:bg-indigo-500"
+            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-emerald-500/15 text-emerald-400">
+              <ShieldCheck size={28} />
+            </div>
+            <p className="text-sm text-slate-300">
+              MFA is enabled. Future logins only need the 6-digit code from your authenticator — Bhudi
+              will not keep emailing new QR codes.
+            </p>
+            {info ? <p className="text-xs text-slate-500">{info}</p> : null}
+            <Link
+              href="/dashboard"
+              className="inline-flex w-full items-center justify-center rounded-xl bg-indigo-600 py-3 text-sm font-semibold text-white hover:bg-indigo-500"
             >
-              Back to dashboard
-            </button>
+              Continue to dashboard
+            </Link>
+            <Link href="/billing" className="block text-center text-xs text-slate-500 hover:text-slate-300">
+              Manage subscription
+            </Link>
           </div>
         ) : !started ? (
           <div className="space-y-4">
-            <div className="rounded-xl border border-slate-700 bg-slate-950 p-4 text-center">
-              <MailCheck className="mx-auto mb-3 text-indigo-400" size={32} />
-              <p className="text-sm font-medium text-white">We'll email your authenticator QR code</p>
-              <p className="mt-2 text-xs leading-5 text-slate-400">
-                The QR code will be sent to your registered Bhudi email address. We never display your authenticator secret on this page.
-              </p>
+            <div className="rounded-xl border border-slate-700 bg-slate-800/50 p-4 text-left text-xs leading-5 text-slate-400">
+              <p className="font-medium text-slate-200">How MFA works</p>
+              <ol className="mt-2 list-decimal space-y-1 pl-4">
+                <li>We email you one QR code.</li>
+                <li>You scan it once in your authenticator app.</li>
+                <li>You enter the 6-digit code here to finish setup.</li>
+                <li>Every later login: password + that same 6-digit code only.</li>
+              </ol>
             </div>
             {error && <p className="text-sm text-red-300">{error}</p>}
+            {info && <p className="text-sm text-emerald-300">{info}</p>}
             <button
               type="button"
               disabled={loading}
-              onClick={() => void startSetup()}
+              onClick={() => void startSetup(false)}
               className="w-full rounded-xl bg-indigo-600 py-3 text-sm font-semibold text-white hover:bg-indigo-500 disabled:opacity-50"
             >
-              {loading ? 'Sending QR code…' : 'Email me the QR code'}
+              {loading ? 'Sending…' : 'Email me the QR code'}
             </button>
-            <Link href="/dashboard" className="block text-center text-xs text-slate-500 hover:text-slate-300">
-              Continue browsing without MFA
+            <p className="text-center text-xs text-slate-500">
+              Already scanned a QR before?{' '}
+              <button type="button" className="text-indigo-400 hover:text-indigo-300" onClick={() => setStarted(true)}>
+                Enter your 6-digit code
+              </button>
+            </p>
+            <Link href="/billing" className="block text-center text-xs text-slate-500 hover:text-slate-300">
+              Complete payment first
+            </Link>
+            <Link href="/dashboard" className="block text-center text-xs text-slate-600 hover:text-slate-400">
+              Back to trial dashboard
             </Link>
           </div>
         ) : (
           <form onSubmit={onVerify} className="space-y-4">
             <div className="rounded-xl border border-emerald-900/60 bg-emerald-950/30 p-4">
-              <p className="text-sm font-medium text-emerald-300">Check your email</p>
+              <p className="flex items-center gap-2 text-sm font-medium text-emerald-300">
+                <MailCheck size={16} /> Check your email (or use an existing scan)
+              </p>
               <p className="mt-1 text-xs leading-5 text-slate-400">
-                We sent your Bhudi MFA QR code by email. Scan it with Google Authenticator, Microsoft Authenticator, Authy, 1Password, or another compatible authenticator app.
+                Use the <strong className="text-slate-300">same</strong> authenticator entry. Do not keep
+                adding new Bhudi accounts for every email.
               </p>
             </div>
             <div>
@@ -127,6 +185,7 @@ export default function MfaSetupPage() {
               />
             </div>
             {error && <p className="text-sm text-red-300">{error}</p>}
+            {info && <p className="text-sm text-emerald-300">{info}</p>}
             <button
               type="submit"
               disabled={loading || code.length !== 6}
@@ -137,10 +196,26 @@ export default function MfaSetupPage() {
             <button
               type="button"
               disabled={loading}
-              onClick={() => void startSetup()}
+              onClick={() => void startSetup(false)}
               className="w-full rounded-xl border border-slate-700 py-3 text-sm font-semibold text-slate-300 hover:bg-slate-800 disabled:opacity-50"
             >
-              Send a new QR code
+              Resend same QR by email
+            </button>
+            <button
+              type="button"
+              disabled={loading}
+              onClick={() => {
+                if (
+                  confirm(
+                    'This creates a NEW secret. Delete all old Bhudi entries in your authenticator first, then scan the new QR.'
+                  )
+                ) {
+                  void startSetup(true);
+                }
+              }}
+              className="w-full text-xs text-slate-500 hover:text-amber-400"
+            >
+              Reset MFA (new QR — only if lost access)
             </button>
           </form>
         )}
