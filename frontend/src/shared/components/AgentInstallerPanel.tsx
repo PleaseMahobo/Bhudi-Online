@@ -7,12 +7,11 @@ const DEFAULT_SERVER =
   (typeof process !== 'undefined' && process.env.NEXT_PUBLIC_API_URL?.replace(/\/api\/v1\/?$/, '')) ||
   'https://bhudi-online-production.up.railway.app';
 const RELEASE = 'https://github.com/PleaseMahobo/Bhudi-Online/releases/download/agent-native-latest';
-const SETUP = `${RELEASE}/bhudi-agent-setup.exe`;
+const SETUP = `${RELEASE}/BhudiAgent-Setup.exe`;
 
-type OsKey = 'exe' | 'msi' | 'linux' | 'linux-arm64' | 'macos' | 'macos-intel';
+type OsKey = 'exe' | 'linux' | 'linux-arm64' | 'macos' | 'macos-intel';
 const OS_OPTIONS: { key: OsKey; label: string; file: string }[] = [
-  { key: 'exe', label: 'Windows (.exe)', file: 'bhudi-agent-setup.exe' },
-  { key: 'msi', label: 'Windows (.msi)', file: 'bhudi-agent-setup.msi' },
+  { key: 'exe', label: 'Windows Installer (.exe)', file: 'BhudiAgent-Setup.exe' },
   { key: 'linux', label: 'Linux x64', file: 'bhudi-agent-linux-amd64' },
   { key: 'linux-arm64', label: 'Linux ARM64', file: 'bhudi-agent-linux-arm64' },
   { key: 'macos', label: 'macOS Apple Silicon', file: 'bhudi-agent-darwin-arm64' },
@@ -44,8 +43,7 @@ export default function AgentInstallerPanel({ serverUrl = DEFAULT_SERVER, compac
   const installCmd = useMemo(() => {
     if (!token) return 'Generate a customer enrollment token first.';
     switch (os) {
-      case 'exe': return `bhudi-agent-setup.exe -server ${cleanServer} -enrollment-token ${token}`;
-      case 'msi': return `msiexec /i bhudi-agent-setup.msi /qn`;
+      case 'exe': return `BhudiAgent-Setup.exe /SERVER="${cleanServer}" /TOKEN="${token}"`;
       case 'linux': return `chmod +x bhudi-agent-linux-amd64\nsudo ./bhudi-agent-linux-amd64 install -server ${cleanServer} -enrollment-token ${token}`;
       case 'linux-arm64': return `chmod +x bhudi-agent-linux-arm64\nsudo ./bhudi-agent-linux-arm64 install -server ${cleanServer} -enrollment-token ${token}`;
       case 'macos': return `chmod +x bhudi-agent-darwin-arm64\n./bhudi-agent-darwin-arm64 install -server ${cleanServer} -enrollment-token ${token}`;
@@ -57,9 +55,16 @@ export default function AgentInstallerPanel({ serverUrl = DEFAULT_SERVER, compac
     void navigator.clipboard.writeText(text).then(() => { setCopied(kind); setTimeout(() => setCopied(''), 2000); });
   }
 
+  function downloadInstaller() {
+    const a = document.createElement('a');
+    a.href = SETUP;
+    a.download = 'BhudiAgent-Setup.exe';
+    a.click();
+  }
+
   function downloadBootstrap() {
     if (!token) return;
-    const script = `@echo off\r\nset "BHUDI_SERVER_URL=${cleanServer}"\r\nset "BHUDI_ENROLLMENT_TOKEN=${token}"\r\nPowerShell -NoProfile -ExecutionPolicy Bypass -Command "$u='${SETUP}'; $p=Join-Path $env:TEMP 'bhudi-agent-setup.exe'; Invoke-WebRequest -UseBasicParsing -Uri $u -OutFile $p; Start-Process $p -ArgumentList '-server','${cleanServer}','-enrollment-token','${token}' -Verb RunAs -Wait"\r\n`;
+    const script = `@echo off\r\nset "BHUDI_SERVER_URL=${cleanServer}"\r\nset "BHUDI_ENROLLMENT_TOKEN=${token}"\r\nPowerShell -NoProfile -ExecutionPolicy Bypass -Command "$u='${SETUP}'; $p=Join-Path $env:TEMP 'BhudiAgent-Setup.exe'; Invoke-WebRequest -UseBasicParsing -Uri $u -OutFile $p; Start-Process $p -ArgumentList '/SERVER=${cleanServer}','/TOKEN=${token}' -Verb RunAs -Wait"\r\n`;
     const blob = new Blob([script], { type: 'application/octet-stream' });
     const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'BhudiAgent-Customer-Installer.cmd'; a.click(); URL.revokeObjectURL(url);
   }
@@ -76,6 +81,7 @@ export default function AgentInstallerPanel({ serverUrl = DEFAULT_SERVER, compac
 
         <div className="flex flex-wrap gap-2">
           <button type="button" onClick={() => void generateToken()} disabled={loading} className="inline-flex items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-indigo-500 disabled:opacity-60">{loading ? <Loader2 size={16} className="animate-spin" /> : <ShieldCheck size={16} />}Generate customer installer</button>
+          <button type="button" onClick={downloadInstaller} className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"><Download size={16} />Download Windows Installer</button>
           {token && <button type="button" onClick={downloadBootstrap} className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"><Download size={16} />Download customer .cmd</button>}
         </div>
 
@@ -84,7 +90,7 @@ export default function AgentInstallerPanel({ serverUrl = DEFAULT_SERVER, compac
 
         <div><div className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-slate-500"><Terminal size={12} />Install command</div><div className="flex gap-2"><pre className="flex-1 overflow-x-auto rounded-xl bg-slate-900 px-3 py-2.5 text-[11px] leading-relaxed text-slate-200">{installCmd}</pre><button type="button" disabled={!token} onClick={() => copy('cmd', installCmd)} className="shrink-0 rounded-xl border border-slate-200 px-3 text-slate-600 disabled:opacity-40">{copied === 'cmd' ? <Check size={16} /> : <Copy size={16} />}</button></div></div>
 
-        <div className="rounded-xl border border-slate-100 bg-slate-50 px-4 py-3 text-xs text-slate-600"><p className="font-semibold text-slate-800">Windows</p><ol className="mt-2 list-decimal space-y-1 pl-4"><li>Generate the customer installer above.</li><li>Download the customer <code>.cmd</code> package or the native EXE.</li><li>Run it as Administrator on the target computer.</li><li>The installer downloads the native agent, registers the Windows service, and enrolls it to this customer only.</li></ol></div>
+        <div className="rounded-xl border border-slate-100 bg-slate-50 px-4 py-3 text-xs text-slate-600"><p className="font-semibold text-slate-800">Windows</p><ol className="mt-2 list-decimal space-y-1 pl-4"><li>Generate a customer enrollment token.</li><li>Download <code>BhudiAgent-Setup.exe</code>.</li><li>Run the installer as Administrator.</li><li>Enter the server URL and customer token in the installer, or use the generated command for silent/scripted deployment.</li><li>The installer registers the Windows service and enrolls the endpoint to this customer only.</li></ol></div>
         <p className="text-[11px] text-slate-400"><Monitor size={12} className="mr-1 inline" />Server: <span className="font-mono text-slate-500">{cleanServer}</span> · zero endpoint runtime dependencies</p>
       </div>
     </section>
