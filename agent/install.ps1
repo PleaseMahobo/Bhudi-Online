@@ -10,14 +10,6 @@ $ErrorActionPreference = "Stop"
 $ServiceName = "BhudiAgent"
 function Write-Step($msg) { Write-Host "[Bhudi] $msg" -ForegroundColor Cyan }
 function Write-Ok($msg) { Write-Host "[Bhudi] $msg" -ForegroundColor Green }
-function Invoke-Sc([string[]]$Args) {
-  $out = & sc.exe @Args 2>&1
-  if ($LASTEXITCODE -ne 0) {
-    $detail = ($out | Out-String).Trim()
-    throw "sc.exe $($Args -join ' ') failed (exit $LASTEXITCODE): $detail"
-  }
-  return $out
-}
 $principal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
 if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { throw "Run this installer from an elevated PowerShell window (Run as Administrator)." }
 $ServerUrl = $ServerUrl.TrimEnd('/')
@@ -73,16 +65,21 @@ try {
   New-Item -ItemType File -Path $serviceLog -Force | Out-Null
   Write-Step "Registering BhudiAgent with Windows Service Control Manager..."
   $binPath = '"' + $venvPython + '" "' + $serviceHost + '"'
-  Invoke-Sc @("create", $ServiceName, "binPath= $binPath", "start= auto", "DisplayName= Bhudi RMM Agent", "type= own") | Out-Null
-  Invoke-Sc @("description", $ServiceName, "Bhudi remote monitoring, management and security agent.") | Out-Null
-  Invoke-Sc @("failure", $ServiceName, "reset=", "86400", "actions=", "restart/5000/restart/10000/restart/30000") | Out-Null
+  try {
+    New-Service -Name $ServiceName -BinaryPathName $binPath -DisplayName "Bhudi RMM Agent" -Description "Bhudi remote monitoring, management and security agent." -StartupType Automatic | Out-Null
+  } catch {
+    throw "Windows service registration failed: $($_.Exception.Message)"
+  }
   Write-Step "Starting BhudiAgent..."
-  Invoke-Sc @("start", $ServiceName) | Out-Null
-  Start-Sleep -Seconds 4
-  $svc = Get-Service -Name $ServiceName -ErrorAction Stop
+  Start-Service -Name $ServiceName -ErrorAction Stop
+  $deadline = (Get-Date).AddSeconds(15)
+  do {
+    Start-Sleep -Milliseconds 500
+    $svc = Get-Service -Name $ServiceName -ErrorAction Stop
+  } while ($svc.Status -eq "StartPending" -and (Get-Date) -lt $deadline)
   if ($svc.Status -ne "Running") {
     $log = if (Test-Path $serviceLog) { Get-Content $serviceLog -Tail 50 | Out-String } else { "<service log unavailable>" }
-    throw "BhudiAgent is not running. Service log:`n$log"
+    throw "BhudiAgent is not running (status=$($svc.Status)). Service log:`n$log"
   }
   Write-Ok "Bhudi Agent installed and running as a Windows service."
   Write-Host "  Service : $ServiceName"
