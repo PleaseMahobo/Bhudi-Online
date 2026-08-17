@@ -1,17 +1,27 @@
-"""API v1 router — Phase A+B: guaranteed runtime routes + best-effort enterprise routes."""
+"""API v1 router — tenant-safe runtime and enterprise routes."""
 from fastapi import APIRouter
+
 api_router = APIRouter()
-from app.api.v1.endpoints import health, devices, agent_runtime
+from app.api.v1.endpoints import health, devices, agent_runtime, agent_runtime_enrollment
+
 api_router.include_router(health.router, prefix="/health", tags=["health"])
 api_router.include_router(devices.router, prefix="/devices", tags=["devices"])
+# Secure customer-bound enrollment is registered before the legacy runtime
+# router so POST /runtime/enroll cannot bypass tenant enrollment credentials.
+api_router.include_router(agent_runtime_enrollment.router, tags=["agent-runtime"])
 api_router.include_router(agent_runtime.router, tags=["agent-runtime"])
+
 
 def _safe_include(mod_path: str, attr: str = "router", **kwargs):
     try:
         import importlib
-        mod = importlib.import_module(mod_path); router = getattr(mod, attr); api_router.include_router(router, **kwargs); print(f"[router] included {mod_path}")
+        mod = importlib.import_module(mod_path)
+        router = getattr(mod, attr)
+        api_router.include_router(router, **kwargs)
+        print(f"[router] included {mod_path}")
     except Exception as e:
         print(f"[router] skipped {mod_path}: {e}")
+
 
 _safe_include("app.api.v1.endpoints.agents", tags=["agents"])
 _safe_include("app.api.v1.endpoints.auth", tags=["auth"])
