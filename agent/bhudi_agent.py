@@ -48,9 +48,11 @@ IDENTITY_PATH = Path(os.getenv("BHUDI_IDENTITY_PATH") or DEFAULT_IDENTITY_PATH)
 
 
 def load_json(path: Path) -> dict:
-    if path.exists():
-        return json.loads(path.read_text(encoding="utf-8"))
-    return {}
+    if not path.exists():
+        return {}
+    # Windows PowerShell 5.1 writes UTF-8 JSON with a BOM. Accept both BOM and
+    # BOM-free files so the installed Windows service can read its configuration.
+    return json.loads(path.read_text(encoding="utf-8-sig"))
 
 
 def save_json(path: Path, data: dict) -> None:
