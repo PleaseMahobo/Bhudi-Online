@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.database.session import get_db
@@ -21,6 +22,27 @@ from app.schemas.ai import (
 from app.services.ai_service import AIService
 
 router = APIRouter(prefix="/ai", tags=["AI"])
+
+
+class AssistantChatRequest(BaseModel):
+    message: str = Field(..., min_length=1, max_length=4000)
+    history: list[dict[str, str]] | None = None
+
+
+class AssistantChatResponse(BaseModel):
+    reply: str
+    mode: str = "heuristic"
+    latency_ms: int | None = None
+    suggestions: list[str] = []
+
+
+@router.post("/chat", response_model=AssistantChatResponse)
+def assistant_chat(payload: AssistantChatRequest, db: Session = Depends(get_db)):
+    """In-app Bhudi AI assistant panel."""
+    from app.services.assistant_service import AssistantService
+
+    result = AssistantService().chat(payload.message, history=payload.history)
+    return AssistantChatResponse(**result)
 
 
 @router.post("/root-cause", response_model=AIRunResponse)

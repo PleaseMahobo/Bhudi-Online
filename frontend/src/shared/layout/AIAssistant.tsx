@@ -1,11 +1,11 @@
 'use client';
 
-import { useState } from 'react';
-import { Bot, X, Send, Sparkles } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { Bot, X, Send, Sparkles, Loader2 } from 'lucide-react';
 
 const EXAMPLE_PROMPTS = [
   'Why is DC01 showing high CPU?',
-  'Show machines missing KB506324.',
+  'Show machines missing critical patches.',
   'Restart Print Spooler on Finance PCs.',
   'Generate monthly compliance report.',
   'Which users failed MFA today?',
@@ -13,121 +13,187 @@ const EXAMPLE_PROMPTS = [
 
 type Message = { role: 'user' | 'assistant'; content: string };
 
+async function askBhudiAi(
+  message: string,
+  history: Message[]
+): Promise<{ reply: string; mode?: string; suggestions?: string[] }> {
+  const res = await fetch('/api/v1/ai/chat', {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify({
+      message,
+      history: history.slice(-8).map((m) => ({ role: m.role, content: m.content })),
+    }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const detail =
+      typeof data?.detail === 'string'
+        ? data.detail
+        : data?.message || `AI request failed (${res.status})`;
+    throw new Error(detail);
+  }
+  return data;
+}
+
 export default function AIAssistant() {
   const [open, setOpen] = useState(true);
   const [message, setMessage] = useState('');
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [messages, setMessages] = useState<Message[]>([
+    {
+      role: 'assistant',
+      content:
+        'Hi — I am Bhudi AI. Ask about devices, patches, print, alerts, or MFA. I use live models when configured, otherwise guided playbooks.',
+    },
+  ]);
+  const [loading, setLoading] = useState(false);
+  const [suggestions, setSuggestions] = useState<string[]>(EXAMPLE_PROMPTS);
+  const [mode, setMode] = useState<string>('');
+  const bottomRef = useRef<HTMLDivElement | null>(null);
 
-  const handleSend = () => {
-    const text = message.trim();
-    if (!text) return;
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages, loading]);
+
+  async function handleSend(textOverride?: string) {
+    const text = (textOverride ?? message).trim();
+    if (!text || loading) return;
 
     setMessages((prev) => [...prev, { role: 'user', content: text }]);
     setMessage('');
+    setLoading(true);
 
-    // Placeholder — wire to your real AI / backend endpoint later
-    window.setTimeout(() => {
+    try {
+      const result = await askBhudiAi(text, messages);
+      setMessages((prev) => [
+        ...prev,
+        { role: 'assistant', content: result.reply || 'No response generated.' },
+      ]);
+      if (result.mode) setMode(result.mode);
+      if (Array.isArray(result.suggestions) && result.suggestions.length) {
+        setSuggestions(result.suggestions);
+      }
+    } catch (err: any) {
       setMessages((prev) => [
         ...prev,
         {
           role: 'assistant',
           content:
-            "I'm analyzing that for you… Connect this panel to your Bhudi AI backend when ready.",
+            err?.message ||
+            'Could not reach the AI service. Check API deploy and that /api/v1/ai/chat is routed.',
         },
       ]);
-    }, 500);
-  };
+    } finally {
+      setLoading(false);
+    }
+  }
 
   if (!open) {
     return (
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="fixed bottom-6 right-6 z-50 flex items-center gap-2 px-4 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-full shadow-lg transition-all"
+        className="fixed bottom-6 right-6 z-50 flex items-center gap-2 rounded-full bg-indigo-600 px-4 py-3 text-white shadow-lg transition-all hover:bg-indigo-700"
       >
-        <Sparkles className="w-5 h-5" />
-        <span className="font-medium text-sm">Ask Bhudi AI</span>
+        <Sparkles className="h-5 w-5" />
+        <span className="text-sm font-medium">Ask Bhudi AI</span>
       </button>
     );
   }
 
   return (
-    <aside className="w-80 xl:w-96 h-screen bg-white border-l border-slate-200 flex flex-col shrink-0 sticky top-0">
-      {/* Header */}
-      <div className="h-14 flex items-center justify-between px-4 border-b border-slate-200 shrink-0">
+    <aside className="sticky top-0 flex h-screen w-80 shrink-0 flex-col border-l border-slate-200 bg-white xl:w-96">
+      <div className="flex h-14 shrink-0 items-center justify-between border-b border-slate-200 px-4">
         <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center">
-            <Bot className="w-4 h-4 text-white" />
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-600">
+            <Bot className="h-4 w-4 text-white" />
           </div>
           <div>
             <p className="text-sm font-semibold text-slate-900">Bhudi AI</p>
-            <p className="text-[11px] text-slate-500">Always here to help</p>
+            <p className="text-[11px] text-slate-500">
+              {mode === 'live'
+                ? 'Live model'
+                : mode === 'heuristic'
+                  ? 'Guided mode'
+                  : 'Always here to help'}
+            </p>
           </div>
         </div>
         <button
           type="button"
           onClick={() => setOpen(false)}
-          className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500"
+          className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100"
           aria-label="Close AI assistant"
         >
-          <X className="w-5 h-5" />
+          <X className="h-5 w-5" />
         </button>
       </div>
 
-      {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-3">
-        {messages.length === 0 ? (
-          <div className="space-y-2">
-            <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">
-              Try asking
-            </p>
-            {EXAMPLE_PROMPTS.map((prompt) => (
-              <button
-                key={prompt}
-                type="button"
-                onClick={() => setMessage(prompt)}
-                className="w-full text-left text-sm px-3 py-2.5 rounded-lg bg-slate-50 hover:bg-indigo-50 hover:text-indigo-700 text-slate-700 transition-colors border border-slate-100"
-              >
-                {prompt}
-              </button>
-            ))}
+      <div className="flex-1 space-y-3 overflow-y-auto p-4">
+        {messages.map((m, i) => (
+          <div
+            key={`${m.role}-${i}`}
+            className={`whitespace-pre-wrap rounded-2xl px-3 py-2 text-sm leading-relaxed ${
+              m.role === 'user'
+                ? 'ml-6 bg-indigo-600 text-white'
+                : 'mr-4 border border-slate-200 bg-slate-50 text-slate-800'
+            }`}
+          >
+            {m.content}
           </div>
-        ) : (
-          messages.map((msg, i) => (
-            <div
-              key={i}
-              className={
-                msg.role === 'user'
-                  ? 'ml-auto max-w-[85%] rounded-2xl rounded-br-md px-3.5 py-2.5 text-sm bg-indigo-600 text-white'
-                  : 'max-w-[85%] rounded-2xl rounded-bl-md px-3.5 py-2.5 text-sm bg-slate-100 text-slate-800'
-              }
-            >
-              {msg.content}
-            </div>
-          ))
+        ))}
+        {loading && (
+          <div className="mr-4 flex items-center gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-500">
+            <Loader2 className="h-4 w-4 animate-spin" /> Thinking…
+          </div>
         )}
+        <div ref={bottomRef} />
       </div>
 
-      {/* Input */}
-      <div className="p-3 border-t border-slate-200 shrink-0">
-        <div className="flex gap-2">
-          <input
-            type="text"
+      <div className="shrink-0 border-t border-slate-200 p-3">
+        <div className="mb-2 flex flex-wrap gap-1.5">
+          {suggestions.slice(0, 3).map((s) => (
+            <button
+              key={s}
+              type="button"
+              disabled={loading}
+              onClick={() => void handleSend(s)}
+              className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] text-slate-600 hover:border-indigo-300 hover:text-indigo-700 disabled:opacity-50"
+            >
+              {s}
+            </button>
+          ))}
+        </div>
+        <form
+          className="flex items-end gap-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void handleSend();
+          }}
+        >
+          <textarea
             value={message}
             onChange={(e) => setMessage(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-            placeholder="Ask Bhudi AI..."
-            className="flex-1 px-3.5 py-2.5 rounded-xl border border-slate-200 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                void handleSend();
+              }
+            }}
+            rows={2}
+            placeholder="Ask Bhudi AI…"
+            className="flex-1 resize-none rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-500/20"
           />
           <button
-            type="button"
-            onClick={handleSend}
-            className="p-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl transition-colors shrink-0"
+            type="submit"
+            disabled={loading || !message.trim()}
+            className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50"
             aria-label="Send"
           >
-            <Send className="w-5 h-5" />
+            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
           </button>
-        </div>
+        </form>
       </div>
     </aside>
   );
