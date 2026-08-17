@@ -66,7 +66,9 @@ jobs:
         shell: pwsh
         working-directory: agent/cmd/bhudi-agent-setup
         run: |
-          $env:GOOS = 'windows'; $env:GOARCH = 'amd64'; $env:CGO_ENABLED = '0'
+          $env:GOOS = 'windows'
+          $env:GOARCH = 'amd64'
+          $env:CGO_ENABLED = '0'
           New-Item -ItemType Directory -Force ..\..\..\dist | Out-Null
           go build -trimpath -ldflags='-s -w' -o ..\..\..\dist\bhudi-agent-setup.exe .
 
@@ -84,12 +86,14 @@ jobs:
       - name: Build MSI for enterprise packaging
         shell: pwsh
         run: |
+          $ErrorActionPreference = 'Stop'
           Copy-Item 'agent\native\dist\bhudi-agent-windows-amd64.exe' 'agent\msi\bhudi-agent.exe' -Force
           dotnet tool install --global wix --version 5.0.2
           wix extension add -g WixToolset.UI.wixext/5.0.2
           Push-Location agent\msi
-          wix build Product.wxs -ext WixToolset.UI.wixext -bindpath:agent=. -o bhudi-agent-setup.msi
+          wix build Product.wxs -ext WixToolset.UI.wixext -bindpath agent=. -o bhudi-agent-setup.msi
           Pop-Location
+          if (-not (Test-Path 'agent\msi\bhudi-agent-setup.msi')) { throw 'bhudi-agent-setup.msi was not produced.' }
 
       - uses: actions/upload-artifact@v4
         with:
