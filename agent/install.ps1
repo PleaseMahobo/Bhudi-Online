@@ -10,6 +10,14 @@ $ErrorActionPreference = "Stop"
 $ServiceName = "BhudiAgent"
 function Write-Step($msg) { Write-Host "[Bhudi] $msg" -ForegroundColor Cyan }
 function Write-Ok($msg) { Write-Host "[Bhudi] $msg" -ForegroundColor Green }
+function Invoke-Sc([string[]]$Args) {
+  $out = & sc.exe @Args 2>&1
+  if ($LASTEXITCODE -ne 0) {
+    $detail = ($out | Out-String).Trim()
+    throw "sc.exe $($Args -join ' ') failed (exit $LASTEXITCODE): $detail"
+  }
+  return $out
+}
 $principal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
 if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { throw "Run this installer from an elevated PowerShell window (Run as Administrator)." }
 $ServerUrl = $ServerUrl.TrimEnd('/')
@@ -37,7 +45,12 @@ try {
     Write-Step "Removing previous BhudiAgent installation..."
     & sc.exe stop $ServiceName 2>$null | Out-Null
     & sc.exe delete $ServiceName 2>$null | Out-Null
-    Start-Sleep -Seconds 2
+    for ($i = 0; $i -lt 15; $i++) {
+      & sc.exe query $ServiceName 2>&1 | Out-Null
+      if ($LASTEXITCODE -ne 0) { break }
+      Start-Sleep -Milliseconds 500
+    }
+    if (Get-Service -Name $ServiceName -ErrorAction SilentlyContinue) { throw "Existing $ServiceName service could not be removed. Reboot Windows and rerun with -Force." }
     Remove-Item -Path $InstallDir -Recurse -Force -ErrorAction Stop
   }
   New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
@@ -56,18 +69,21 @@ try {
   if ($LASTEXITCODE -ne 0) { throw "Agent dependency installation failed." }
   $serviceHost = Join-Path $InstallDir "windows_service_host.py"
   if (-not (Test-Path $serviceHost)) { throw "Native Windows service host was not found: $serviceHost" }
+  $serviceLog = Join-Path $InstallDir "agent-service.log"
+  New-Item -ItemType File -Path $serviceLog -Force | Out-Null
   Write-Step "Registering BhudiAgent with Windows Service Control Manager..."
-  $binPath = "`"$venvPython`" `"$serviceHost`""
-  & sc.exe create $ServiceName "binPath= $binPath" "start= auto" "DisplayName= Bhudi RMM Agent" "type= own" | Out-Null
-  if ($LASTEXITCODE -ne 0) { throw "Windows service registration failed." }
-  & sc.exe description $ServiceName "Bhudi remote monitoring, management and security agent." | Out-Null
-  & sc.exe failure $ServiceName reset= 86400 actions= restart/5000/restart/10000/restart/30000 | Out-Null
+  $binPath = '"' + $venvPython + '" "' + $serviceHost + '"'
+  Invoke-Sc @("create", $ServiceName, "binPath= $binPath", "start= auto", "DisplayName= Bhudi RMM Agent", "type= own") | Out-Null
+  Invoke-Sc @("description", $ServiceName, "Bhudi remote monitoring, management and security agent.") | Out-Null
+  Invoke-Sc @("failure", $ServiceName, "reset=", "86400", "actions=", "restart/5000/restart/10000/restart/30000") | Out-Null
   Write-Step "Starting BhudiAgent..."
-  & sc.exe start $ServiceName | Out-Null
-  if ($LASTEXITCODE -ne 0) { throw "BhudiAgent service failed to start." }
-  Start-Sleep -Seconds 3
+  Invoke-Sc @("start", $ServiceName) | Out-Null
+  Start-Sleep -Seconds 4
   $svc = Get-Service -Name $ServiceName -ErrorAction Stop
-  if ($svc.Status -ne "Running") { throw "BhudiAgent is not running. Inspect $InstallDir\agent-service.log." }
+  if ($svc.Status -ne "Running") {
+    $log = if (Test-Path $serviceLog) { Get-Content $serviceLog -Tail 50 | Out-String } else { "<service log unavailable>" }
+    throw "BhudiAgent is not running. Service log:`n$log"
+  }
   Write-Ok "Bhudi Agent installed and running as a Windows service."
   Write-Host "  Service : $ServiceName"
   Write-Host "  Server  : $ServerUrl"
