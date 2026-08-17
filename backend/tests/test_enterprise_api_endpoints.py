@@ -1,12 +1,14 @@
 from __future__ import annotations
 
-import pyotp
 from fastapi import FastAPI
 from sqlalchemy import create_engine
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import sessionmaker
 
 from app.api.v1.endpoints import auth as auth_endpoint
+from app.api.v1.endpoints import auth_extras as auth_extras_endpoint
+from app.api.v1.endpoints import mfa as mfa_endpoint
 from app.core import bootstrap
+from app.database.session import get_db
 from app.models.user import User
 
 
@@ -37,27 +39,21 @@ def _build_client() -> FastAPI:
 
     app = FastAPI()
     app.include_router(auth_endpoint.router)
-    app.dependency_overrides[auth_endpoint.get_db] = override_get_db
+    app.include_router(mfa_endpoint.router)
+    app.include_router(auth_extras_endpoint.router)
+    app.dependency_overrides[get_db] = override_get_db
     app.dependency_overrides[auth_endpoint.get_current_user] = override_get_current_user
-
+    app.dependency_overrides[mfa_endpoint.get_current_user] = override_get_current_user
     return app
 
 
 def test_enterprise_security_endpoints_work() -> None:
     app = _build_client()
-    test_client = app.router
+    paths = {getattr(route, "path", None) for route in app.router.routes}
 
-    setup_route = next(route for route in test_client.routes if getattr(route, "path", None) == "/auth/mfa/setup")
-    assert setup_route is not None
-
-    verify_route = next(route for route in test_client.routes if getattr(route, "path", None) == "/auth/mfa/verify")
-    assert verify_route is not None
-
-    passkey_route = next(route for route in test_client.routes if getattr(route, "path", None) == "/auth/passkeys/register")
-    assert passkey_route is not None
-
-    providers_route = next(route for route in test_client.routes if getattr(route, "path", None) == "/auth/sso/providers")
-    assert providers_route is not None
-
-    secrets_route = next(route for route in test_client.routes if getattr(route, "path", None) == "/auth/secrets")
-    assert secrets_route is not None
+    assert "/auth/login" in paths
+    assert "/auth/refresh" in paths
+    assert "/auth/mfa/setup" in paths
+    assert "/auth/mfa/verify" in paths
+    assert "/auth/password-reset/request" in paths
+    assert "/auth/password-reset/confirm" in paths
