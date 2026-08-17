@@ -85,6 +85,21 @@ try {
   & $venvPython -m pip install --disable-pip-version-check -r (Join-Path $InstallDir "requirements.txt")
   if ($LASTEXITCODE -ne 0) { throw "Agent dependency installation failed." }
 
+  # pywin32's service host is a native executable. When the service runs as
+  # LocalSystem, Windows does not inherit the interactive user's Python PATH.
+  # Keep the pywin32 runtime DLLs beside pythonservice.exe so the service can
+  # load them without relying on a user/system PATH configuration.
+  $pywin32DllDir = Join-Path $venvDir "Lib\site-packages\pywin32_system32"
+  $venvHostDir = $venvDir
+  foreach ($dll in @("pywintypes312.dll", "pythoncom312.dll")) {
+    $srcDll = Join-Path $pywin32DllDir $dll
+    if (Test-Path $srcDll) {
+      Copy-Item -Path $srcDll -Destination (Join-Path $venvHostDir $dll) -Force
+    } else {
+      throw "Required pywin32 runtime DLL was not found: $srcDll"
+    }
+  }
+
   Write-Step "Installing BhudiAgent Windows service..."
   & $venvPython (Join-Path $InstallDir "windows_service.py") install
   if ($LASTEXITCODE -ne 0) { throw "Windows service registration failed." }
