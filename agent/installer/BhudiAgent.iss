@@ -13,7 +13,6 @@ DefaultGroupName=Bhudi Agent
 PrivilegesRequired=admin
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
-DefaultDirName={autopf}\Bhudi\Agent
 OutputDir=..\dist
 OutputBaseFilename=BhudiAgent-Setup
 Compression=lzma2
