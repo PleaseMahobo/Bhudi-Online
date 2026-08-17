@@ -23,7 +23,11 @@ func installService(server, enrollmentToken string) error {
     server=strings.TrimRight(server,"/"); if strings.TrimSpace(enrollmentToken)==""{return fmt.Errorf("customer enrollment token is required")}
     exe,err:=os.Executable();if err!=nil{return err};exe,_=filepath.Abs(exe)
     destDir:=filepath.Join(os.Getenv("ProgramFiles"),"Bhudi","Agent");if err:=os.MkdirAll(destDir,0755);err!=nil{destDir=filepath.Join(os.Getenv("LOCALAPPDATA"),"Bhudi","Agent");if err:=os.MkdirAll(destDir,0755);err!=nil{return fmt.Errorf("create install dir: %w",err)}}
-    dest:=filepath.Join(destDir,"bhudi-agent.exe");if err:=copyFile(exe,dest);err!=nil{return fmt.Errorf("copy agent: %w",err)}
+    dest:=filepath.Join(destDir,"bhudi-agent.exe")
+    // The real installer places the executable directly in {app}. Avoid copying
+    // a file onto itself, which would truncate the executable before service start.
+    sameFile:=strings.EqualFold(exe,dest)
+    if !sameFile { if err:=copyFile(exe,dest);err!=nil{return fmt.Errorf("copy agent: %w",err)} }
     if err:=os.MkdirAll(dataDir(),0755);err!=nil{return err}; if err:=os.WriteFile(enrollmentTokenPath(),[]byte(strings.TrimSpace(enrollmentToken)),0600);err!=nil{return fmt.Errorf("write enrollment bootstrap: %w",err)}
     if err:=writeConfig(server);err!=nil{fmt.Println("Warning: could not write config:",err)}
     if err:=installWindowsService(dest,server);err!=nil{return err}
