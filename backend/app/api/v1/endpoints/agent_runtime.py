@@ -11,8 +11,11 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
 
 from app.core.access_tiers import require_mfa_for_actions
+from app.database.session import get_db
+from app.models.agent import Agent
 from app.models.user import User
 from app.state import device_state
 from app.services.remote_session_manager import remote_session_manager
@@ -133,8 +136,56 @@ def _require_agent_token(agent_id: str, agent_token: str | None) -> dict[str, An
     return agent
 
 
+def _sync_enterprise_agent(agent: dict[str, Any], db: Session) -> None:
+    """Mirror runtime enrollment into the persistent enterprise Agent registry.
+
+    The runtime API historically kept its own in-memory/persisted registry while
+    enterprise command dispatch used the SQL Agent/AgentCommand tables. That left
+    newly enrolled agents without a corresponding database Agent row, causing
+    command polling to fail. Keep the two identity layers synchronized.
+    """
+    try:
+        agent_id = uuid.UUID(str(agent["agent_id"]))
+        row = db.get(Agent, agent_id)
+        now = datetime.now(timezone.utc)
+        if row is None:
+            row = Agent(
+                id=agent_id,
+                hostname=str(agent.get("hostname") or agent_id),
+                agent_version=str(agent.get("agent_version") or "1.0.0"),
+                platform=agent.get("platform"),
+                enrollment_token=agent.get("agent_token"),
+                registration_state="approved",
+                approved=True,
+                trusted=True,
+                status="online",
+                enabled=True,
+                registered_at=now,
+                last_seen=now,
+                last_heartbeat=now,
+            )
+            db.add(row)
+        else:
+            row.hostname = str(agent.get("hostname") or row.hostname)
+            row.agent_version = str(agent.get("agent_version") or row.agent_version or "1.0.0")
+            row.platform = agent.get("platform") or row.platform
+            row.enrollment_token = agent.get("agent_token") or row.enrollment_token
+            row.status = "online"
+            row.last_seen = now
+            row.last_heartbeat = now
+            row.enabled = True
+            if row.registration_state == "pending":
+                row.registration_state = "approved"
+                row.approved = True
+                row.trusted = True
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        print(f"[runtime] enterprise agent sync skipped: {exc}")
+
+
 @router.post("/enroll", response_model=EnrollResponse)
-def enroll(req: EnrollRequest):
+def enroll(req: EnrollRequest, db: Session = Depends(get_db)):
     agent_id = str(uuid.uuid4())
     token = str(uuid.uuid4())
     _agents[agent_id] = {
@@ -147,12 +198,13 @@ def enroll(req: EnrollRequest):
     _commands[agent_id] = []
     device_state.register_device(agent_id)
     device_state.devices[agent_id]["hostname"] = req.hostname
+    _sync_enterprise_agent(_agents[agent_id], db)
     _persist_agents()
     return EnrollResponse(agent_id=agent_id, agent_token=token)
 
 
 @router.post("/heartbeat")
-def heartbeat(req: HeartbeatRequest):
+def heartbeat(req: HeartbeatRequest, db: Session = Depends(get_db)):
     agent = _require_agent_token(req.agent_id, req.agent_token)
     agent["status"] = req.status
     agent["last_seen"] = datetime.now(timezone.utc).isoformat()
@@ -173,10 +225,12 @@ def heartbeat(req: HeartbeatRequest):
                                  ip_address=req.ip_address or agent.get("ip_address"), status=req.status)
     except Exception as exc:
         print(f"[runtime] metrics persist skipped: {exc}")
+    _sync_enterprise_agent(agent, db)
     pending = sum(1 for c in _commands.get(req.agent_id, []) if c["status"] in ("pending", "dispatched"))
     _persist_agents()
-    return {"ok": True, "pending_commands": pending, "heartbeat_interval": 30, "cpu_percent": agent.get("cpu_percent"),
-            "memory_percent": agent.get("memory_percent"), "disk_percent": agent.get("disk_percent")}
+    return {"ok": True, "pending_commands": pending, "heartbeat_interval": 30,
+            "cpu_percent": agent.get("cpu_percent"), "memory_percent": agent.get("memory_percent"),
+            "disk_percent": agent.get("disk_percent")}
 
 
 @router.get("/agents")
