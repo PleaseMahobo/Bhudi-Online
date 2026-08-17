@@ -29,10 +29,8 @@ try {
   Write-Step 'Downloading standalone Bhudi Windows installer...'
   [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
   Invoke-WebRequest -Uri $BootstrapUrl -OutFile $bootstrap -UseBasicParsing
-
   Write-Step 'Launching native installer...'
   $args = @('-server', $ServerUrl, '-enrollment-token', $EnrollmentToken)
-  if ($Force) { $args += '-force' }
   $p = Start-Process -FilePath $bootstrap -ArgumentList $args -Verb RunAs -Wait -PassThru
   if ($p.ExitCode -ne 0) { throw "Native Bhudi installer exited with code $($p.ExitCode)." }
   Write-Ok 'Bhudi Agent installed using the native Windows package. No Python was installed or required.'
