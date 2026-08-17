@@ -128,7 +128,7 @@ def poll_commands(ident: dict) -> list:
 
 def poll_enterprise_commands(ident: dict) -> list:
     try:
-        r = requests.get(api(f"/agent/{enterprise_agent_id(ident)}/commands"), timeout=15)
+        r = requests.get(api(f"/agent/{enterprise_agent_id(ident)}/commands"), params={"agent_token": ident["agent_token"]}, timeout=15)
     except requests.RequestException as exc:
         print(f"[enterprise-command] poll transport error: {exc}")
         return []
@@ -146,7 +146,7 @@ def poll_enterprise_commands(ident: dict) -> list:
 
 
 def mark_enterprise_command_sent(ident: dict, command_id: str) -> None:
-    r = requests.post(api(f"/agent/{enterprise_agent_id(ident)}/commands/{command_id}/sent"), timeout=15)
+    r = requests.post(api(f"/agent/{enterprise_agent_id(ident)}/commands/{command_id}/sent"), params={"agent_token": ident["agent_token"]}, timeout=15)
     r.raise_for_status()
 
 
@@ -154,7 +154,7 @@ def post_enterprise_result(ident: dict, command_id: str, result: dict) -> None:
     agent_id = enterprise_agent_id(ident)
     endpoint = "completed" if int(result.get("exit_code", 1)) == 0 else "failed"
     payload = result if endpoint == "completed" else {"message": result.get("stderr") or result.get("stdout") or "remote command failed"}
-    r = requests.post(api(f"/agent/{agent_id}/commands/{command_id}/{endpoint}"), json=payload, timeout=15)
+    r = requests.post(api(f"/agent/{agent_id}/commands/{command_id}/{endpoint}"), params={"agent_token": ident["agent_token"]}, json=payload, timeout=15)
     r.raise_for_status()
 
 
@@ -264,7 +264,10 @@ def run_once(ident: dict) -> None:
     except Exception as exc:
         print(f"[command] poll/process failed: {exc}")
 
-    process_deployments(ident)
+    try:
+        process_deployments(ident)
+    except Exception as exc:
+        print(f"[deploy] cycle failed: {exc}")
 
 
 def main() -> None:
