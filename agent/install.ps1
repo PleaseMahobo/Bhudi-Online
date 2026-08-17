@@ -58,9 +58,13 @@ try {
 
   if (Test-Path $InstallDir) {
     if (-not $Force) { throw "$InstallDir already exists. Use -Force to replace it." }
+    Write-Step "Removing previous BhudiAgent installation..."
     Stop-Service -Name $ServiceName -Force -ErrorAction SilentlyContinue
-    if (Test-Path (Join-Path $InstallDir "windows_service.py")) {
-      & $python (Join-Path $InstallDir "windows_service.py") remove 2>$null
+    & sc.exe stop $ServiceName 2>$null | Out-Null
+    & sc.exe delete $ServiceName 2>$null | Out-Null
+    Start-Sleep -Seconds 2
+    if (Test-Path $InstallDir) {
+      Remove-Item -Path $InstallDir -Recurse -Force -ErrorAction Stop
     }
   }
   New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
@@ -73,11 +77,11 @@ try {
   if ($LASTEXITCODE -ne 0) { throw "Python virtual environment creation failed." }
   $venvPython = Join-Path $venvDir "Scripts\python.exe"
 
-  Write-Step "Installing agent dependencies..."
-  # Pin pip below 26.0. The current pip 26.x packaging stack can reject
-  # legacy metadata such as 0.dev0 on Windows/Python 3.12 environments.
+  Write-Step "Pinning compatible pip version..."
   & $venvPython -m pip install --disable-pip-version-check "pip<26"
   if ($LASTEXITCODE -ne 0) { throw "pip bootstrap failed." }
+
+  Write-Step "Installing agent dependencies..."
   & $venvPython -m pip install --disable-pip-version-check -r (Join-Path $InstallDir "requirements.txt")
   if ($LASTEXITCODE -ne 0) { throw "Agent dependency installation failed." }
 
