@@ -27,9 +27,9 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.22"
-      - name: Download Go modules
+      - name: Prepare Go module
         working-directory: agent/native
-        run: go mod download
+        run: go mod tidy
       - name: Go test and cross-platform build
         working-directory: agent/native
         run: |
@@ -66,7 +66,7 @@ jobs:
           GOOS: windows
           GOARCH: amd64
           CGO_ENABLED: "0"
-        run: go mod download; go build -ldflags="-s -w" -o ..\msi\bhudi-agent.exe .
+        run: go mod tidy; go build -ldflags="-s -w" -o ..\msi\bhudi-agent.exe .
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: "8.0.x"
@@ -87,8 +87,8 @@ jobs:
           name: Bhudi Native Agent (no Python)
           body: |
             ## Standalone agents — no Python required
-            Windows x64: `bhudi-agent-setup.exe`, `bhudi-agent.exe`, or `bhudi-agent-setup.msi`.
-            The setup executable downloads the native agent and accepts a tenant-bound single-use enrollment token.
+            Windows x64: `bhudi-agent-setup.exe` or `bhudi-agent.exe` for tenant-bound installs; MSI remains available for enterprise packaging.
+            The setup executable accepts a tenant-bound single-use enrollment token.
           files: |
             agent/native/dist/bhudi-agent.exe
             agent/native/dist/bhudi-agent-windows-amd64.exe
