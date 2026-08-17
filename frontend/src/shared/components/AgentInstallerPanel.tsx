@@ -5,7 +5,7 @@ import { Check, Copy, Download, Loader2, Monitor, Server, ShieldCheck, Terminal 
 
 const DEFAULT_SERVER =
   (typeof process !== 'undefined' && process.env.NEXT_PUBLIC_API_URL?.replace(/\/api\/v1\/?$/, '')) ||
-  'https://bhudi-online-production.up.railway.app';
+  'https://generous-presence-production-b237.up.railway.app';
 const RELEASE = 'https://github.com/PleaseMahobo/Bhudi-Online/releases/download/agent-native-latest';
 const SETUP = `${RELEASE}/BhudiAgent-Setup.exe`;
 
