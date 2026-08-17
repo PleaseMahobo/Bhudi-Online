@@ -1,25 +1,23 @@
 package main
 
 import (
+    "encoding/json"
     "net/http"
-    "net/url"
+    "os"
     "strings"
 )
 
-// agentAuthTransport binds enterprise agent callbacks to the credential issued
-// during enrollment. Runtime enrollment itself is not modified.
-type agentAuthTransport struct {
-    base  http.RoundTripper
-    token func() string
-}
+type agentAuthTransport struct { base http.RoundTripper }
 
 func (t agentAuthTransport) RoundTrip(req *http.Request) (*http.Response, error) {
     base := t.base
-    if base == nil {
-        base = http.DefaultTransport
-    }
+    if base == nil { base = http.DefaultTransport }
     if strings.Contains(req.URL.Path, "/api/v1/agent/") {
-        token := strings.TrimSpace(t.token())
+        token := ""
+        if data, err := os.ReadFile(identityPath()); err == nil {
+            var id identity
+            if json.Unmarshal(data, &id) == nil { token = strings.TrimSpace(id.AgentToken) }
+        }
         if token != "" {
             cloned := req.Clone(req.Context())
             q := cloned.URL.Query()
@@ -31,5 +29,7 @@ func (t agentAuthTransport) RoundTrip(req *http.Request) (*http.Response, error)
     return base.RoundTrip(req)
 }
 
-var _ http.RoundTripper = agentAuthTransport{}
-var _ = url.Values{}
+func init() {
+    base := http.DefaultTransport
+    http.DefaultTransport = agentAuthTransport{base: base}
+}
