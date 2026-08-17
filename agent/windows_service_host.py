@@ -180,7 +180,11 @@ def run_service() -> int:
     # Cast a NULL pointer to the callback type for the required terminator.
     table[1].lpServiceName = None
     table[1].lpServiceProc = ctypes.cast(None, MAIN)
-    ok = advapi32.StartServiceCtrlDispatcherW(ctypes.byref(table))
+
+    # StartServiceCtrlDispatcherW expects a pointer to the first
+    # SERVICE_TABLE_ENTRY, not a pointer to the array object itself.
+    table_ptr = ctypes.cast(table, ctypes.POINTER(SERVICE_TABLE_ENTRY))
+    ok = advapi32.StartServiceCtrlDispatcherW(table_ptr)
     if not ok:
         error = ctypes.get_last_error()
         # 1063 means this executable was not launched by SCM; useful for debug.
