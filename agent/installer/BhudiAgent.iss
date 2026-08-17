@@ -20,7 +20,7 @@ WizardStyle=modern
 UninstallDisplayIcon={app}\{#MyAppExeName}
 
 [Files]
-Source: "..\native\bhudi-agent.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\native\dist\bhudi-agent.exe"; DestDir: "{app}"; Flags: ignoreversion
 
 [UninstallRun]
 Filename: "{app}\{#MyAppExeName}"; Parameters: "uninstall"; Flags: runhidden waituntilterminated
