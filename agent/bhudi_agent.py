@@ -1,12 +1,13 @@
 """
-Bhudi RMM — unified production agent (Phase B + Phase 11 Software Deployment + Sprint 3 Real Command Framework)
+Bhudi RMM — unified production agent.
 
 Loop:
   1. Enroll (or load saved identity)
   2. Heartbeat + metrics
-  3. Poll pending commands
-  4. Poll pending software deployments
-  5. Execute and post results
+  3. Poll pending enterprise commands
+  4. Poll pending runtime commands
+  5. Poll pending software deployments
+  6. Execute and post results
 """
 from __future__ import annotations
 
@@ -50,8 +51,6 @@ IDENTITY_PATH = Path(os.getenv("BHUDI_IDENTITY_PATH") or DEFAULT_IDENTITY_PATH)
 def load_json(path: Path) -> dict:
     if not path.exists():
         return {}
-    # Windows PowerShell 5.1 writes UTF-8 JSON with a BOM. Accept both BOM and
-    # BOM-free files so the installed Windows service can read its configuration.
     return json.loads(path.read_text(encoding="utf-8-sig"))
 
 
@@ -91,7 +90,7 @@ def metrics() -> dict:
 
 
 def enroll() -> dict:
-    body = {"hostname": agent_hostname(), "agent_version": "1.2.0-sprint-3", "platform": platform.platform(), "enrollment_secret": os.getenv("BHUDI_ENROLL_SECRET") or "phase-ab-test"}
+    body = {"hostname": agent_hostname(), "agent_version": "1.2.1-sprint-3", "platform": platform.platform(), "enrollment_secret": os.getenv("BHUDI_ENROLL_SECRET") or "phase-ab-test"}
     r = requests.post(api("/runtime/enroll"), json=body, timeout=15)
     r.raise_for_status()
     data = r.json()
@@ -128,11 +127,22 @@ def poll_commands(ident: dict) -> list:
 
 
 def poll_enterprise_commands(ident: dict) -> list:
-    r = requests.get(api(f"/agent/{enterprise_agent_id(ident)}/commands"), timeout=15)
+    try:
+        r = requests.get(api(f"/agent/{enterprise_agent_id(ident)}/commands"), timeout=15)
+    except requests.RequestException as exc:
+        print(f"[enterprise-command] poll transport error: {exc}")
+        return []
     if r.status_code == 404:
         return []
+    if 500 <= r.status_code < 600:
+        print(f"[enterprise-command] server error {r.status_code}; retrying next cycle")
+        return []
+    if r.status_code in (401, 403):
+        print(f"[enterprise-command] authorization error {r.status_code}; retrying next cycle")
+        return []
     r.raise_for_status()
-    return r.json()
+    data = r.json()
+    return data if isinstance(data, list) else data.get("commands", [])
 
 
 def mark_enterprise_command_sent(ident: dict, command_id: str) -> None:
@@ -176,11 +186,14 @@ def post_result(ident: dict, command_id: str, result: dict) -> None:
 def poll_deployments(ident: dict) -> list:
     params: dict = {"hostname": agent_hostname()}
     device_id = os.getenv("BHUDI_DEVICE_ID")
-    if device_id: params["device_id"] = device_id
-    if ident.get("agent_id"): params["agent_id"] = ident["agent_id"]
+    if device_id:
+        params["device_id"] = device_id
+    if ident.get("agent_id"):
+        params["agent_id"] = ident["agent_id"]
     try:
         r = requests.get(api("/software-deployment/agent/pending"), params=params, timeout=15)
-        if r.status_code == 404: return []
+        if r.status_code == 404:
+            return []
         r.raise_for_status()
         return r.json().get("deployments") or []
     except Exception as e:
@@ -199,11 +212,15 @@ def process_deployments(ident: dict) -> None:
     for dep in deployments:
         job_id, target_id = str(dep.get("job_id") or ""), str(dep.get("target_id") or "")
         def _progress(partial: dict) -> None:
-            try: report_deployment(job_id, target_id, partial)
-            except Exception as e: print(f"[deploy] progress report failed: {e}")
+            try:
+                report_deployment(job_id, target_id, partial)
+            except Exception as e:
+                print(f"[deploy] progress report failed: {e}")
         result = execute_deployment(dep, report=_progress)
-        try: report_deployment(job_id, target_id, result)
-        except Exception as e: print(f"[deploy] final report failed: {e}")
+        try:
+            report_deployment(job_id, target_id, result)
+        except Exception as e:
+            print(f"[deploy] final report failed: {e}")
 
 
 def execute_enterprise_command(command: dict) -> dict:
@@ -214,6 +231,7 @@ def execute_enterprise_command(command: dict) -> dict:
     if is_interactive_remote_session(command):
         return streaming_session_coordinator.start(server_url=server_url(), agent_id=enterprise_agent_id(_CURRENT_IDENTITY), command=command)
     return execute_command_record(command)
+
 
 _CURRENT_IDENTITY: dict = {}
 
@@ -226,18 +244,25 @@ def run_once(ident: dict) -> None:
 
     for command in poll_enterprise_commands(ident):
         command_id = command.get("command_id") or command.get("id")
-        if not command_id: continue
+        if not command_id:
+            continue
         print(f"[enterprise-command] {command_id}: {command.get('command_type')}")
-        mark_enterprise_command_sent(ident, str(command_id))
-        result = execute_enterprise_command(command)
-        post_enterprise_result(ident, str(command_id), result)
-        print(f"[enterprise-result] exit={result.get('exit_code')}")
+        try:
+            mark_enterprise_command_sent(ident, str(command_id))
+            result = execute_enterprise_command(command)
+            post_enterprise_result(ident, str(command_id), result)
+            print(f"[enterprise-result] exit={result.get('exit_code')}")
+        except Exception as exc:
+            print(f"[enterprise-command] processing failed: {exc}")
 
-    for cmd in poll_commands(ident):
-        print(f"[command] {cmd['command_id']}: {cmd['command']}")
-        result = execute(cmd["command"], shell=cmd.get("shell", True))
-        post_result(ident, cmd["command_id"], result)
-        print(f"[result] exit={result['exit_code']}")
+    try:
+        for cmd in poll_commands(ident):
+            print(f"[command] {cmd['command_id']}: {cmd['command']}")
+            result = execute(cmd["command"], shell=cmd.get("shell", True))
+            post_result(ident, cmd["command_id"], result)
+            print(f"[result] exit={result['exit_code']}")
+    except Exception as exc:
+        print(f"[command] poll/process failed: {exc}")
 
     process_deployments(ident)
 
@@ -247,12 +272,13 @@ def main() -> None:
     ident = load_identity()
     print(f"[bhudi-agent] agent_id={ident['agent_id']} host={agent_hostname()}")
     interval = int(os.getenv("BHUDI_HEARTBEAT_INTERVAL", "10"))
-    run_once(ident)
-    if os.getenv("BHUDI_RUN_ONCE", "0").lower() in {"1", "true", "yes"}:
-        return
     while True:
-        try: run_once(ident)
-        except Exception as e: print(f"[error] {e}")
+        try:
+            run_once(ident)
+        except Exception as exc:
+            print(f"[error] {exc}")
+        if os.getenv("BHUDI_RUN_ONCE", "0").lower() in {"1", "true", "yes"}:
+            return
         time.sleep(interval)
 
 
