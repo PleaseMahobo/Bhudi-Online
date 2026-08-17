@@ -1,8 +1,8 @@
 """Bhudi RMM Windows Service wrapper.
 
 Installs/runs the existing bhudi_agent.py loop as a native Windows service
-using pywin32. The service itself owns lifecycle/restart control; the agent
-continues to own enrollment, heartbeat, command and telemetry behavior.
+using pywin32. The service owns lifecycle/restart control; the agent owns
+enrollment, heartbeat, command and telemetry behavior.
 """
 from __future__ import annotations
 
@@ -56,6 +56,13 @@ class BhudiAgentService(win32serviceutil.ServiceFramework):
         env.setdefault("BHUDI_IDENTITY_PATH", str(ROOT / "agent_identity.json"))
         env.setdefault("BHUDI_HOSTNAME", os.environ.get("COMPUTERNAME", "unknown"))
         env.setdefault("BHUDI_HEARTBEAT_INTERVAL", "30")
+
+        # pywin32 runs the service host through pythonservice.exe, so
+        # sys.executable is not the venv's python interpreter here. Explicitly
+        # select the interpreter installed alongside the service.
+        venv_python = ROOT / ".venv" / "Scripts" / "python.exe"
+        python_exe = venv_python if venv_python.exists() else Path(sys.executable)
+        agent_script = ROOT / "bhudi_agent.py"
         log_path = ROOT / "agent-service.log"
         ROOT.mkdir(parents=True, exist_ok=True)
 
@@ -64,8 +71,10 @@ class BhudiAgentService(win32serviceutil.ServiceFramework):
                 return
             try:
                 with log_path.open("a", encoding="utf-8") as log:
+                    log.write(f"[service] starting agent: {python_exe} {agent_script}\n")
+                    log.flush()
                     self.process = subprocess.Popen(
-                        [sys.executable, str(ROOT / "bhudi_agent.py")],
+                        [str(python_exe), str(agent_script)],
                         cwd=str(ROOT),
                         env=env,
                         stdout=log,
@@ -76,8 +85,16 @@ class BhudiAgentService(win32serviceutil.ServiceFramework):
                     if win32event.WaitForSingleObject(self.stop_event, 1000) == win32event.WAIT_OBJECT_0:
                         self.SvcStop()
                         return
+                exit_code = self.process.returncode
                 self.process = None
+                with log_path.open("a", encoding="utf-8") as log:
+                    log.write(f"[service] agent exited with code {exit_code}; restarting\n")
             except Exception as exc:
+                try:
+                    with log_path.open("a", encoding="utf-8") as log:
+                        log.write(f"[service] supervisor error: {exc!r}\n")
+                except Exception:
+                    pass
                 try:
                     servicemanager.LogErrorMsg(f"{SERVICE_NAME}: {exc}")
                 except Exception:
