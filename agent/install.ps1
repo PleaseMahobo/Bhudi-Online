@@ -74,7 +74,10 @@ try {
   $venvPython = Join-Path $venvDir "Scripts\python.exe"
 
   Write-Step "Installing agent dependencies..."
-  & $venvPython -m pip install --disable-pip-version-check --upgrade pip
+  # Pin pip below 26.0. The current pip 26.x packaging stack can reject
+  # legacy metadata such as 0.dev0 on Windows/Python 3.12 environments.
+  & $venvPython -m pip install --disable-pip-version-check "pip<26"
+  if ($LASTEXITCODE -ne 0) { throw "pip bootstrap failed." }
   & $venvPython -m pip install --disable-pip-version-check -r (Join-Path $InstallDir "requirements.txt")
   if ($LASTEXITCODE -ne 0) { throw "Agent dependency installation failed." }
 
