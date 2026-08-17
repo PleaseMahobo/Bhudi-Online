@@ -34,7 +34,7 @@ type NavItem = { label: string; href: string; icon: LucideIcon; exact?: boolean;
 const NAV_ITEMS: NavItem[] = [
   { label: 'Dashboard', href: '/dashboard', icon: LayoutDashboard, exact: true },
   { label: 'Devices', href: '/devices', icon: Monitor },
-  { label: 'Download Agent', href: '/agents', icon: Download },
+  { label: 'Agent Deployment', href: '/agents', icon: Download },
   { label: 'Customers', href: '/msp', icon: Users },
   { label: 'Tickets', href: '/itsm', icon: Ticket, badge: '3' },
   { label: 'Alerts', href: '/alert-engine', icon: Activity },
