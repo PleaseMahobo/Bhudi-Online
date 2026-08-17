@@ -85,10 +85,9 @@ try {
   & $venvPython -m pip install --disable-pip-version-check -r (Join-Path $InstallDir "requirements.txt")
   if ($LASTEXITCODE -ne 0) { throw "Agent dependency installation failed." }
 
-  # pywin32's service host is a native executable. When the service runs as
-  # LocalSystem, Windows does not inherit the interactive user's Python PATH.
-  # Keep the pywin32 runtime DLLs beside pythonservice.exe so the service can
-  # load them without relying on a user/system PATH configuration.
+  # pywin32's service host is a native executable. A LocalSystem service does
+  # not inherit the interactive user's Python PATH, so all native runtime DLLs
+  # needed by pythonservice.exe are kept beside it.
   $pywin32DllDir = Join-Path $venvDir "Lib\site-packages\pywin32_system32"
   $venvHostDir = $venvDir
   foreach ($dll in @("pywintypes312.dll", "pythoncom312.dll")) {
@@ -99,6 +98,17 @@ try {
       throw "Required pywin32 runtime DLL was not found: $srcDll"
     }
   }
+
+  # pythonservice.exe itself embeds Python and therefore needs the matching
+  # CPython runtime DLL available without relying on the machine/user PATH.
+  $pythonRoot = Split-Path -Parent $python
+  $pythonDll = Get-ChildItem -Path $pythonRoot -Filter "python3*.dll" -File |
+    Where-Object { $_.Name -match '^python3\d+\.dll$' } |
+    Select-Object -First 1
+  if (-not $pythonDll) {
+    throw "CPython runtime DLL was not found beside $python."
+  }
+  Copy-Item -Path $pythonDll.FullName -Destination (Join-Path $venvHostDir $pythonDll.Name) -Force
 
   Write-Step "Installing BhudiAgent Windows service..."
   & $venvPython (Join-Path $InstallDir "windows_service.py") install
