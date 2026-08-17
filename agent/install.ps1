@@ -8,7 +8,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $ServerUrl = $ServerUrl.TrimEnd('/')
-$BootstrapUrl = 'https://github.com/PleaseMahobo/Bhudi-Online/releases/download/agent-native-latest/bhudi-agent-setup.exe'
+$BootstrapUrl = 'https://github.com/PleaseMahobo/Bhudi-Online/releases/download/agent-native-latest/BhudiAgent-Setup.exe'
 
 function Write-Step($msg) { Write-Host "[Bhudi] $msg" -ForegroundColor Cyan }
 function Write-Ok($msg) { Write-Host "[Bhudi] $msg" -ForegroundColor Green }
@@ -20,7 +20,7 @@ if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administra
 if ([string]::IsNullOrWhiteSpace($EnrollmentToken)) { throw 'A customer enrollment token is required. Generate one from the Bhudi portal.' }
 
 $temp = Join-Path $env:TEMP ('bhudi-bootstrap-' + [guid]::NewGuid().ToString('n'))
-$bootstrap = Join-Path $temp 'bhudi-agent-setup.exe'
+$bootstrap = Join-Path $temp 'BhudiAgent-Setup.exe'
 New-Item -ItemType Directory -Path $temp -Force | Out-Null
 
 try {
@@ -30,10 +30,10 @@ try {
   [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
   Invoke-WebRequest -Uri $BootstrapUrl -OutFile $bootstrap -UseBasicParsing
   Write-Step 'Launching native installer...'
-  $args = @('-server', $ServerUrl, '-enrollment-token', $EnrollmentToken)
+  $args = @('/SERVER=' + $ServerUrl, '/TOKEN=' + $EnrollmentToken)
   $p = Start-Process -FilePath $bootstrap -ArgumentList $args -Verb RunAs -Wait -PassThru
   if ($p.ExitCode -ne 0) { throw "Native Bhudi installer exited with code $($p.ExitCode)." }
-  Write-Ok 'Bhudi Agent installed using the native Windows package. No Python was installed or required.'
+  Write-Ok 'Bhudi Agent installed using the native Windows installer. No Python was installed or required.'
 } finally {
   Remove-Item -Path $temp -Recurse -Force -ErrorAction SilentlyContinue
 }
