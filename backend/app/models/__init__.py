@@ -2,6 +2,7 @@ from .base import Base
 
 from .action import Action
 from .agent import Agent
+from .agent_enrollment import AgentEnrollment
 from .ai import AIRun, KnowledgeArticle, PredictionRecord
 from .alert import Alert
 from .alert_rule import AlertRule
