@@ -1,14 +1,9 @@
-"""Bhudi RMM Windows Service wrapper.
-
-Installs/runs the existing bhudi_agent.py loop as a native Windows service
-using pywin32. The service owns lifecycle/restart control; the agent owns
-enrollment, heartbeat, command and telemetry behavior.
-"""
+"""Bhudi RMM Windows Service wrapper."""
 from __future__ import annotations
 
 import os
 import subprocess
-import sys
+import time
 from pathlib import Path
 
 import servicemanager
@@ -16,11 +11,22 @@ import win32event
 import win32service
 import win32serviceutil
 
-
 SERVICE_NAME = "BhudiAgent"
 SERVICE_DISPLAY_NAME = "Bhudi RMM Agent"
 SERVICE_DESCRIPTION = "Bhudi remote monitoring, management and security agent."
 ROOT = Path(__file__).resolve().parent
+VENV_PYTHON = ROOT / ".venv" / "Scripts" / "python.exe"
+LOG_PATH = ROOT / "agent-service.log"
+
+
+def log(message: str) -> None:
+    try:
+        ROOT.mkdir(parents=True, exist_ok=True)
+        with LOG_PATH.open("a", encoding="utf-8") as fh:
+            fh.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {message}\n")
+            fh.flush()
+    except Exception:
+        pass
 
 
 class BhudiAgentService(win32serviceutil.ServiceFramework):
@@ -32,9 +38,10 @@ class BhudiAgentService(win32serviceutil.ServiceFramework):
     def __init__(self, args):
         super().__init__(args)
         self.stop_event = win32event.CreateEvent(None, 0, 0, None)
-        self.process: subprocess.Popen[str] | None = None
+        self.process: subprocess.Popen | None = None
 
     def SvcStop(self):
+        log("service stop requested")
         self.ReportServiceStatus(win32service.SERVICE_STOP_PENDING)
         if self.process and self.process.poll() is None:
             self.process.terminate()
@@ -44,61 +51,70 @@ class BhudiAgentService(win32serviceutil.ServiceFramework):
                 self.process.kill()
         win32event.SetEvent(self.stop_event)
         self.ReportServiceStatus(win32service.SERVICE_STOPPED)
+        log("service stopped")
 
     def SvcDoRun(self):
-        servicemanager.LogInfoMsg(f"{SERVICE_NAME} starting")
-        self.main()
+        log(f"service starting; root={ROOT}; python={VENV_PYTHON}")
+        try:
+            servicemanager.LogInfoMsg(f"{SERVICE_NAME} starting")
+            self.main()
+        except Exception as exc:
+            log(f"service startup failure: {type(exc).__name__}: {exc}")
+            try:
+                servicemanager.LogErrorMsg(f"{SERVICE_NAME} startup failure: {exc}")
+            except Exception:
+                pass
+            raise
 
     def main(self):
+        if not VENV_PYTHON.exists():
+            raise FileNotFoundError(f"Agent interpreter not found: {VENV_PYTHON}")
+        agent_script = ROOT / "bhudi_agent.py"
+        if not agent_script.exists():
+            raise FileNotFoundError(f"Agent script not found: {agent_script}")
+
         env = os.environ.copy()
         env["PYTHONUNBUFFERED"] = "1"
-        env.setdefault("BHUDI_CONFIG_PATH", str(ROOT / "agent_config.json"))
-        env.setdefault("BHUDI_IDENTITY_PATH", str(ROOT / "agent_identity.json"))
-        env.setdefault("BHUDI_HOSTNAME", os.environ.get("COMPUTERNAME", "unknown"))
+        env["BHUDI_CONFIG_PATH"] = str(ROOT / "agent_config.json")
+        env["BHUDI_IDENTITY_PATH"] = str(ROOT / "agent_identity.json")
+        env["BHUDI_HOSTNAME"] = os.environ.get("COMPUTERNAME", "unknown")
         env.setdefault("BHUDI_HEARTBEAT_INTERVAL", "30")
 
-        # pywin32 runs the service host through pythonservice.exe, so
-        # sys.executable is not the venv's python interpreter here. Explicitly
-        # select the interpreter installed alongside the service.
-        venv_python = ROOT / ".venv" / "Scripts" / "python.exe"
-        python_exe = venv_python if venv_python.exists() else Path(sys.executable)
-        agent_script = ROOT / "bhudi_agent.py"
-        log_path = ROOT / "agent-service.log"
-        ROOT.mkdir(parents=True, exist_ok=True)
-
+        # Keep the service process alive while the supervised agent is running.
+        # The pywin32 service framework reports the service state before entering
+        # this loop, so SCM does not wait for the agent's network startup.
         while True:
             if win32event.WaitForSingleObject(self.stop_event, 0) == win32event.WAIT_OBJECT_0:
                 return
+            log(f"launching agent: {VENV_PYTHON} {agent_script}")
             try:
-                with log_path.open("a", encoding="utf-8") as log:
-                    log.write(f"[service] starting agent: {python_exe} {agent_script}\n")
-                    log.flush()
-                    self.process = subprocess.Popen(
-                        [str(python_exe), str(agent_script)],
-                        cwd=str(ROOT),
-                        env=env,
-                        stdout=log,
-                        stderr=subprocess.STDOUT,
-                        text=True,
-                    )
+                self.process = subprocess.Popen(
+                    [str(VENV_PYTHON), str(agent_script)],
+                    cwd=str(ROOT),
+                    env=env,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    bufsize=1,
+                )
+                assert self.process.stdout is not None
                 while self.process.poll() is None:
+                    line = self.process.stdout.readline()
+                    if line:
+                        log(f"[agent] {line.rstrip()}")
                     if win32event.WaitForSingleObject(self.stop_event, 1000) == win32event.WAIT_OBJECT_0:
                         self.SvcStop()
                         return
+                remaining = self.process.stdout.read()
+                if remaining:
+                    for line in remaining.splitlines():
+                        log(f"[agent] {line}")
                 exit_code = self.process.returncode
                 self.process = None
-                with log_path.open("a", encoding="utf-8") as log:
-                    log.write(f"[service] agent exited with code {exit_code}; restarting\n")
+                log(f"agent exited with code {exit_code}; restarting in 10s")
             except Exception as exc:
-                try:
-                    with log_path.open("a", encoding="utf-8") as log:
-                        log.write(f"[service] supervisor error: {exc!r}\n")
-                except Exception:
-                    pass
-                try:
-                    servicemanager.LogErrorMsg(f"{SERVICE_NAME}: {exc}")
-                except Exception:
-                    pass
+                self.process = None
+                log(f"agent launch failure: {type(exc).__name__}: {exc}")
             if win32event.WaitForSingleObject(self.stop_event, 10000) == win32event.WAIT_OBJECT_0:
                 return
 
