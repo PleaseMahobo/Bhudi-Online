@@ -15,11 +15,12 @@ import (
 	"time"
 )
 
-const defaultServerURL = "https://bhudi-online-production.up.railway.app"
+const defaultServerURL = "https://generous-presence-production-b237.up.railway.app"
 
 type runConfig struct {
-	Server   string
-	Interval int
+	Server         string
+	Interval       int
+	EnrollmentToken string
 }
 
 type identity struct {
@@ -28,17 +29,17 @@ type identity struct {
 }
 
 type enrollReq struct {
-	Hostname         string  `json:"hostname"`
-	AgentVersion     string  `json:"agent_version"`
-	Platform         string  `json:"platform"`
+	Hostname      string  `json:"hostname"`
+	AgentVersion  string  `json:"agent_version"`
+	Platform      string  `json:"platform"`
 	EnrollmentSecret *string `json:"enrollment_secret,omitempty"`
 }
 
 type enrollResp struct {
-	AgentID           string `json:"agent_id"`
-	AgentToken        string `json:"agent_token"`
-	HeartbeatInterval int    `json:"heartbeat_interval"`
-	PollInterval      int    `json:"poll_interval"`
+	AgentID          string `json:"agent_id"`
+	AgentToken       string `json:"agent_token"`
+	HeartbeatInterval int   `json:"heartbeat_interval"`
+	PollInterval      int   `json:"poll_interval"`
 }
 
 type heartbeatReq struct {
@@ -67,9 +68,9 @@ func runAgent(cfg runConfig) {
 	if cfg.Interval < 5 {
 		cfg.Interval = 5
 	}
-	fmt.Printf("[bhudi-agent] version=%s server=%s os=%s/%s\n", agentVersion, cfg.Server, runtime.GOOS, runtime.GOARCH)
 
-	ident, err := loadOrEnroll(cfg.Server)
+	fmt.Printf("[bhudi-agent] version=%s server=%s os=%s/%s\n", agentVersion, cfg.Server, runtime.GOOS, runtime.GOARCH)
+	ident, err := loadOrEnroll(cfg.Server, cfg.EnrollmentToken)
 	if err != nil {
 		fatal(fmt.Errorf("enroll: %w", err))
 	}
@@ -79,16 +80,12 @@ func runAgent(cfg runConfig) {
 	for {
 		if err := cycle(client, cfg.Server, &ident); err != nil {
 			fmt.Println("[error]", err)
+			// Enrollment credentials are single-use bootstrap credentials and are
+			// intentionally removed after successful enrollment. Do not attempt to
+			// re-enroll with an empty token after a transient/auth failure. The
+			// service remains alive and continues retrying with the issued identity.
 			if isAuthError(err) {
-				fmt.Println("[bhudi-agent] credentials rejected — re-enrolling…")
-				clearIdentity()
-				newID, e2 := enroll(cfg.Server)
-				if e2 != nil {
-					fmt.Println("[error] re-enroll:", e2)
-				} else {
-					ident = newID
-					fmt.Printf("[bhudi-agent] re-enrolled agent_id=%s\n", ident.AgentID)
-				}
+				fmt.Println("[error] agent authentication failed; reinstall or issue a new customer enrollment token to replace the identity")
 			}
 		}
 		time.Sleep(time.Duration(cfg.Interval) * time.Second)
@@ -101,13 +98,13 @@ func cycle(client *http.Client, server string, ident *identity) error {
 	}
 
 	for _, cmd := range pollEnterpriseCommands(client, server, *ident) {
-		cmdID := firstString(cmd, "command_id", "id")
-		cmdType := firstString(cmd, "command_type")
-		fmt.Printf("[enterprise-command] %s type=%s\n", cmdID, cmdType)
-		_ = markEnterpriseSent(client, server, *ident, cmdID)
+		id := firstString(cmd, "command_id", "id")
+		if id == "" {
+			continue
+		}
+		_ = markEnterpriseSent(client, server, *ident, id)
 		result := executeEnterpriseCommand(server, *ident, cmd)
-		_ = postEnterpriseResult(client, server, *ident, cmdID, result)
-		fmt.Printf("[enterprise-result] exit=%v\n", result["exit_code"])
+		_ = postEnterpriseResult(client, server, *ident, id, result)
 	}
 
 	cmds, err := pollCommands(client, server, *ident)
@@ -115,89 +112,62 @@ func cycle(client *http.Client, server string, ident *identity) error {
 		return err
 	}
 	for _, c := range cmds {
-		fmt.Printf("[command] %s type=%s cmd=%s\n", c.CommandID, c.CommandType, c.Command)
 		if c.CommandType == "remote.desktop.start" || c.CommandType == "remote.desktop.webrtc" || c.CommandType == "remote.terminal.start" {
-			cmdMap := map[string]any{
-				"command_id":   c.CommandID,
-				"command_type": c.CommandType,
-				"payload":      c.Payload,
-			}
-			result := executeEnterpriseCommand(server, *ident, cmdMap)
-			exitCode := 0
-			if v, ok := result["exit_code"].(int); ok {
-				exitCode = v
-			} else if v, ok := result["exit_code"].(float64); ok {
-				exitCode = int(v)
-			}
-			stdout, _ := result["stdout"].(string)
-			stderr, _ := result["stderr"].(string)
-			_ = postResult(client, server, *ident, c.CommandID, exitCode, stdout, stderr)
-			fmt.Printf("[result] remote session exit=%d\n", exitCode)
+			m := map[string]any{"command_id": c.CommandID, "command_type": c.CommandType, "payload": c.Payload}
+			r := executeEnterpriseCommand(server, *ident, m)
+			code := intValue(r["exit_code"])
+			out, _ := r["stdout"].(string)
+			er, _ := r["stderr"].(string)
+			_ = postResult(client, server, *ident, c.CommandID, code, out, er)
 			continue
 		}
-		exitCode, stdout, stderr := runCommand(c.Command, c.Shell)
-		if err := postResult(client, server, *ident, c.CommandID, exitCode, stdout, stderr); err != nil {
-			fmt.Println("[result-error]", err)
-			continue
-		}
-		fmt.Printf("[result] exit=%d\n", exitCode)
+		code, out, er := runCommand(c.Command, c.Shell)
+		_ = postResult(client, server, *ident, c.CommandID, code, out, er)
 	}
 	return nil
 }
 
 func executeEnterpriseCommand(server string, ident identity, cmd map[string]any) map[string]any {
-	cmdType := firstString(cmd, "command_type")
+	typ := firstString(cmd, "command_type")
 	payload, _ := cmd["payload"].(map[string]any)
 	if payload == nil {
 		payload = map[string]any{}
 	}
 
-	switch cmdType {
+	switch typ {
 	case "remote.desktop.start":
 		return startRemoteDesktop(server, ident.AgentID, cmd)
-
 	case "remote.desktop.webrtc":
 		return startRemoteDesktopWebRTC(server, ident.AgentID, cmd)
-
 	case "remote.terminal.start":
 		interactive := true
-		if v, ok := payload["interactive"]; ok {
-			if b, ok := v.(bool); ok {
-				interactive = b
-			}
+		if v, ok := payload["interactive"].(bool); ok {
+			interactive = v
 		}
 		if interactive {
 			return startRemoteTerminal(server, ident.AgentID, cmd)
 		}
-		shellCmd := firstString(payload, "command", "script")
-		if shellCmd == "" {
-			return map[string]any{"exit_code": 1, "stdout": "", "stderr": "no command"}
-		}
-		code, out, errOut := runCommand(shellCmd, true)
-		return map[string]any{"exit_code": code, "stdout": out, "stderr": errOut}
-
+		fallthrough
 	case "remote.cmd", "remote.powershell", "remote_script", "remote_powershell":
 		shellCmd := firstString(payload, "command", "script")
 		if shellCmd == "" {
-			return map[string]any{"exit_code": 1, "stdout": "", "stderr": "no command"}
+			return map[string]any{"exit_code": 1, "stderr": "no command"}
 		}
-		code, out, errOut := runCommand(shellCmd, true)
-		return map[string]any{"exit_code": code, "stdout": out, "stderr": errOut}
-
+		code, out, er := runCommand(shellCmd, true)
+		return map[string]any{"exit_code": code, "stdout": out, "stderr": er}
 	case "remote.reboot":
+		command := "sudo reboot"
 		if runtime.GOOS == "windows" {
-			code, out, errOut := runCommand("shutdown /r /t 5", true)
-			return map[string]any{"exit_code": code, "stdout": out, "stderr": errOut}
+			command = "shutdown /r /t 5"
 		}
-		code, out, errOut := runCommand("sudo reboot", true)
-		return map[string]any{"exit_code": code, "stdout": out, "stderr": errOut}
-
+		code, out, er := runCommand(command, true)
+		return map[string]any{"exit_code": code, "stdout": out, "stderr": er}
 	default:
 		if shellCmd := firstString(payload, "command", "script"); shellCmd != "" {
-			code, out, errOut := runCommand(shellCmd, true)
-			return map[string]any{"exit_code": code, "stdout": out, "stderr": errOut}
+			code, out, er := runCommand(shellCmd, true)
+			return map[string]any{"exit_code": code, "stdout": out, "stderr": er}
 		}
-		return map[string]any{"exit_code": 1, "stdout": "", "stderr": "unsupported command_type: " + cmdType}
+		return map[string]any{"exit_code": 1, "stderr": "unsupported command_type: " + typ}
 	}
 }
 
@@ -212,33 +182,28 @@ func pollEnterpriseCommands(client *http.Client, server string, ident identity) 
 		return nil
 	}
 	defer res.Body.Close()
-	if res.StatusCode == 404 || res.StatusCode >= 300 {
+	if res.StatusCode == http.StatusNotFound || res.StatusCode >= 300 {
 		return nil
 	}
-	body, _ := io.ReadAll(res.Body)
+	b, _ := io.ReadAll(res.Body)
 	var list []map[string]any
-	if json.Unmarshal(body, &list) == nil {
+	if json.Unmarshal(b, &list) == nil {
 		return list
 	}
-	var wrap struct {
+	var wrapper struct {
 		Commands []map[string]any `json:"commands"`
 	}
-	if json.Unmarshal(body, &wrap) == nil {
-		return wrap.Commands
+	if json.Unmarshal(b, &wrapper) == nil {
+		return wrapper.Commands
 	}
 	return nil
 }
 
-func markEnterpriseSent(client *http.Client, server string, ident identity, commandID string) error {
-	if commandID == "" {
+func markEnterpriseSent(client *http.Client, server string, ident identity, id string) error {
+	if id == "" {
 		return nil
 	}
-	url := server + "/api/v1/agent/" + ident.AgentID + "/commands/" + commandID + "/sent"
-	req, err := http.NewRequest(http.MethodPost, url, nil)
-	if err != nil {
-		return err
-	}
-	res, err := client.Do(req)
+	res, err := client.Post(server+"/api/v1/agent/"+ident.AgentID+"/commands/"+id+"/sent", "application/json", nil)
 	if err != nil {
 		return err
 	}
@@ -246,35 +211,25 @@ func markEnterpriseSent(client *http.Client, server string, ident identity, comm
 	return nil
 }
 
-func postEnterpriseResult(client *http.Client, server string, ident identity, commandID string, result map[string]any) error {
-	if commandID == "" {
+func postEnterpriseResult(client *http.Client, server string, ident identity, id string, result map[string]any) error {
+	if id == "" {
 		return nil
 	}
-	exitCode := 1
-	if v, ok := result["exit_code"].(int); ok {
-		exitCode = v
-	} else if v, ok := result["exit_code"].(float64); ok {
-		exitCode = int(v)
-	}
-	endpoint := "failed"
+	code := intValue(result["exit_code"])
+	ep := "failed"
 	var body any
-	if exitCode == 0 {
-		endpoint = "completed"
+	if code == 0 {
+		ep = "completed"
 		body = result
 	} else {
-		msg := firstString(result, "stderr", "stdout")
-		if msg == "" {
-			msg = "remote command failed"
-		}
-		body = map[string]any{"message": msg}
+		body = map[string]any{"message": firstString(result, "stderr", "stdout")}
 	}
-	url := server + "/api/v1/agent/" + ident.AgentID + "/commands/" + commandID + "/" + endpoint
-	return postJSONClient(client, url, body, nil)
+	return postJSONClient(client, server+"/api/v1/agent/"+ident.AgentID+"/commands/"+id+"/"+ep, body, nil)
 }
 
 func firstString(m map[string]any, keys ...string) string {
 	for _, k := range keys {
-		if v, ok := m[k]; ok && v != nil {
+		if v := m[k]; v != nil {
 			s := strings.TrimSpace(fmt.Sprint(v))
 			if s != "" && s != "<nil>" {
 				return s
@@ -284,7 +239,18 @@ func firstString(m map[string]any, keys ...string) string {
 	return ""
 }
 
-func loadOrEnroll(server string) (identity, error) {
+func intValue(v any) int {
+	switch n := v.(type) {
+	case int:
+		return n
+	case float64:
+		return int(n)
+	default:
+		return 0
+	}
+}
+
+func loadOrEnroll(server, token string) (identity, error) {
 	path := identityPath()
 	if data, err := os.ReadFile(path); err == nil {
 		var id identity
@@ -292,11 +258,19 @@ func loadOrEnroll(server string) (identity, error) {
 			return id, nil
 		}
 	}
-	return enroll(server)
+	if token == "" {
+		token = loadBootstrapToken()
+	}
+	return enroll(server, token)
 }
 
-func clearIdentity() {
-	_ = os.Remove(identityPath())
+func loadBootstrapToken() string {
+	p := enrollmentTokenPath()
+	b, err := os.ReadFile(p)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(b))
 }
 
 func isAuthError(err error) bool {
@@ -304,15 +278,20 @@ func isAuthError(err error) bool {
 		return false
 	}
 	s := err.Error()
-	return strings.Contains(s, "401") || strings.Contains(s, "Invalid agent credentials")
+	return strings.Contains(s, "401") || strings.Contains(s, "Invalid agent credentials") || strings.Contains(s, "Authentication failed")
 }
 
-func enroll(server string) (identity, error) {
+func enroll(server, token string) (identity, error) {
 	body := enrollReq{
 		Hostname:     hostname(),
 		AgentVersion: agentVersion,
 		Platform:     runtime.GOOS + "/" + runtime.GOARCH + " " + runtime.Version(),
 	}
+	if token == "" {
+		return identity{}, fmt.Errorf("no enrollment token available; generate a customer installer token in the portal")
+	}
+	body.EnrollmentSecret = &token
+
 	var resp enrollResp
 	if err := postJSON(server+"/api/v1/runtime/enroll", body, &resp); err != nil {
 		return identity{}, err
@@ -321,6 +300,7 @@ func enroll(server string) (identity, error) {
 	_ = os.MkdirAll(filepath.Dir(identityPath()), 0755)
 	data, _ := json.MarshalIndent(id, "", "  ")
 	_ = os.WriteFile(identityPath(), data, 0600)
+	_ = os.Remove(enrollmentTokenPath())
 	_ = writeConfig(server)
 	return id, nil
 }
@@ -345,9 +325,15 @@ func sendHeartbeat(client *http.Client, server string, ident identity) error {
 	if err := postJSONClient(client, server+"/api/v1/runtime/heartbeat", req, &raw); err != nil {
 		return err
 	}
-	pending, _ := raw["pending_commands"].(float64)
-	fmt.Printf("[heartbeat] ok pending=%.0f\n", pending)
+	fmt.Printf("[heartbeat] ok pending=%.0f\n", rawFloat(raw["pending_commands"]))
 	return nil
+}
+
+func rawFloat(v any) float64 {
+	if n, ok := v.(float64); ok {
+		return n
+	}
+	return 0
 }
 
 func pollCommands(client *http.Client, server string, ident identity) ([]commandItem, error) {
@@ -365,19 +351,21 @@ func pollCommands(client *http.Client, server string, ident identity) ([]command
 		b, _ := io.ReadAll(res.Body)
 		return nil, fmt.Errorf("poll HTTP %d: %s", res.StatusCode, string(b))
 	}
-	var payload struct {
+	var p struct {
 		Commands []commandItem `json:"commands"`
 	}
-	if err := json.NewDecoder(res.Body).Decode(&payload); err != nil {
+	if err := json.NewDecoder(res.Body).Decode(&p); err != nil {
 		return nil, err
 	}
-	return payload.Commands, nil
+	return p.Commands, nil
 }
 
-func postResult(client *http.Client, server string, ident identity, commandID string, exitCode int, stdout, stderr string) error {
-	url := fmt.Sprintf("%s/api/v1/runtime/agents/%s/commands/%s/result?agent_token=%s", server, ident.AgentID, commandID, ident.AgentToken)
-	body := map[string]any{"exit_code": exitCode, "stdout": stdout, "stderr": stderr}
-	return postJSONClient(client, url, body, nil)
+func postResult(client *http.Client, server string, ident identity, id string, code int, out, er string) error {
+	return postJSONClient(client, fmt.Sprintf("%s/api/v1/runtime/agents/%s/commands/%s/result?agent_token=%s", server, ident.AgentID, id, ident.AgentToken), map[string]any{
+		"exit_code": code,
+		"stdout":    out,
+		"stderr":    er,
+	}, nil)
 }
 
 func runCommand(command string, shell bool) (int, string, string) {
@@ -389,9 +377,9 @@ func runCommand(command string, shell bool) (int, string, string) {
 	} else {
 		cmd = exec.Command("sh", "-c", command)
 	}
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+	var out, er bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &er
 	err := cmd.Run()
 	code := 0
 	if err != nil {
@@ -399,10 +387,10 @@ func runCommand(command string, shell bool) (int, string, string) {
 			code = ee.ExitCode()
 		} else {
 			code = 1
-			stderr.WriteString(err.Error())
+			er.WriteString(err.Error())
 		}
 	}
-	return code, stdout.String(), stderr.String()
+	return code, out.String(), er.String()
 }
 
 func postJSON(url string, in any, out any) error {
@@ -480,6 +468,10 @@ func dataDir() string {
 
 func identityPath() string {
 	return filepath.Join(dataDir(), "agent_identity.json")
+}
+
+func enrollmentTokenPath() string {
+	return filepath.Join(dataDir(), "enrollment_token")
 }
 
 func writeConfig(server string) error {
