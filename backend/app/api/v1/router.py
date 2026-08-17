@@ -2,14 +2,13 @@
 from fastapi import APIRouter
 
 api_router = APIRouter()
-from app.api.v1.endpoints import health, devices, agent_runtime, agent_runtime_enrollment
+from app.api.v1.endpoints import health, devices, agent_runtime, agent_runtime_enrollment, agent_enrollment_portal
 
 api_router.include_router(health.router, prefix="/health", tags=["health"])
 api_router.include_router(devices.router, prefix="/devices", tags=["devices"])
-# Secure customer-bound enrollment is registered before the legacy runtime
-# router so POST /runtime/enroll cannot bypass tenant enrollment credentials.
 api_router.include_router(agent_runtime_enrollment.router, tags=["agent-runtime"])
 api_router.include_router(agent_runtime.router, tags=["agent-runtime"])
+api_router.include_router(agent_enrollment_portal.router, tags=["agents"])
 
 
 def _safe_include(mod_path: str, attr: str = "router", **kwargs):
