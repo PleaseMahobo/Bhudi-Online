@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import ctypes
 import os
-import signal
 import subprocess
 import sys
 import threading
@@ -23,17 +22,15 @@ AGENT = ROOT / "bhudi_agent.py"
 PYTHON = ROOT / ".venv" / "Scripts" / "python.exe"
 
 advapi32 = ctypes.WinDLL("Advapi32.dll", use_last_error=True)
-kernel32 = ctypes.WinDLL("Kernel32.dll", use_last_error=True)
 
 SERVICE_WIN32_OWN_PROCESS = 0x00000010
-SERVICE_AUTO_START = 0x00000002
 SERVICE_RUNNING = 0x00000004
 SERVICE_STOPPED = 0x00000001
 SERVICE_START_PENDING = 0x00000002
 SERVICE_STOP_PENDING = 0x00000003
 SERVICE_ACCEPT_STOP = 0x00000001
 SERVICE_CONTROL_STOP = 0x00000001
-NO_ERROR = 0
+
 
 class SERVICE_STATUS(ctypes.Structure):
     _fields_ = [
@@ -46,14 +43,23 @@ class SERVICE_STATUS(ctypes.Structure):
         ("dwWaitHint", wintypes.DWORD),
     ]
 
+
 HANDLER = ctypes.WINFUNCTYPE(None, wintypes.DWORD)
 MAIN = ctypes.WINFUNCTYPE(None, wintypes.DWORD, ctypes.POINTER(ctypes.c_wchar_p))
+
+
+class SERVICE_TABLE_ENTRY(ctypes.Structure):
+    _fields_ = [
+        ("lpServiceName", wintypes.LPWSTR),
+        ("lpServiceProc", MAIN),
+    ]
+
 
 advapi32.RegisterServiceCtrlHandlerW.argtypes = [wintypes.LPCWSTR, HANDLER]
 advapi32.RegisterServiceCtrlHandlerW.restype = wintypes.SC_HANDLE
 advapi32.SetServiceStatus.argtypes = [wintypes.SC_HANDLE, ctypes.POINTER(SERVICE_STATUS)]
 advapi32.SetServiceStatus.restype = wintypes.BOOL
-advapi32.StartServiceCtrlDispatcherW.argtypes = [ctypes.c_void_p]
+advapi32.StartServiceCtrlDispatcherW.argtypes = [ctypes.POINTER(SERVICE_TABLE_ENTRY)]
 advapi32.StartServiceCtrlDispatcherW.restype = wintypes.BOOL
 
 stop_event = threading.Event()
@@ -73,6 +79,21 @@ def report(state: int, accepted: int = 0, exit_code: int = 0, checkpoint: int = 
     status = SERVICE_STATUS(SERVICE_WIN32_OWN_PROCESS, state, accepted, exit_code, 0, checkpoint, wait_hint)
     if service_handle:
         advapi32.SetServiceStatus(service_handle, ctypes.byref(status))
+
+
+def validate_agent_paths() -> None:
+    """Ensure the service can only launch its bundled agent interpreter/script."""
+    root = ROOT.resolve()
+    python_path = PYTHON.resolve()
+    agent_path = AGENT.resolve()
+    if python_path.parent != (root / ".venv" / "Scripts").resolve():
+        raise RuntimeError(f"unexpected service Python path: {python_path}")
+    if agent_path != (root / "bhudi_agent.py").resolve():
+        raise RuntimeError(f"unexpected service agent path: {agent_path}")
+    if not python_path.is_file():
+        raise FileNotFoundError(python_path)
+    if not agent_path.is_file():
+        raise FileNotFoundError(agent_path)
 
 
 @HANDLER
@@ -98,10 +119,7 @@ def service_main(argc: int, argv) -> None:
     report(SERVICE_START_PENDING, 0, 0, 1, 15000)
     log(f"service starting; root={ROOT}; python={PYTHON}")
     try:
-        if not PYTHON.exists():
-            raise FileNotFoundError(PYTHON)
-        if not AGENT.exists():
-            raise FileNotFoundError(AGENT)
+        validate_agent_paths()
 
         env = os.environ.copy()
         env["PYTHONUNBUFFERED"] = "1"
@@ -111,34 +129,42 @@ def service_main(argc: int, argv) -> None:
         env.setdefault("BHUDI_HEARTBEAT_INTERVAL", "30")
 
         report(SERVICE_RUNNING, SERVICE_ACCEPT_STOP)
-        log(f"launching agent: {PYTHON} {AGENT}")
+        log(f"launching bundled agent: {PYTHON} {AGENT}")
+
+        # Both command elements are fixed paths derived from ROOT and validated
+        # immediately above; no service configuration or network input controls them.
+        command = (os.fspath(PYTHON), os.fspath(AGENT))
         agent_process = subprocess.Popen(
-            [str(PYTHON), str(AGENT)],
-            cwd=str(ROOT),
+            command,
+            cwd=os.fspath(ROOT),
             env=env,
+            shell=False,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
             bufsize=1,
         )
         assert agent_process.stdout is not None
-        while not stop_event.is_set():
-            line = agent_process.stdout.readline()
-            if line:
-                log(f"[agent] {line.rstrip()}")
-            elif agent_process.poll() is not None:
-                break
-        if agent_process.poll() is None:
-            agent_process.terminate()
-            try:
-                agent_process.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                agent_process.kill()
-        remaining = agent_process.stdout.read() if agent_process.stdout else ""
-        if remaining:
-            for line in remaining.splitlines():
-                log(f"[agent] {line}")
-        log(f"agent exited with code {agent_process.returncode}")
+        try:
+            while not stop_event.is_set():
+                line = agent_process.stdout.readline()
+                if line:
+                    log(f"[agent] {line.rstrip()}")
+                elif agent_process.poll() is not None:
+                    break
+            if agent_process.poll() is None:
+                agent_process.terminate()
+                try:
+                    agent_process.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    agent_process.kill()
+            remaining = agent_process.stdout.read()
+            if remaining:
+                for line in remaining.splitlines():
+                    log(f"[agent] {line}")
+            log(f"agent exited with code {agent_process.returncode}")
+        finally:
+            agent_process.stdout.close()
         report(SERVICE_STOPPED)
     except Exception as exc:
         log(f"service startup/runtime failure: {type(exc).__name__}: {exc}")
@@ -147,14 +173,13 @@ def service_main(argc: int, argv) -> None:
 
 def run_service() -> int:
     # The SCM supplies this table when starting the service.
-    table_type = type("SERVICE_TABLE_ENTRY", (ctypes.Structure,), {
-        "_fields_": [("lpServiceName", wintypes.LPWSTR), ("lpServiceProc", MAIN)]
-    })
-    table = (table_type * 2)()
+    table = (SERVICE_TABLE_ENTRY * 2)()
     table[0].lpServiceName = SERVICE_NAME
     table[0].lpServiceProc = service_main
+    # ctypes does not accept None directly for a function-pointer field.
+    # Cast a NULL pointer to the callback type for the required terminator.
     table[1].lpServiceName = None
-    table[1].lpServiceProc = None
+    table[1].lpServiceProc = ctypes.cast(None, MAIN)
     ok = advapi32.StartServiceCtrlDispatcherW(ctypes.byref(table))
     if not ok:
         error = ctypes.get_last_error()
