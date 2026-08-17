@@ -2,87 +2,40 @@
 [CmdletBinding()]
 param(
   [Parameter(Mandatory=$true)] [ValidatePattern('^https://')] [string]$ServerUrl,
-  [string]$InstallDir = $(Join-Path ${env:ProgramFiles} "BhudiAgent"),
-  [string]$RepoZipUrl = "https://github.com/PleaseMahobo/Bhudi-Online/archive/refs/heads/main.zip",
+  [Parameter(Mandatory=$true)] [string]$EnrollmentToken,
   [switch]$Force
 )
-$ErrorActionPreference = "Stop"
-$ServiceName = "BhudiAgent"
+
+$ErrorActionPreference = 'Stop'
+$ServerUrl = $ServerUrl.TrimEnd('/')
+$BootstrapUrl = 'https://github.com/PleaseMahobo/Bhudi-Online/releases/download/agent-native-latest/bhudi-agent-setup.exe'
+
 function Write-Step($msg) { Write-Host "[Bhudi] $msg" -ForegroundColor Cyan }
 function Write-Ok($msg) { Write-Host "[Bhudi] $msg" -ForegroundColor Green }
+
 $principal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
-if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { throw "Run this installer from an elevated PowerShell window (Run as Administrator)." }
-$ServerUrl = $ServerUrl.TrimEnd('/')
-Write-Step "Server URL: $ServerUrl"
-Write-Step "Install dir: $InstallDir"
-$python = $null
-foreach ($cand in @("py", "python", "python3")) {
-  try { $v = & $cand -c "import sys; print(sys.executable)" 2>$null; if ($LASTEXITCODE -eq 0 -and $v) { $python = $v.Trim(); break } } catch {}
+if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+  throw 'Run this installer from an elevated PowerShell window (Run as Administrator).'
 }
-if (-not $python) { throw "Python 3.11+ was not found. Install Python and rerun the installer." }
-Write-Ok "Python: $python"
-$temp = Join-Path $env:TEMP ("bhudi-agent-" + [guid]::NewGuid().ToString("n"))
-$zipPath = Join-Path $temp "repo.zip"
+if ([string]::IsNullOrWhiteSpace($EnrollmentToken)) { throw 'A customer enrollment token is required. Generate one from the Bhudi portal.' }
+
+$temp = Join-Path $env:TEMP ('bhudi-bootstrap-' + [guid]::NewGuid().ToString('n'))
+$bootstrap = Join-Path $temp 'bhudi-agent-setup.exe'
 New-Item -ItemType Directory -Path $temp -Force | Out-Null
+
 try {
-  Write-Step "Downloading Bhudi agent package..."
+  Write-Step "Server URL: $ServerUrl"
+  Write-Step 'Python: not required'
+  Write-Step 'Downloading standalone Bhudi Windows installer...'
   [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-  Invoke-WebRequest -Uri $RepoZipUrl -OutFile $zipPath -UseBasicParsing
-  Expand-Archive -Path $zipPath -DestinationPath $temp -Force
-  $root = Get-ChildItem -Path $temp -Directory | Where-Object { $_.Name -like "Bhudi-Online-*" } | Select-Object -First 1
-  $agentSrc = if ($root) { Join-Path $root.FullName "agent" } else { $null }
-  if (-not $agentSrc -or -not (Test-Path (Join-Path $agentSrc "bhudi_agent.py"))) { throw "Downloaded package does not contain agent/bhudi_agent.py." }
-  if (Test-Path $InstallDir) {
-    if (-not $Force) { throw "$InstallDir already exists. Use -Force to replace it." }
-    Write-Step "Removing previous BhudiAgent installation..."
-    & sc.exe stop $ServiceName 2>$null | Out-Null
-    & sc.exe delete $ServiceName 2>$null | Out-Null
-    for ($i = 0; $i -lt 15; $i++) {
-      & sc.exe query $ServiceName 2>&1 | Out-Null
-      if ($LASTEXITCODE -ne 0) { break }
-      Start-Sleep -Milliseconds 500
-    }
-    if (Get-Service -Name $ServiceName -ErrorAction SilentlyContinue) { throw "Existing $ServiceName service could not be removed. Reboot Windows and rerun with -Force." }
-    Remove-Item -Path $InstallDir -Recurse -Force -ErrorAction Stop
-  }
-  New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
-  Copy-Item -Path (Join-Path $agentSrc "*") -Destination $InstallDir -Recurse -Force
-  @{ server_url = $ServerUrl; heartbeat_interval = 30 } | ConvertTo-Json | Set-Content -Path (Join-Path $InstallDir "agent_config.json") -Encoding UTF8
-  $venvDir = Join-Path $InstallDir ".venv"
-  Write-Step "Creating isolated Python environment..."
-  & $python -m venv $venvDir
-  if ($LASTEXITCODE -ne 0) { throw "Python virtual environment creation failed." }
-  $venvPython = Join-Path $venvDir "Scripts\python.exe"
-  Write-Step "Pinning compatible pip version..."
-  & $venvPython -m pip install --disable-pip-version-check "pip<26"
-  if ($LASTEXITCODE -ne 0) { throw "pip bootstrap failed." }
-  Write-Step "Installing agent dependencies..."
-  & $venvPython -m pip install --disable-pip-version-check -r (Join-Path $InstallDir "requirements.txt")
-  if ($LASTEXITCODE -ne 0) { throw "Agent dependency installation failed." }
-  $serviceHost = Join-Path $InstallDir "windows_service_host.py"
-  if (-not (Test-Path $serviceHost)) { throw "Native Windows service host was not found: $serviceHost" }
-  $serviceLog = Join-Path $InstallDir "agent-service.log"
-  New-Item -ItemType File -Path $serviceLog -Force | Out-Null
-  Write-Step "Registering BhudiAgent with Windows Service Control Manager..."
-  $binPath = '"' + $venvPython + '" "' + $serviceHost + '"'
-  try {
-    New-Service -Name $ServiceName -BinaryPathName $binPath -DisplayName "Bhudi RMM Agent" -Description "Bhudi remote monitoring, management and security agent." -StartupType Automatic | Out-Null
-  } catch {
-    throw "Windows service registration failed: $($_.Exception.Message)"
-  }
-  Write-Step "Starting BhudiAgent..."
-  Start-Service -Name $ServiceName -ErrorAction Stop
-  $deadline = (Get-Date).AddSeconds(15)
-  do {
-    Start-Sleep -Milliseconds 500
-    $svc = Get-Service -Name $ServiceName -ErrorAction Stop
-  } while ($svc.Status -eq "StartPending" -and (Get-Date) -lt $deadline)
-  if ($svc.Status -ne "Running") {
-    $log = if (Test-Path $serviceLog) { Get-Content $serviceLog -Tail 50 | Out-String } else { "<service log unavailable>" }
-    throw "BhudiAgent is not running (status=$($svc.Status)). Service log:`n$log"
-  }
-  Write-Ok "Bhudi Agent installed and running as a Windows service."
-  Write-Host "  Service : $ServiceName"
-  Write-Host "  Server  : $ServerUrl"
-  Write-Host "  Install : $InstallDir"
-} finally { Remove-Item -Path $temp -Recurse -Force -ErrorAction SilentlyContinue }
+  Invoke-WebRequest -Uri $BootstrapUrl -OutFile $bootstrap -UseBasicParsing
+
+  Write-Step 'Launching native installer...'
+  $args = @('-server', $ServerUrl, '-enrollment-token', $EnrollmentToken)
+  if ($Force) { $args += '-force' }
+  $p = Start-Process -FilePath $bootstrap -ArgumentList $args -Verb RunAs -Wait -PassThru
+  if ($p.ExitCode -ne 0) { throw "Native Bhudi installer exited with code $($p.ExitCode)." }
+  Write-Ok 'Bhudi Agent installed using the native Windows package. No Python was installed or required.'
+} finally {
+  Remove-Item -Path $temp -Recurse -Force -ErrorAction SilentlyContinue
+}
