@@ -1,25 +1,43 @@
 from __future__ import annotations
 
+import secrets
 import uuid
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.database.session import get_db
+from app.models.agent import Agent
 from app.services.agent_dispatcher import AgentDispatcher
 
 router = APIRouter(prefix="/agent", tags=["Agent Commands"])
 
 
+def _require_agent(agent_id: uuid.UUID, agent_token: str | None, db: Session) -> Agent:
+    agent = db.get(Agent, agent_id)
+    stored = agent.enrollment_token if agent else None
+    if not agent or not agent.enabled or not agent_token or not stored or not secrets.compare_digest(agent_token, stored):
+        raise HTTPException(status_code=401, detail="Invalid agent credentials")
+    return agent
+
+
+def _require_command_agent(agent_id: uuid.UUID, command_id: uuid.UUID, db: Session) -> None:
+    from app.models.agent_command import AgentCommand
+
+    command = db.get(AgentCommand, command_id)
+    if command is None or command.agent_id != agent_id:
+        raise HTTPException(status_code=404, detail="Command not found")
+
+
 @router.get("/{agent_id}/commands")
 def get_commands(
     agent_id: uuid.UUID,
+    agent_token: str | None = None,
     db: Session = Depends(get_db),
 ):
+    _require_agent(agent_id, agent_token, db)
     dispatcher = AgentDispatcher(db)
-
     commands = dispatcher.get_pending_commands(agent_id)
-
     return [
         {
             "id": str(command.id),
@@ -40,12 +58,12 @@ def get_commands(
 def mark_sent(
     agent_id: uuid.UUID,
     command_id: uuid.UUID,
+    agent_token: str | None = None,
     db: Session = Depends(get_db),
 ):
-    dispatcher = AgentDispatcher(db)
-
-    dispatcher.mark_sent(command_id)
-
+    _require_agent(agent_id, agent_token, db)
+    _require_command_agent(agent_id, command_id, db)
+    AgentDispatcher(db).mark_sent(command_id)
     return {"status": "ok"}
 
 
@@ -54,12 +72,12 @@ def mark_completed(
     agent_id: uuid.UUID,
     command_id: uuid.UUID,
     result: dict,
+    agent_token: str | None = None,
     db: Session = Depends(get_db),
 ):
-    dispatcher = AgentDispatcher(db)
-
-    dispatcher.mark_completed(command_id, result)
-
+    _require_agent(agent_id, agent_token, db)
+    _require_command_agent(agent_id, command_id, db)
+    AgentDispatcher(db).mark_completed(command_id, result)
     return {"status": "ok"}
 
 
@@ -68,13 +86,10 @@ def mark_failed(
     agent_id: uuid.UUID,
     command_id: uuid.UUID,
     error: dict,
+    agent_token: str | None = None,
     db: Session = Depends(get_db),
 ):
-    dispatcher = AgentDispatcher(db)
-
-    dispatcher.mark_failed(
-        command_id,
-        error.get("message", "Unknown error"),
-    )
-
+    _require_agent(agent_id, agent_token, db)
+    _require_command_agent(agent_id, command_id, db)
+    AgentDispatcher(db).mark_failed(command_id, error.get("message", "Unknown error"))
     return {"status": "ok"}
