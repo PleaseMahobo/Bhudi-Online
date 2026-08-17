@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-from io import BytesIO
 from uuid import UUID
 
-import qrcode
 from fastapi import (
     APIRouter,
     Depends,
@@ -28,7 +26,6 @@ from app.schemas.auth import (
     UserResponse,
 )
 from app.services.auth_service import AuthService
-from app.services.email_service import EmailService
 
 router = APIRouter(
     prefix="/auth",
@@ -130,77 +127,7 @@ def active_sessions(current_user: User = Depends(get_current_user), db: Session 
     return AuthService(db).get_active_sessions(current_user)
 
 
-@router.post("/mfa/setup", status_code=status.HTTP_200_OK)
-def setup_mfa(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    try:
-        from app.services.mfa_service import MfaService
-    except Exception as exc:
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=f"MFA service unavailable: {exc}") from exc
-
-    service = MfaService(db)
-    secret, otpauth_uri = service.generate_secret(current_user)
-
-    qr = qrcode.QRCode(version=None, error_correction=qrcode.constants.ERROR_CORRECT_M, box_size=8, border=4)
-    qr.add_data(otpauth_uri)
-    qr.make(fit=True)
-    image = qr.make_image(fill_color="black", back_color="white")
-    qr_buffer = BytesIO()
-    image.save(qr_buffer, format="PNG")
-
-    email_service = EmailService()
-    if not email_service.configured:
-        db.rollback()
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="MFA email delivery is not configured")
-
-    subject = "Bhudi RMM — Secure your account"
-    body_text = (
-        "Secure your Bhudi RMM account\n\n"
-        "We received a request to set up multi-factor authentication for your account.\n\n"
-        "Open this email on a device where you can view the QR code, then scan the QR code with Google Authenticator, Microsoft Authenticator, Authy, 1Password, or another compatible authenticator app.\n\n"
-        "After scanning, return to Bhudi RMM and enter the current 6-digit code from your authenticator app to finish enrollment.\n\n"
-        "If you did not request MFA setup, ignore this email and contact your Bhudi administrator.\n\n"
-        "— Bhudi RMM Security"
-    )
-    body_html = """
-    <html><body style="margin:0;background:#0f172a;color:#e5e7eb;font-family:Arial,sans-serif">
-      <div style="max-width:560px;margin:0 auto;padding:32px 20px">
-        <div style="background:#111827;border:1px solid #334155;border-radius:20px;padding:32px;text-align:center">
-          <div style="font-size:22px;font-weight:700;margin-bottom:8px">Bhudi RMM</div>
-          <div style="color:#94a3b8;margin-bottom:24px">Secure your account</div>
-          <h1 style="font-size:24px;margin:0 0 12px">Set up multi-factor authentication</h1>
-          <p style="color:#cbd5e1;line-height:1.6">Scan the QR code below with Google Authenticator, Microsoft Authenticator, Authy, 1Password, or another compatible authenticator app.</p>
-          <div style="background:#fff;border-radius:16px;padding:20px;margin:24px auto;width:fit-content"><img src="cid:bhudi-mfa-qr" alt="Bhudi MFA QR code" width="280" height="280" style="display:block" /></div>
-          <p style="color:#cbd5e1;line-height:1.6">After scanning, return to Bhudi RMM and enter the current 6-digit code shown in your authenticator app.</p>
-          <p style="color:#64748b;font-size:12px;line-height:1.5;margin-top:24px">If you did not request MFA setup, ignore this email and contact your Bhudi administrator.</p>
-        </div>
-      </div>
-    </body></html>
-    """
-
-    result = email_service.send(
-        to=[current_user.email],
-        subject=subject,
-        body_text=body_text,
-        body_html=body_html,
-        attachments=[("bhudi-mfa-qr.png", qr_buffer.getvalue(), "image/png", "bhudi-mfa-qr")],
-    )
-    if not result.ok:
-        db.rollback()
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Unable to send MFA setup email")
-
-    return {"enabled": service.is_enabled(current_user), "email_sent": True}
-
-
-@router.post("/mfa/verify", status_code=status.HTTP_200_OK)
-def verify_mfa(payload: dict[str, str], current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    try:
-        from app.services.mfa_service import MfaService
-    except Exception as exc:
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=f"MFA service unavailable: {exc}") from exc
-    service = MfaService(db)
-    code = payload.get("code", "")
-    enabled = service.enable_totp(current_user, code)
-    return {"enabled": enabled and service.is_enabled(current_user)}
+# MFA setup/verify live in app.api.v1.endpoints.mfa
 
 
 @router.post("/passkeys/register", status_code=status.HTTP_200_OK)
