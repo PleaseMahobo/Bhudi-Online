@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - "agent/native/**"
+      - "agent/cmd/bhudi-agent-setup/**"
       - "agent/msi/**"
       - ".github/workflows/build-agent-setup.yml"
   workflow_dispatch:
@@ -32,6 +33,14 @@ jobs:
           GOOS=darwin  GOARCH=arm64 CGO_ENABLED=0 go build -ldflags="-s -w" -o dist/bhudi-agent-darwin-arm64 .
           cp dist/bhudi-agent-windows-amd64.exe dist/bhudi-agent.exe
 
+      - name: Build customer installer base
+        working-directory: agent/cmd/bhudi-agent-setup
+        env:
+          GOOS: windows
+          GOARCH: amd64
+          CGO_ENABLED: "0"
+        run: go build -ldflags="-s -w" -o ../../native/dist/BhudiAgent-Setup.exe .
+
       - uses: actions/upload-artifact@v4
         with:
           name: bhudi-agent-native
@@ -46,30 +55,17 @@ jobs:
 
             | File | Platform |
             |------|----------|
-            | `bhudi-agent.exe` | Windows x64 |
+            | `BhudiAgent-Setup.exe` | Windows customer-specific installer base |
+            | `bhudi-agent.exe` | Windows x64 native agent |
             | `bhudi-agent-linux-amd64` | Linux x64 |
             | `bhudi-agent-linux-arm64` | Linux ARM64 |
             | `bhudi-agent-darwin-amd64` | macOS Intel |
             | `bhudi-agent-darwin-arm64` | macOS Apple Silicon |
-            | `bhudi-agent-setup.msi` | Windows MSI (from MSI job) |
+            | `bhudi-agent-setup.msi` | Windows MSI |
 
-            ### Windows
-            ```
-            bhudi-agent.exe install -server https://your-backend.example.com
-            ```
-
-            ### Linux
-            ```
-            chmod +x bhudi-agent-linux-amd64
-            sudo ./bhudi-agent-linux-amd64 install -server https://your-backend.example.com
-            ```
-
-            ### macOS
-            ```
-            chmod +x bhudi-agent-darwin-arm64
-            ./bhudi-agent-darwin-arm64 install -server https://your-backend.example.com
-            ```
+            The portal creates the customer-specific `BhudiAgent-Setup.exe` by appending a short-lived, single-use tenant enrollment bootstrap to this base executable.
           files: |
+            agent/native/dist/BhudiAgent-Setup.exe
             agent/native/dist/bhudi-agent.exe
             agent/native/dist/bhudi-agent-windows-amd64.exe
             agent/native/dist/bhudi-agent-linux-amd64
