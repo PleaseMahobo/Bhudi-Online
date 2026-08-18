@@ -89,7 +89,15 @@ def refresh(request: Request, response: Response, body: RefreshTokenRequest | No
         refresh_token = body.refresh_token
     if not refresh_token:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Refresh token missing", headers={"WWW-Authenticate": "Bearer"})
-    tokens = service.refresh_access_token(refresh_token)
+    ip_address = request.client.host if request.client else None
+    user_agent = request.headers.get("user-agent")
+    device_name = request.headers.get("x-device-name")
+    tokens = service.refresh_access_token(
+        refresh_token,
+        ip_address=ip_address,
+        user_agent=user_agent,
+        device_name=device_name,
+    )
     set_auth_cookies(response, access_token=tokens["access_token"], refresh_token=tokens["refresh_token"])
     return TokenResponse(**tokens)
 
@@ -118,7 +126,9 @@ def logout_all(response: Response, current_user: User = Depends(get_current_user
 
 @router.post("/sessions/{session_id}/revoke", response_model=MessageResponse, status_code=status.HTTP_200_OK)
 def revoke_session(session_id: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    revoked = AuthService(db).revoke_session(session_id=session_id)
+    revoked = AuthService(db).revoke_session(current_user, session_id=session_id)
+    if revoked == 0:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
     return MessageResponse(message=f"Revoked {revoked} token(s) for the specified session.")
 
 
