@@ -8,6 +8,12 @@ on:
       - "agent/cmd/bhudi-agent-setup/**"
       - "agent/msi/**"
       - ".github/workflows/build-agent-setup.yml"
+  pull_request:
+    paths:
+      - "agent/native/**"
+      - "agent/cmd/bhudi-agent-setup/**"
+      - "agent/msi/**"
+      - ".github/workflows/build-agent-setup.yml"
   workflow_dispatch:
 
 permissions:
@@ -46,7 +52,9 @@ jobs:
           name: bhudi-agent-native
           path: agent/native/dist/*
 
-      - uses: softprops/action-gh-release@v2
+      - name: Publish native release assets
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: agent-native-latest
           name: Bhudi Native Agent (no Python)
@@ -105,7 +113,9 @@ jobs:
         with:
           name: bhudi-agent-msi
           path: agent/msi/bhudi-agent-setup.msi
-      - uses: softprops/action-gh-release@v2
+      - name: Publish MSI release asset
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: agent-native-latest
           files: agent/msi/bhudi-agent-setup.msi
