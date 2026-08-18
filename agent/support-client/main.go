@@ -14,6 +14,7 @@ import (
     "path/filepath"
     "runtime"
     "strings"
+    "time"
 
     "github.com/getlantern/systray"
 )
@@ -24,12 +25,16 @@ type client struct { identity identity; server, session, baseURL string }
 type createTicket struct { Title string `json:"title"`; Description string `json:"description"`; Priority string `json:"priority"`; Category string `json:"category,omitempty"`; Requester string `json:"requester,omitempty"` }
 
 func main() {
- c, err := loadClient(); if err != nil { fmt.Fprintln(os.Stderr, "Bhudi Support Client:", err); os.Exit(1) }
- ln, err := net.Listen("tcp", "127.0.0.1:0"); if err != nil { os.Exit(1) }; c.baseURL="http://"+ln.Addr().String()
- mux:=http.NewServeMux(); mux.HandleFunc("/", c.page); mux.HandleFunc("/api/tickets", c.ticketAPI); go func(){ _=http.Serve(ln,mux) }()
- systray.Run(c.ready, func(){ _=ln.Close() })
+    c, err := loadClient(); if err != nil { fmt.Fprintln(os.Stderr, "Bhudi Support Client:", err); os.Exit(1) }
+    ln, err := net.Listen("tcp", "127.0.0.1:0"); if err != nil { os.Exit(1) }; c.baseURL="http://"+ln.Addr().String()
+    mux:=http.NewServeMux(); mux.HandleFunc("/", c.page); mux.HandleFunc("/api/tickets", c.ticketAPI); go func(){ _=http.Serve(ln,mux) }()
+    systray.Run(c.ready, func(){ _=ln.Close() })
 }
-func loadClient()(*client,error){ dir:=dataDir(); ib,e:=os.ReadFile(filepath.Join(dir,"agent_identity.json")); if e!=nil{return nil,e}; var id identity; if json.Unmarshal(ib,&id)!=nil||id.AgentID==""||id.AgentToken==""{return nil,fmt.Errorf("invalid agent identity")}; cb,e:=os.ReadFile(filepath.Join(dir,"agent_config.json")); if e!=nil{return nil,e}; var cfg config; if json.Unmarshal(cb,&cfg)!=nil||strings.TrimSpace(cfg.ServerURL)==""{return nil,fmt.Errorf("invalid agent configuration")}; b:=make([]byte,32); if _,e=rand.Read(b);e!=nil{return nil,e}; return &client{identity:id,server:strings.TrimRight(cfg.ServerURL,"/"),session:base64.RawURLEncoding.EncodeToString(b)},nil }
+func loadClient()(*client,error){
+    dir:=dataDir(); deadline:=time.Now().Add(60*time.Second)
+    for time.Now().Before(deadline) { ib,e:=os.ReadFile(filepath.Join(dir,"agent_identity.json")); if e==nil { var id identity; if json.Unmarshal(ib,&id)==nil&&id.AgentID!=""&&id.AgentToken!="" { cb,e:=os.ReadFile(filepath.Join(dir,"agent_config.json")); if e==nil { var cfg config; if json.Unmarshal(cb,&cfg)==nil&&strings.TrimSpace(cfg.ServerURL)!="" { b:=make([]byte,32);if _,e=rand.Read(b);e!=nil{return nil,e};return &client{identity:id,server:strings.TrimRight(cfg.ServerURL,"/"),session:base64.RawURLEncoding.EncodeToString(b)},nil } } } }; time.Sleep(2*time.Second) }
+    return nil,fmt.Errorf("agent enrollment files were not available within 60 seconds")
+}
 func dataDir()string{ b:=os.Getenv("ProgramData");if b==""{b=os.Getenv("LOCALAPPDATA")};if b==""{b="."};return filepath.Join(b,"Bhudi","Agent") }
 func(c *client)ready(){ systray.SetTitle("Bhudi");systray.SetTooltip("Bhudi Support");open:=systray.AddMenuItem("Open Ticket","Open a Bhudi support ticket");tickets:=systray.AddMenuItem("My Tickets","View your Bhudi tickets");systray.AddSeparator();quit:=systray.AddMenuItem("Exit","Exit Bhudi Support");go func(){for{select{case<-open.ClickedCh:c.open();case<-tickets.ClickedCh:c.open();case<-quit.ClickedCh:systray.Quit();return}}}() }
 func(c *client)open(){ target:=c.baseURL+"/?session="+url.QueryEscape(c.session);if runtime.GOOS=="windows"{_=exec.Command("rundll32","url.dll,FileProtocolHandler",target).Start()}else{_=exec.Command("xdg-open",target).Start()} }
