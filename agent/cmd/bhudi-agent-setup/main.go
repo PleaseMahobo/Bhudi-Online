@@ -60,7 +60,8 @@ func main() {
 	}
 
 	fmt.Println("[2/3] Installing Windows service and enrolling endpoint...")
-	cmd := exec.Command(agentPath, "install", "-server", server, "-enrollment-token", boot.EnrollmentToken)
+	cmd := exec.Command(agentPath, "install", "-server", server)
+	cmd.Env = append(os.Environ(), "BHUDI_ENROLLMENT_TOKEN="+boot.EnrollmentToken)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
