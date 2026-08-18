@@ -1,3 +1,5 @@
+//go:build !windows
+
 package main
 
 // numVal normalizes numeric values received from JSON payloads.
