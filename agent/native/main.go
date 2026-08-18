@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-const agentVersion = "2.4.0-service"
+const agentVersion = "2.5.0-service"
 
 func main() {
 	if len(os.Args) < 2 {
@@ -18,8 +18,9 @@ func main() {
 	case "install":
 		fs := flag.NewFlagSet("install", flag.ExitOnError)
 		server := fs.String("server", envOr("BHUDI_SERVER_URL", defaultServerURL), "Bhudi backend base URL")
+		enrollmentToken := fs.String("enrollment-token", "", "single-use customer enrollment token")
 		_ = fs.Parse(os.Args[2:])
-		if err := installService(strings.TrimRight(*server, "/")); err != nil {
+		if err := installService(strings.TrimRight(*server, "/"), strings.TrimSpace(*enrollmentToken)); err != nil {
 			fatal(err)
 		}
 	case "uninstall":
@@ -33,16 +34,12 @@ func main() {
 	case "help", "-h", "--help":
 		fmt.Print(`Bhudi agent — install once, starts at every boot
 
-  install -server URL   Install Windows Service / systemd / LaunchAgent
-  uninstall             Remove service and startup entries
-  run [-server URL]     Run in foreground (used by the service)
+  install -server URL [-enrollment-token TOKEN]
+  uninstall
+  run [-server URL]
   version
 
-Windows (Administrator):
-  bhudi-agent.exe install -server https://bhudi-online-production.up.railway.app
-
-Linux (preferred with sudo for boot-wide service):
-  sudo ./bhudi-agent-linux-amd64 install -server https://bhudi-online-production.up.railway.app
+The customer installer supplies the single-use enrollment token automatically.
 `)
 	default:
 		runAgent(parseRunFlags(os.Args[1:]))
