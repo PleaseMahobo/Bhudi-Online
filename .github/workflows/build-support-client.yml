@@ -23,9 +23,12 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.22"
-      - name: Download dependencies
+      - name: Resolve dependencies
         working-directory: agent/support-client
-        run: go mod download
+        run: go mod tidy
+      - name: Verify dependencies
+        working-directory: agent/support-client
+        run: go mod verify
       - name: Build Windows x64 support client
         working-directory: agent/support-client
         env:
