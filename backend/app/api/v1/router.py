@@ -22,6 +22,7 @@ def _safe_include(mod_path: str, attr: str = "router", **kwargs):
     except Exception as e:
         print(f"[router] skipped {mod_path}: {e}")
 
+
 _safe_include("app.api.v1.endpoints.agents", tags=["agents"])
 _safe_include("app.api.v1.endpoints.auth", tags=["auth"])
 _safe_include("app.api.v1.endpoints.mfa", tags=["Authentication"])
