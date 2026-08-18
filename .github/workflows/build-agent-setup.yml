@@ -6,12 +6,14 @@ on:
     paths:
       - "agent/native/**"
       - "agent/cmd/bhudi-agent-setup/**"
+      - "agent/support-client/**"
       - "agent/msi/**"
       - ".github/workflows/build-agent-setup.yml"
   pull_request:
     paths:
       - "agent/native/**"
       - "agent/cmd/bhudi-agent-setup/**"
+      - "agent/support-client/**"
       - "agent/msi/**"
       - ".github/workflows/build-agent-setup.yml"
   workflow_dispatch:
@@ -27,18 +29,23 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.22"
-
       - name: Build native binaries
         working-directory: agent/native
         run: |
           mkdir -p dist
           GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o dist/bhudi-agent-windows-amd64.exe .
-          GOOS=linux   GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o dist/bhudi-agent-linux-amd64 .
-          GOOS=linux   GOARCH=arm64 CGO_ENABLED=0 go build -ldflags="-s -w" -o dist/bhudi-agent-linux-arm64 .
-          GOOS=darwin  GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o dist/bhudi-agent-darwin-amd64 .
-          GOOS=darwin  GOARCH=arm64 CGO_ENABLED=0 go build -ldflags="-s -w" -o dist/bhudi-agent-darwin-arm64 .
+          GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o dist/bhudi-agent-linux-amd64 .
+          GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -ldflags="-s -w" -o dist/bhudi-agent-linux-arm64 .
+          GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o dist/bhudi-agent-darwin-amd64 .
+          GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build -ldflags="-s -w" -o dist/bhudi-agent-darwin-arm64 .
           cp dist/bhudi-agent-windows-amd64.exe dist/bhudi-agent.exe
-
+      - name: Build Windows support client
+        working-directory: agent/support-client
+        env:
+          GOOS: windows
+          GOARCH: amd64
+          CGO_ENABLED: "0"
+        run: go build -ldflags="-s -w -H=windowsgui" -o ../native/dist/bhudi-support.exe .
       - name: Build customer installer base
         working-directory: agent/cmd/bhudi-agent-setup
         env:
@@ -46,12 +53,10 @@ jobs:
           GOARCH: amd64
           CGO_ENABLED: "0"
         run: go build -ldflags="-s -w" -o ../../native/dist/BhudiAgent-Setup.exe .
-
       - uses: actions/upload-artifact@v4
         with:
           name: bhudi-agent-native
           path: agent/native/dist/*
-
       - name: Publish native release assets
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
@@ -65,17 +70,17 @@ jobs:
             |------|----------|
             | `BhudiAgent-Setup.exe` | Windows customer-specific installer base |
             | `bhudi-agent.exe` | Windows x64 native agent |
+            | `bhudi-support.exe` | Windows system-tray endpoint support client |
             | `bhudi-agent-linux-amd64` | Linux x64 |
             | `bhudi-agent-linux-arm64` | Linux ARM64 |
             | `bhudi-agent-darwin-amd64` | macOS Intel |
             | `bhudi-agent-darwin-arm64` | macOS Apple Silicon |
             | `bhudi-agent-setup.msi` | Windows MSI |
-
-            The portal creates the customer-specific `BhudiAgent-Setup.exe` by appending a short-lived, single-use tenant enrollment bootstrap to this base executable.
           files: |
             agent/native/dist/BhudiAgent-Setup.exe
             agent/native/dist/bhudi-agent.exe
             agent/native/dist/bhudi-agent-windows-amd64.exe
+            agent/native/dist/bhudi-support.exe
             agent/native/dist/bhudi-agent-linux-amd64
             agent/native/dist/bhudi-agent-linux-arm64
             agent/native/dist/bhudi-agent-darwin-amd64
@@ -83,7 +88,6 @@ jobs:
           make_latest: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
   msi:
     needs: build
     runs-on: windows-latest
