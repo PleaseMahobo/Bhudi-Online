@@ -119,6 +119,11 @@ class AuthService:
                 pass
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Refresh token expired")
 
+        user = self.users.get_by_id(current_token.user_id)
+        if user is None:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Refresh token not recognized")
+        self._ensure_active_user(user)
+
         access_token = create_access_token(subject=str(current_token.user_id))
         new_refresh_token = create_refresh_token(
             subject=str(current_token.user_id), session_id=str(current_token.session_id),
@@ -161,8 +166,9 @@ class AuthService:
         self.db.commit()
         return revoked
 
-    def revoke_session(self, session_id: str, *, reason: str = "session_revoked") -> int:
-        revoked = self.refresh_tokens.revoke_session(session_id=session_id, reason=reason)
+    def revoke_session(self, user: User, session_id: str, *, reason: str = "session_revoked") -> int:
+        """Revoke a session only when it belongs to the authenticated user."""
+        revoked = self.refresh_tokens.revoke_session(user_id=user.id, session_id=session_id, reason=reason)
         self.db.commit()
         return revoked
 
