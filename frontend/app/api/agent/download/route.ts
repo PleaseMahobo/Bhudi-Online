@@ -1,16 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-/**
- * Native agent downloads — redirects to GitHub release assets.
- * No embedded shell scripts / template literals (Turbopack-safe).
- */
 const RELEASE =
   'https://github.com/PleaseMahobo/Bhudi-Online/releases/download/agent-native-latest';
+const BASE_SETUP = RELEASE + '/BhudiAgent-Setup.exe';
+const MAGIC = Buffer.from('BHUDI_BOOTSTRAP_V1', 'utf8');
+const BACKEND_URL = (
+  process.env.API_BASE_URL ||
+  process.env.NEXT_PUBLIC_API_URL ||
+  'https://bhudi-online-production.up.railway.app'
+)
+  .replace(/\/$/, '')
+  .replace(/\/api\/v1$/, '');
 
-const ASSETS: Record<string, { url: string; fallback?: string }> = {
-  exe: { url: RELEASE + '/bhudi-agent.exe' },
-  'windows-exe': { url: RELEASE + '/bhudi-agent.exe' },
-  windows: { url: RELEASE + '/bhudi-agent.exe' },
+const STATIC_ASSETS: Record<string, { url: string; fallback?: string }> = {
   msi: {
     url: RELEASE + '/bhudi-agent-setup.msi',
     fallback: RELEASE + '/bhudi-agent.exe',
@@ -25,23 +27,90 @@ const ASSETS: Record<string, { url: string; fallback?: string }> = {
   'macos-intel': { url: RELEASE + '/bhudi-agent-darwin-amd64' },
 };
 
-async function resolveUrl(url: string, fallback?: string): Promise<string> {
-  try {
-    const res = await fetch(url, { method: 'HEAD', redirect: 'follow' });
-    if (res.ok) return url;
-  } catch {
-    /* ignore */
+function authHeaders(req: NextRequest): Headers {
+  const headers = new Headers({ Accept: 'application/json' });
+  for (const name of ['authorization', 'cookie']) {
+    const value = req.headers.get(name);
+    if (value) headers.set(name, value);
   }
-  if (fallback) return fallback;
-  return url;
+  return headers;
 }
 
-/** Default: Windows EXE. MSI falls back to EXE if the MSI asset is not published yet. */
+async function customerInstaller(req: NextRequest): Promise<NextResponse> {
+  const tokenResponse = await fetch(`${BACKEND_URL}/api/v1/agents/enrollment-token`, {
+    method: 'POST',
+    headers: authHeaders(req),
+    cache: 'no-store',
+  });
+  if (!tokenResponse.ok) {
+    const detail = await tokenResponse.text();
+    return NextResponse.json(
+      { error: 'Unable to create customer enrollment token', detail },
+      { status: tokenResponse.status === 401 ? 401 : 502 }
+    );
+  }
+
+  const tokenData = (await tokenResponse.json()) as {
+    token?: string;
+    expires_at?: string;
+    tenant_id?: string;
+  };
+  if (!tokenData.token || !tokenData.tenant_id) {
+    return NextResponse.json({ error: 'Invalid enrollment-token response' }, { status: 502 });
+  }
+
+  const baseResponse = await fetch(BASE_SETUP, { cache: 'no-store', redirect: 'follow' });
+  if (!baseResponse.ok) {
+    return NextResponse.json(
+      { error: 'Published BhudiAgent-Setup.exe is unavailable' },
+      { status: 503 }
+    );
+  }
+
+  const base = Buffer.from(await baseResponse.arrayBuffer());
+  const payload = Buffer.from(
+    JSON.stringify({
+      server_url: BACKEND_URL,
+      enrollment_token: tokenData.token,
+      tenant_id: tokenData.tenant_id,
+      expires_at: tokenData.expires_at,
+    }),
+    'utf8'
+  );
+
+  // Footer format consumed by the setup EXE:
+  // [JSON payload][uint64 little-endian payload length][magic]
+  const length = Buffer.alloc(8);
+  length.writeBigUInt64LE(BigInt(payload.length));
+  const output = Buffer.concat([base, payload, length, MAGIC]);
+
+  return new NextResponse(output as unknown as BodyInit, {
+    status: 200,
+    headers: {
+      'Content-Type': 'application/vnd.microsoft.portable-executable',
+      'Content-Disposition': 'attachment; filename="BhudiAgent-Setup.exe"',
+      'Cache-Control': 'private, no-store, max-age=0',
+      'X-Bhudi-Installer': 'customer-specific',
+    },
+  });
+}
+
+async function staticDownload(os: string): Promise<NextResponse> {
+  const asset = STATIC_ASSETS[os] || { url: RELEASE + '/bhudi-agent.exe' };
+  let target = asset.url;
+  try {
+    const res = await fetch(target, { method: 'HEAD', redirect: 'follow' });
+    if (!res.ok && asset.fallback) target = asset.fallback;
+  } catch {
+    if (asset.fallback) target = asset.fallback;
+  }
+  return NextResponse.redirect(target, 302);
+}
+
 export async function GET(req: NextRequest) {
   const os = (new URL(req.url).searchParams.get('os') || 'exe').toLowerCase();
-  const asset = ASSETS[os] || ASSETS.exe;
-  const target = await resolveUrl(asset.url, asset.fallback);
-  const res = NextResponse.redirect(target, 302);
-  res.headers.set('Cache-Control', 'public, max-age=60');
-  return res;
+  if (os === 'exe' || os === 'windows' || os === 'windows-exe') {
+    return customerInstaller(req);
+  }
+  return staticDownload(os);
 }
