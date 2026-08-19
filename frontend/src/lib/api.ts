@@ -4,9 +4,31 @@
 // the HttpOnly access/refresh cookies issued by /api/auth/*.
 const API_BASE = "";
 
+let refreshPromise: Promise<unknown> | null = null;
+
+async function refreshSessionOnce(): Promise<void> {
+  if (!refreshPromise) {
+    refreshPromise = fetch(`${API_BASE}/api/auth/refresh`, {
+      method: "POST",
+      headers: { Accept: "application/json" },
+      credentials: "include",
+      cache: "no-store",
+    }).then(async response => {
+      if (!response.ok) {
+        throw new Error(`Session refresh failed (${response.status})`);
+      }
+      await response.json().catch(() => undefined);
+    }).finally(() => {
+      refreshPromise = null;
+    });
+  }
+  await refreshPromise;
+}
+
 async function request<T>(
   endpoint: string,
-  options: RequestInit = {}
+  options: RequestInit = {},
+  allowRefresh = true
 ): Promise<T> {
   const headers = new Headers(options.headers);
   if (!headers.has("Content-Type") && options.body) {
@@ -20,6 +42,16 @@ async function request<T>(
     credentials: "include",
     cache: "no-store",
   });
+
+  if (response.status === 401 && allowRefresh && endpoint !== "/api/auth/login" && endpoint !== "/api/auth/refresh" && endpoint !== "/api/auth/logout") {
+    try {
+      await refreshSessionOnce();
+      return request<T>(endpoint, options, false);
+    } catch {
+      // The refresh session is genuinely unavailable. Preserve the original
+      // authentication failure rather than looping or forcing a password reset.
+    }
+  }
 
   if (!response.ok) {
     let message = response.statusText;
@@ -181,7 +213,8 @@ export async function getCurrentUser() {
 }
 
 export async function refreshAccessToken() {
-  return request<LoginResponse>("/api/auth/refresh", { method: "POST" });
+  await refreshSessionOnce();
+  return getCurrentUser() as Promise<LoginResponse>;
 }
 
 export async function getHealth() { return request<HealthResponse>("/api/health"); }
@@ -209,16 +242,16 @@ export async function getAssetDepreciation(id: string) { return request<Deprecia
 export async function listAssetLifecycle(id: string) { return request<LifecycleEvent[]>(`/api/v1/assets/${id}/lifecycle`); }
 export async function listVendors(activeOnly = false) { return request<Vendor[]>(`/api/v1/assets/vendors${activeOnly ? "?active_only=true" : ""}`); }
 export async function createVendor(data: VendorCreate) { return request<Vendor>(`/api/v1/assets/vendors`, { method: "POST", body: JSON.stringify(data) }); }
-export async function updateVendor(id: string, data: Partial<VendorCreate>) { return request<Vendor>(`/api/v1/assets/vendors/${id}`, { method: "PATCH", body: JSON.stringify(data) }); }
-export async function deleteVendor(id: string) { return request<void>(`/api/v1/assets/vendors/${id}`, { method: "DELETE" }); }
+export async function updateVendor(id: string, data: Partial<VendorCreate>) { return request<Vendor>(`/api/v1/assets/vendors`, { method: "PATCH", body: JSON.stringify(data) }); }
+export async function deleteVendor(id: string) { return request<void>(`/api/v1/assets/vendors`, { method: "DELETE" }); }
 export async function listLicenses(activeOnly = false) { return request<License[]>(`/api/v1/assets/licenses${activeOnly ? "?active_only=true" : ""}`); }
 export async function createLicense(data: LicenseCreate) { return request<License>(`/api/v1/assets/licenses`, { method: "POST", body: JSON.stringify(data) }); }
-export async function updateLicense(id: string, data: Partial<LicenseCreate>) { return request<License>(`/api/v1/assets/licenses/${id}`, { method: "PATCH", body: JSON.stringify(data) }); }
-export async function deleteLicense(id: string) { return request<void>(`/api/v1/assets/licenses/${id}`, { method: "DELETE" }); }
+export async function updateLicense(id: string, data: Partial<LicenseCreate>) { return request<License>(`/api/v1/assets/licenses`, { method: "PATCH", body: JSON.stringify(data) }); }
+export async function deleteLicense(id: string) { return request<void>(`/api/v1/assets/licenses`, { method: "DELETE" }); }
 export async function listContracts(status?: string) { return request<Contract[]>(`/api/v1/assets/contracts${status ? `?status=${encodeURIComponent(status)}` : ""}`); }
 export async function createContract(data: ContractCreate) { return request<Contract>(`/api/v1/assets/contracts`, { method: "POST", body: JSON.stringify(data) }); }
-export async function updateContract(id: string, data: Partial<ContractCreate>) { return request<Contract>(`/api/v1/assets/contracts/${id}`, { method: "PATCH", body: JSON.stringify(data) }); }
-export async function deleteContract(id: string) { return request<void>(`/api/v1/assets/contracts/${id}`, { method: "DELETE" }); }
+export async function updateContract(id: string, data: Partial<ContractCreate>) { return request<Contract>(`/api/v1/assets/contracts`, { method: "PATCH", body: JSON.stringify(data) }); }
+export async function deleteContract(id: string) { return request<void>(`/api/v1/assets/contracts`, { method: "DELETE" }); }
 export async function listSoftware(params?: { asset_id?: string; device_id?: string }) { const qs = new URLSearchParams(); if (params?.asset_id) qs.set("asset_id", params.asset_id); if (params?.device_id) qs.set("device_id", params.device_id); return request<SoftwareItem[]>(`/api/v1/assets/software${qs.toString() ? `?${qs}` : ""}`); }
 
 export async function listTickets(params?: { status?: string; ticket_type?: string; asset_id?: string; device_id?: string; priority?: string }) { const qs = new URLSearchParams(); if (params?.status) qs.set("status", params.status); if (params?.ticket_type) qs.set("ticket_type", params.ticket_type); if (params?.asset_id) qs.set("asset_id", params.asset_id); if (params?.device_id) qs.set("device_id", params.device_id); if (params?.priority) qs.set("priority", params.priority); return request<ServiceTicket[]>(`/api/v1/itsm/tickets${qs.toString() ? `?${qs}` : ""}`); }
@@ -236,8 +269,8 @@ export async function runWarrantyExpiryJob(withinDays = 30) { return request<Ser
 
 export async function listPackages(params?: { package_type?: string; active_only?: boolean }) { const qs = new URLSearchParams(); if (params?.package_type) qs.set("package_type", params.package_type); if (params?.active_only) qs.set("active_only", "true"); return request<SoftwarePackage[]>(`/api/v1/software-deployment/packages${qs.toString() ? `?${qs}` : ""}`); }
 export async function createPackage(data: SoftwarePackageCreate) { return request<SoftwarePackage>(`/api/v1/software-deployment/packages`, { method: "POST", body: JSON.stringify(data) }); }
-export async function updatePackage(id: string, data: Partial<SoftwarePackageCreate>) { return request<SoftwarePackage>(`/api/v1/software-deployment/packages/${id}`, { method: "PATCH", body: JSON.stringify(data) }); }
-export async function deletePackage(id: string) { return request<void>(`/api/v1/software-deployment/packages/${id}`, { method: "DELETE" }); }
+export async function updatePackage(id: string, data: Partial<SoftwarePackageCreate>) { return request<SoftwarePackage>(`/api/v1/software-deployment/packages`, { method: "PATCH", body: JSON.stringify(data) }); }
+export async function deletePackage(id: string) { return request<void>(`/api/v1/software-deployment/packages`, { method: "DELETE" }); }
 export async function listDeploymentJobs(params?: { status?: string; package_id?: string }) { const qs = new URLSearchParams(); if (params?.status) qs.set("status", params.status); if (params?.package_id) qs.set("package_id", params.package_id); return request<DeploymentJob[]>(`/api/v1/software-deployment/jobs${qs.toString() ? `?${qs}` : ""}`); }
 export async function getDeploymentJob(id: string) { return request<DeploymentJob>(`/api/v1/software-deployment/jobs/${id}`); }
 export async function createDeploymentJob(data: DeploymentJobCreate) { return request<DeploymentJob>(`/api/v1/software-deployment/jobs`, { method: "POST", body: JSON.stringify(data) }); }
@@ -256,11 +289,11 @@ export async function deleteSecurityProvider(id: string) { return request<void>(
 export async function listSecurityAgents(params?: { device_id?: string; provider_id?: string; status?: string }) { const qs = new URLSearchParams(); if (params?.device_id) qs.set("device_id", params.device_id); if (params?.provider_id) qs.set("provider_id", params.provider_id); if (params?.status) qs.set("status", params.status); return request<EndpointSecurityAgent[]>(`/api/v1/endpoint-security/agents${qs.toString() ? `?${qs}` : ""}`); }
 export async function createSecurityAgent(data: EndpointSecurityAgentCreate) { return request<EndpointSecurityAgent>(`/api/v1/endpoint-security/agents`, { method: "POST", body: JSON.stringify(data) }); }
 export async function updateSecurityAgent(id: string, data: Partial<EndpointSecurityAgentCreate>) { return request<EndpointSecurityAgent>(`/api/v1/endpoint-security/agents/${id}`, { method: "PATCH", body: JSON.stringify(data) }); }
-export async function deleteSecurityAgent(id: string) { return request<void>(`/api/v1/endpoint-security/agents/${id}`, { method: "DELETE" }); }
+export async function deleteSecurityAgent(id: string) { return request<void>(`/api/v1/endpoint-security/agents`, { method: "DELETE" }); }
 export async function listSecurityFindings(params?: { device_id?: string; provider_id?: string; status?: string; severity?: string }) { const qs = new URLSearchParams(); if (params?.device_id) qs.set("device_id", params.device_id); if (params?.provider_id) qs.set("provider_id", params.provider_id); if (params?.status) qs.set("status", params.status); if (params?.severity) qs.set("severity", params.severity); return request<SecurityFinding[]>(`/api/v1/endpoint-security/findings${qs.toString() ? `?${qs}` : ""}`); }
 export async function createSecurityFinding(data: SecurityFindingCreate) { return request<SecurityFinding>(`/api/v1/endpoint-security/findings`, { method: "POST", body: JSON.stringify(data) }); }
-export async function updateSecurityFinding(id: string, data: Partial<SecurityFindingCreate> & { resolved_at?: string | null }) { return request<SecurityFinding>(`/api/v1/endpoint-security/findings/${id}`, { method: "PATCH", body: JSON.stringify(data) }); }
-export async function deleteSecurityFinding(id: string) { return request<void>(`/api/v1/endpoint-security/findings/${id}`, { method: "DELETE" }); }
+export async function updateSecurityFinding(id: string, data: Partial<SecurityFindingCreate> & { resolved_at?: string | null }) { return request<SecurityFinding>(`/api/v1/endpoint-security/findings`, { method: "PATCH", body: JSON.stringify(data) }); }
+export async function deleteSecurityFinding(id: string) { return request<void>(`/api/v1/endpoint-security/findings`, { method: "DELETE" }); }
 export async function getOrgSecurityScore() { return request<OrgSecurityScore>(`/api/v1/endpoint-security/scores/org`); }
 export async function listSecurityScores(minScore?: number) { return request<EndpointSecurityScore[]>(`/api/v1/endpoint-security/scores${minScore != null ? `?min_score=${minScore}` : ""}`); }
 export async function getDeviceSecurityScore(deviceId: string) { return request<EndpointSecurityScore>(`/api/v1/endpoint-security/scores/${deviceId}`); }
