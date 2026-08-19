@@ -11,10 +11,12 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.models.base import Base
 
 if TYPE_CHECKING:
+    from .permission import Permission
     from .refresh_token import RefreshToken
     from .tenant import Tenant
     from .profile import Profile
     from .user_role import UserRole
+    from .role import Role
 
 
 class User(Base):
