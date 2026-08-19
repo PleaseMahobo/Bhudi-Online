@@ -7,12 +7,14 @@ on:
       - "agent/native/**"
       - "agent/cmd/bhudi-agent-setup/**"
       - "agent/msi/**"
+      - "frontend/**"
       - ".github/workflows/build-agent-setup.yml"
   pull_request:
     paths:
       - "agent/native/**"
       - "agent/cmd/bhudi-agent-setup/**"
       - "agent/msi/**"
+      - "frontend/**"
       - ".github/workflows/build-agent-setup.yml"
   workflow_dispatch:
 
@@ -40,10 +42,10 @@ jobs:
         run: |
           mkdir -p dist
           GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o dist/bhudi-agent-windows-amd64.exe .
-          GOOS=linux   GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o dist/bhudi-agent-linux-amd64 .
-          GOOS=linux   GOARCH=arm64 CGO_ENABLED=0 go build -ldflags="-s -w" -o dist/bhudi-agent-linux-arm64 .
-          GOOS=darwin  GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o dist/bhudi-agent-darwin-amd64 .
-          GOOS=darwin  GOARCH=arm64 CGO_ENABLED=0 go build -ldflags="-s -w" -o dist/bhudi-agent-darwin-arm64 .
+          GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o dist/bhudi-agent-linux-amd64 .
+          GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -ldflags="-s -w" -o dist/bhudi-agent-linux-arm64 .
+          GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o dist/bhudi-agent-darwin-amd64 .
+          GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build -ldflags="-s -w" -o dist/bhudi-agent-darwin-arm64 .
           cp dist/bhudi-agent-windows-amd64.exe dist/bhudi-agent.exe
 
       - name: Build customer installer base
