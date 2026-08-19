@@ -20,6 +20,7 @@ from app.core.security import (
     verify_and_upgrade_password,
 )
 from app.models.refresh_token import RefreshToken
+from app.models.tenant import Tenant
 from app.models.user import User
 from app.repositories.refresh_token_repository import RefreshTokenRepository
 from app.repositories.user_repository import UserRepository
@@ -39,10 +40,21 @@ class AuthService:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
         self._validate_password(password)
         password_hash = hash_password(password)
-        user = User(email=email, password_hash=password_hash, first_name=first_name, last_name=last_name, role="trial")
+        tenant_name = " ".join(part for part in (first_name, last_name) if part).strip() or email.split("@", 1)[0]
+        user = User(
+            email=email,
+            password_hash=password_hash,
+            first_name=first_name,
+            last_name=last_name,
+            role="trial",
+        )
+        tenant = Tenant(name=tenant_name)
+        user.tenant = tenant
         try:
+            self.db.add(tenant)
             self.users.create(user)
             self.db.commit()
+            self.db.refresh(user)
         except Exception as exc:
             self.db.rollback()
             raise HTTPException(

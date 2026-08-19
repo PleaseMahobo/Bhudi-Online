@@ -28,7 +28,10 @@ def test_revoke_session_is_scoped_to_authenticated_user():
     service.db.commit.assert_called_once_with()
 
 
-def test_refresh_rejects_disabled_user():
+def test_refresh_rejects_disabled_user(monkeypatch):
+    """The test token is synthetic, so bypass JWT signature validation here."""
+    monkeypatch.setattr("app.services.auth_service.verify_refresh_token", lambda _: None)
+
     service = AuthService.__new__(AuthService)
     service.db = Mock()
     service.refresh_tokens = Mock()

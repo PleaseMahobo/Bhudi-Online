@@ -25,6 +25,7 @@ def _safe_include(mod_path: str, attr: str = "router", **kwargs):
 
 _safe_include("app.api.v1.endpoints.agents", tags=["agents"])
 _safe_include("app.api.v1.endpoints.auth", tags=["auth"])
+_safe_include("app.api.v1.endpoints.tenant_context", tags=["auth"])
 _safe_include("app.api.v1.endpoints.mfa", tags=["Authentication"])
 _safe_include("app.api.v1.endpoints.auth_extras", tags=["auth"])
 _safe_include("app.api.v1.endpoints.billing_checkout", tags=["billing"])
@@ -54,7 +55,8 @@ _safe_include("app.api.v1.endpoints.backup_integration", tags=["Backup Integrati
 _safe_include("app.api.v1.endpoints.compliance", tags=["Compliance"])
 _safe_include("app.api.v1.endpoints.reporting", tags=["Reporting"])
 _safe_include("app.api.v1.endpoints.msp", tags=["MSP Multi-Tenant"])
-_safe_include("app.api.v1.endpoints.stripe_billing", tags=["Stripe Billing"])
+_safe_include("app.api.v1.endpoints.stripe_billing", tags=["billing"])
 _safe_include("app.api.v1.endpoints.psa", tags=["PSA Integration"])
 _safe_include("app.api.v1.endpoints.notifications", tags=["Notifications"])
 _safe_include("app.api.v1.endpoints.ai", tags=["AI"])
+_safe_include("app.api.v1.endpoints.agent_support", tags=["Agent Support"])
