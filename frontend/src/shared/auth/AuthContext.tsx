@@ -5,16 +5,29 @@ import { getCurrentUser } from "@/lib/api";
 import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
 
 type User = { id: string; email: string; firstName: string; lastName: string; role: string; active: boolean };
-type AuthContextType = { user: User | null; loading: boolean; login: (email: string, password: string, mfaCode?: string) => Promise<boolean>; logout: () => Promise<void>; refreshUser: () => Promise<void> };
+type AuthContextType = {
+  user: User | null;
+  loading: boolean;
+  login: (email: string, password: string, mfaCode?: string) => Promise<boolean>;
+  logout: () => Promise<void>;
+  refreshUser: () => Promise<void>;
+};
 const AuthContext = createContext<AuthContextType | null>(null);
 
 function normalizeUser(data: any): User | null {
   const value = data?.user ?? data;
   if (!value) return null;
-  return { id: String(value.id ?? ""), email: String(value.email ?? ""), firstName: String(value.first_name ?? value.firstName ?? ""), lastName: String(value.last_name ?? value.lastName ?? ""), role: String(value.role ?? ""), active: Boolean(value.active ?? true) };
+  return {
+    id: String(value.id ?? ""),
+    email: String(value.email ?? ""),
+    firstName: String(value.first_name ?? value.firstName ?? ""),
+    lastName: String(value.last_name ?? value.lastName ?? ""),
+    role: String(value.role ?? ""),
+    active: Boolean(value.active ?? true),
+  };
 }
 
-async function syncSupabaseSession(accessToken: string) {
+async function syncSupabaseSession(accessToken: string): Promise<void> {
   const response = await fetch("/api/auth/supabase-session", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -22,19 +35,20 @@ async function syncSupabaseSession(accessToken: string) {
     credentials: "include",
     cache: "no-store",
   });
-  if (!response.ok) throw new Error("Unable to establish Bhudi session");
+  if (!response.ok) {
+    const body = await response.json().catch(() => null);
+    throw new Error(body?.detail || "Unable to establish Bhudi session");
+  }
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
-  async function refreshUser() {
+  async function refreshUser(): Promise<void> {
     try {
       const current = await getCurrentUser();
-      const normalized = normalizeUser(current);
-      setUser(normalized);
-      return normalized;
+      setUser(normalizeUser(current));
     } catch (error) {
       setUser(null);
       throw error;
@@ -45,16 +59,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const supabase = getSupabaseBrowserClient();
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) throw new Error(error.message);
-    if (!data.session?.access_token) throw new Error("Supabase did not return an authentication session");
+    if (!data.session?.access_token) {
+      throw new Error("Supabase did not return an authentication session");
+    }
 
     await syncSupabaseSession(data.session.access_token);
-    const current = await refreshUser();
+    const current = normalizeUser(await getCurrentUser());
+    setUser(current);
     return Boolean(current);
   }
 
-  async function logout() {
+  async function logout(): Promise<void> {
     try {
-      await fetch("/api/auth/supabase-session", { method: "DELETE", credentials: "include", cache: "no-store" });
+      await fetch("/api/auth/supabase-session", {
+        method: "DELETE",
+        credentials: "include",
+        cache: "no-store",
+      });
       await getSupabaseBrowserClient().auth.signOut();
     } finally {
       setUser(null);
@@ -67,19 +88,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const { data: listener } = supabase.auth.onAuthStateChange(async (_event, session) => {
       if (!active) return;
       if (session?.access_token) {
-        try { await syncSupabaseSession(session.access_token); await refreshUser(); }
-        catch { setUser(null); }
-      } else {
+        try {
+          await syncSupabaseSession(session.access_token);
+          if (active) await refreshUser();
+        } catch {
+          if (active) setUser(null);
+        }
+      } else if (active) {
         setUser(null);
       }
-      setLoading(false);
+      if (active) setLoading(false);
     });
 
-    refreshUser().catch(() => undefined).finally(() => { if (active) setLoading(false); });
-    return () => { active = false; listener.subscription.unsubscribe(); };
+    refreshUser()
+      .catch(() => undefined)
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+
+    return () => {
+      active = false;
+      listener.subscription.unsubscribe();
+    };
   }, []);
 
-  return <AuthContext.Provider value={{ user, loading, login, logout, refreshUser }}>{children}</AuthContext.Provider>;
+  return (
+    <AuthContext.Provider value={{ user, loading, login, logout, refreshUser }}>
+      {children}
+    </AuthContext.Provider>
+  );
 }
 
 export function useAuth() {
