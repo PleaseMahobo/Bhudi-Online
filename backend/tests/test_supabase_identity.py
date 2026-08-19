@@ -1,79 +1,83 @@
+from types import SimpleNamespace
+from unittest.mock import Mock
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 
-from app.models.base import Base
-from app.models.user import User
 from app.services import supabase_identity
 
 
-@pytest.fixture
-def db():
-    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
-    Base.metadata.create_all(engine)
-    Session = sessionmaker(bind=engine, expire_on_commit=False)
-    session = Session()
-    try:
-        yield session
-    finally:
-        session.close()
+def fake_db(user_by_auth=None, user_by_email=None):
+    db = Mock()
+    db.scalar.side_effect = [user_by_auth, user_by_email]
+    return db
 
 
-def test_supabase_identity_maps_existing_user_by_auth_id(db, monkeypatch):
+def fake_supabase(auth_id, email):
+    auth = Mock()
+    auth.get_user.return_value = SimpleNamespace(
+        user=SimpleNamespace(id=str(auth_id), email=email)
+    )
+    return SimpleNamespace(auth=auth)
+
+
+def test_supabase_identity_maps_existing_user_by_auth_id(monkeypatch):
     auth_id = uuid4()
-    user = User(email="user@example.com", password_hash="legacy", supabase_auth_id=auth_id, active=True)
-    db.add(user)
-    db.commit()
+    user = SimpleNamespace(
+        id=uuid4(),
+        email="user@example.com",
+        supabase_auth_id=auth_id,
+        tenant_id=None,
+        active=True,
+    )
+    db = fake_db(user_by_auth=user)
+    monkeypatch.setattr(supabase_identity, "supabase", fake_supabase(auth_id, user.email))
 
-    class Auth:
-        def get_user(self, token):
-            return type("Response", (), {"user": type("AuthUser", (), {"id": str(auth_id), "email": "user@example.com"})()})()
-
-    monkeypatch.setattr(supabase_identity, "supabase", type("Supabase", (), {"auth": Auth()})())
     resolved = supabase_identity.resolve_supabase_user(db, "token")
-    assert resolved.id == user.id
-    assert resolved.tenant_id is None
+
+    assert resolved is user
+    db.scalar.assert_called_once()
 
 
-def test_supabase_identity_links_existing_email(db, monkeypatch):
+def test_supabase_identity_links_existing_email(monkeypatch):
     auth_id = uuid4()
-    user = User(email="USER@example.com", password_hash="legacy", active=True)
-    db.add(user)
-    db.commit()
+    user = SimpleNamespace(
+        id=uuid4(),
+        email="USER@example.com",
+        supabase_auth_id=None,
+        tenant_id=None,
+        active=True,
+    )
+    db = fake_db(user_by_auth=None, user_by_email=user)
+    monkeypatch.setattr(supabase_identity, "supabase", fake_supabase(auth_id, "user@example.com"))
 
-    class Auth:
-        def get_user(self, token):
-            return type("Response", (), {"user": type("AuthUser", (), {"id": str(auth_id), "email": "user@example.com"})()})()
-
-    monkeypatch.setattr(supabase_identity, "supabase", type("Supabase", (), {"auth": Auth()})())
     resolved = supabase_identity.resolve_supabase_user(db, "token")
-    assert resolved.id == user.id
-    assert resolved.supabase_auth_id == auth_id
+
+    assert resolved is user
+    assert user.supabase_auth_id == auth_id
+    db.flush.assert_called_once()
 
 
-def test_supabase_identity_rejects_unmapped_user(db, monkeypatch):
+def test_supabase_identity_rejects_unmapped_user(monkeypatch):
     auth_id = uuid4()
+    db = fake_db(user_by_auth=None, user_by_email=None)
+    monkeypatch.setattr(supabase_identity, "supabase", fake_supabase(auth_id, "missing@example.com"))
 
-    class Auth:
-        def get_user(self, token):
-            return type("Response", (), {"user": type("AuthUser", (), {"id": str(auth_id), "email": "missing@example.com"})()})()
-
-    monkeypatch.setattr(supabase_identity, "supabase", type("Supabase", (), {"auth": Auth()})())
     with pytest.raises(supabase_identity.SupabaseIdentityError, match="not mapped"):
         supabase_identity.resolve_supabase_user(db, "token")
 
 
-def test_supabase_identity_rejects_inactive_user(db, monkeypatch):
+def test_supabase_identity_rejects_inactive_user(monkeypatch):
     auth_id = uuid4()
-    db.add(User(email="disabled@example.com", password_hash="legacy", supabase_auth_id=auth_id, active=False))
-    db.commit()
+    user = SimpleNamespace(
+        id=uuid4(),
+        email="disabled@example.com",
+        supabase_auth_id=auth_id,
+        tenant_id=None,
+        active=False,
+    )
+    db = fake_db(user_by_auth=user)
+    monkeypatch.setattr(supabase_identity, "supabase", fake_supabase(auth_id, user.email))
 
-    class Auth:
-        def get_user(self, token):
-            return type("Response", (), {"user": type("AuthUser", (), {"id": str(auth_id), "email": "disabled@example.com"})()})()
-
-    monkeypatch.setattr(supabase_identity, "supabase", type("Supabase", (), {"auth": Auth()})())
     with pytest.raises(supabase_identity.SupabaseIdentityError, match="inactive"):
         supabase_identity.resolve_supabase_user(db, "token")
