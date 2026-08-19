@@ -1,16 +1,16 @@
 from __future__ import annotations
 
 from fastapi import Depends, Request
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
 
+from app.core.dependencies import authentication_error, get_access_token
 from app.database.session import get_db
 from app.services.supabase_identity import SupabaseIdentityError, resolve_supabase_user
-from app.core.dependencies import authentication_error, get_access_token
 
 
 def get_supabase_user(
     request: Request,
-    db: AsyncSession = Depends(get_db),
+    db: Session = Depends(get_db),
 ):
     token = get_access_token(request)
     try:
@@ -21,7 +21,7 @@ def get_supabase_user(
 
 def get_optional_supabase_user(
     request: Request,
-    db: AsyncSession = Depends(get_db),
+    db: Session = Depends(get_db),
 ):
     try:
         return get_supabase_user(request, db)
