@@ -4,7 +4,7 @@ from typing import Any
 from uuid import UUID
 
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
 
 from app.models.user import User
 from app.core.supabase_client import supabase
@@ -14,10 +14,7 @@ class SupabaseIdentityError(Exception):
     """Raised when a Supabase identity cannot be mapped to Bhudi."""
 
 
-async def resolve_supabase_user(
-    db: AsyncSession,
-    access_token: str,
-) -> User:
+def resolve_supabase_user(db: Session, access_token: str) -> User:
     """Verify a Supabase access token and resolve its Bhudi user mapping."""
     if not supabase:
         raise SupabaseIdentityError("Supabase authentication is not configured")
@@ -34,18 +31,13 @@ async def resolve_supabase_user(
     auth_id = UUID(str(auth_user.id))
     email = (getattr(auth_user, "email", None) or "").strip().lower()
 
-    result = await db.execute(
-        select(User).where(User.supabase_auth_id == auth_id)
-    )
-    user = result.scalar_one_or_none()
+    user = db.scalar(select(User).where(User.supabase_auth_id == auth_id))
 
     if user is None and email:
-        result = await db.execute(select(User).where(User.email == email))
-        user = result.scalar_one_or_none()
-
+        user = db.scalar(select(User).where(User.email == email))
         if user is not None:
             user.supabase_auth_id = auth_id
-            await db.flush()
+            db.flush()
 
     if user is None:
         raise SupabaseIdentityError("Supabase identity is not mapped to a Bhudi user")
