@@ -1,6 +1,6 @@
 const API_BASE = "";
 
-export async function setTenantContext(tenantId: string) {
+export async function setTenantContext(tenantId: string | null) {
   const response = await fetch(`${API_BASE}/api/v1/auth/tenant-context`, {
     method: "POST",
     headers: {
@@ -23,7 +23,7 @@ export async function setTenantContext(tenantId: string) {
 
   return response.json() as Promise<{
     user_id: string;
-    tenant_id: string;
-    tenant_name: string;
+    tenant_id: string | null;
+    tenant_name: string | null;
   }>;
 }
