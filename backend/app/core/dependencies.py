@@ -46,11 +46,7 @@ def get_current_user(
     token: str = Depends(get_access_token),
     db: Session = Depends(get_db),
 ):
-    """Resolve a Bhudi user from the legacy JWT or a Supabase access token.
-
-    Supabase is the authentication authority; Bhudi remains authoritative for
-    application identity, tenant membership, roles, permissions and RBAC.
-    """
+    """Resolve a Bhudi user from the legacy JWT or a Supabase access token."""
     try:
         user_id = UUID(extract_access_token_subject(token))
         user = UserRepository(db).get_by_id(user_id)
@@ -82,15 +78,33 @@ def get_optional_user(
 
 
 def require_role(*allowed_roles: str):
-    def role_checker(user=Depends(get_current_user)):
-        if getattr(user, "role", None) not in allowed_roles:
-            raise authorization_error("Insufficient permissions")
-        return user
+    """Return a FastAPI dependency backed by the canonical AuthorizationService."""
+    if not allowed_roles:
+        raise ValueError("At least one role is required")
+
+    def role_checker(
+        current_user=Depends(get_current_user),
+        db: Session = Depends(get_db),
+    ):
+        authz = AuthorizationService(db)
+        for role in allowed_roles:
+            if authz.has_role(current_user.id, role):
+                return current_user
+        raise authorization_error("Insufficient permissions")
+
     return role_checker
 
 
-def require_admin(user=Depends(require_role("admin"))):
-    return user
+def require_admin():
+    """Canonical administrator dependency using AuthorizationService."""
+    def admin_checker(
+        current_user=Depends(get_current_user),
+        db: Session = Depends(get_db),
+    ):
+        AuthorizationService(db).require_admin(current_user.id)
+        return current_user
+
+    return admin_checker
 
 
 def require_active_user(user=Depends(get_current_user)):
@@ -110,14 +124,17 @@ def require_tenant_user(user=Depends(get_current_user)):
 
 
 def has_permission(user, permission: str) -> bool:
-    permissions = getattr(user, "permissions", None)
-    return bool(permissions and permission in permissions)
+    return bool(getattr(user, "permissions", None) and permission in user.permissions)
 
 
 def require_permission(permission: str) -> Callable:
-    def permission_checker(current_user=Depends(get_current_user), db: Session = Depends(get_db)):
+    def permission_checker(
+        current_user=Depends(get_current_user),
+        db: Session = Depends(get_db),
+    ):
         AuthorizationService(db).require_permission(current_user.id, permission)
         return current_user
+
     return permission_checker
 
 
@@ -140,7 +157,7 @@ def current_user(user=Depends(get_current_user)):
     return user
 
 
-def current_admin(user=Depends(require_admin)):
+def current_admin(user=Depends(require_admin())):
     return user
 
 
@@ -154,6 +171,7 @@ def is_authenticated(request: Request) -> bool:
         return True
     except HTTPException:
         return False
+
 
 __all__ = [
     "authentication_error", "authorization_error", "get_access_token",
