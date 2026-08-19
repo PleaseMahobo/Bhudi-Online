@@ -30,18 +30,6 @@
     <ui:WixUI Id="WixUI_Minimal" />
     <WixVariable Id="WixUILicenseRtf" Value="License.rtf" />
 
-    <CustomAction
-        Id="InstallBhudiAgent"
-        Directory="INSTALLFOLDER"
-        ExeCommand="[INSTALLFOLDER]bhudi-agent.exe install -server [SERVERURL]"
-        Execute="deferred"
-        Impersonate="no"
-        Return="check" />
-
-    <InstallExecuteSequence>
-      <Custom Action="InstallBhudiAgent" After="InstallFiles" Condition="NOT REMOVE" />
-    </InstallExecuteSequence>
-
     <StandardDirectory Id="ProgramFiles64Folder">
       <Directory Id="INSTALLFOLDER" Name="Bhudi Agent" />
     </StandardDirectory>
@@ -53,6 +41,27 @@
             Source="!(bindpath.agent)bhudi-agent.exe"
             KeyPath="yes"
             Checksum="yes" />
+
+        <ServiceInstall
+            Id="BhudiAgentService"
+            Name="BhudiAgent"
+            DisplayName="Bhudi Agent"
+            Description="Bhudi RMM agent — heartbeats, remote access, and support operations."
+            Type="ownProcess"
+            Start="auto"
+            Account="LocalSystem"
+            ErrorControl="normal"
+            Arguments="run -server [SERVERURL]"
+            Vital="yes" />
+
+        <ServiceControl
+            Id="BhudiAgentServiceControl"
+            Name="BhudiAgent"
+            Start="install"
+            Stop="both"
+            Remove="uninstall"
+            Wait="yes" />
+
         <Shortcut
             Id="StartMenuShortcut"
             Directory="ProgramMenuFolder"
@@ -61,6 +70,7 @@
             Target="[INSTALLFOLDER]bhudi-agent.exe"
             Arguments="run"
             WorkingDirectory="INSTALLFOLDER" />
+
         <RemoveFolder Id="RemoveInstallFolder" On="uninstall" />
         <RegistryValue
             Root="HKLM"
