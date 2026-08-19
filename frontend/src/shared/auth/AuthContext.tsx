@@ -27,24 +27,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           current = await getCurrentUser();
         } else throw error;
       }
-      setUser(normalizeUser(current));
+      const normalized = normalizeUser(current);
+      setUser(normalized);
+      return normalized;
     } catch (error) {
       setUser(null);
       console.error("Failed to refresh user:", error);
+      throw error;
     }
   }
 
   async function login(email: string, password: string, mfaCode?: string): Promise<boolean> {
-    try {
-      const response = await apiLogin(email, password, mfaCode);
-      const loggedInUser = normalizeUser(response);
-      if (loggedInUser) { setUser(loggedInUser); return true; }
-      await refreshUser();
+    const response = await apiLogin(email, password, mfaCode);
+    const loggedInUser = normalizeUser(response);
+    if (loggedInUser) {
+      setUser(loggedInUser);
       return true;
-    } catch (error) {
-      console.error("Login failed:", error);
-      return false;
     }
+    const current = await refreshUser();
+    return Boolean(current);
   }
 
   async function logout() {
@@ -53,7 +54,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     finally { setUser(null); }
   }
 
-  useEffect(() => { refreshUser().finally(() => setLoading(false)); }, []);
+  useEffect(() => { refreshUser().catch(() => undefined).finally(() => setLoading(false)); }, []);
 
   return <AuthContext.Provider value={{ user, loading, login, logout, refreshUser }}>{children}</AuthContext.Provider>;
 }
