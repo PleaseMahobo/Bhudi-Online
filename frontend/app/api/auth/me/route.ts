@@ -10,24 +10,26 @@ const BACKEND = (
 
 export async function GET(request: NextRequest) {
   try {
-    const auth =
-      request.headers.get('authorization') ||
-      (request.cookies.get('access_token')?.value
-        ? `Bearer ${request.cookies.get('access_token')!.value}`
-        : '');
+    const token = request.cookies.get('access_token')?.value;
+    const auth = request.headers.get('authorization') || (token ? `Bearer ${token}` : '');
 
     if (!auth) {
       return NextResponse.json({ authenticated: false }, { status: 401 });
     }
 
-    const res = await fetch(`${BACKEND}/api/v1/auth/me`, {
+    // The portal now authenticates with Supabase. Do not send the Supabase
+    // access token to the legacy Bhudi-JWT /auth/me endpoint; that endpoint
+    // expects Bhudi-issued JWT claims and will reject a valid Supabase JWT.
+    const res = await fetch(`${BACKEND}/api/v1/supabase-auth/me`, {
       headers: { Authorization: auth },
       cache: 'no-store',
     });
     const data = await res.json().catch(() => ({}));
+
     if (!res.ok) {
       return NextResponse.json({ authenticated: false, ...data }, { status: res.status });
     }
+
     return NextResponse.json({ authenticated: true, user: data });
   } catch (e) {
     return NextResponse.json(
