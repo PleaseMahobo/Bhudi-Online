@@ -1,3 +1,5 @@
+import { getSupabaseBrowserClient } from './supabase-browser';
+
 const API_BASE = '';
 
 type ApiError = { detail?: unknown; error?: string; message?: string };
@@ -53,11 +55,19 @@ export async function refreshSession() {
 }
 
 export async function requestPasswordReset(email: string) {
-  return postJson<{ message: string }>('/api/auth/password-reset/request', { email });
+  const supabase = getSupabaseBrowserClient();
+  const { error } = await supabase.auth.resetPasswordForEmail(email, {
+    redirectTo: `${window.location.origin}/reset-password`,
+  });
+  if (error) throw error;
+  return { message: 'If an account exists for that email, password reset instructions have been sent.' };
 }
 
-export async function confirmPasswordReset(token: string, new_password: string) {
-  return postJson<{ message: string }>('/api/auth/password-reset/confirm', { token, new_password });
+export async function confirmPasswordReset(new_password: string) {
+  const supabase = getSupabaseBrowserClient();
+  const { data, error } = await supabase.auth.updateUser({ password: new_password });
+  if (error) throw error;
+  return data.user;
 }
 
 export async function mfaSetup() {
