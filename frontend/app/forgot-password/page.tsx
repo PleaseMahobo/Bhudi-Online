@@ -18,7 +18,7 @@ export default function ForgotPasswordPage() {
     try {
       await requestPasswordReset(email.trim());
       setSent(true);
-    } catch (err: any) {
+    } catch {
       // Always show success message for security (don't reveal if email exists)
       setSent(true);
     } finally {
@@ -40,10 +40,7 @@ export default function ForgotPasswordPage() {
               If an account exists for that email, password reset instructions have been sent.
               Check your inbox (and spam folder).
             </div>
-            <Link
-              href="/login"
-              className="inline-block text-sm font-medium text-indigo-400 hover:text-indigo-300"
-            >
+            <Link href="/login" className="inline-block text-sm font-medium text-indigo-400 hover:text-indigo-300">
               ← Back to Sign In
             </Link>
           </div>
@@ -62,23 +59,15 @@ export default function ForgotPasswordPage() {
             </div>
 
             {error && (
-              <p className="rounded-xl border border-red-500/40 bg-red-950/40 px-3 py-2 text-center text-sm text-red-300">
-                {error}
-              </p>
+              <p className="rounded-xl border border-red-500/40 bg-red-950/40 px-3 py-2 text-center text-sm text-red-300">{error}</p>
             )}
 
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full rounded-xl bg-indigo-600 py-3 text-sm font-semibold text-white transition hover:bg-indigo-500 disabled:opacity-50"
-            >
+            <button type="submit" disabled={loading} className="w-full rounded-xl bg-indigo-600 py-3 text-sm font-semibold text-white transition hover:bg-indigo-500 disabled:opacity-50">
               {loading ? 'Sending…' : 'Send Reset Link'}
             </button>
 
             <p className="text-center text-xs text-slate-500">
-              <Link href="/login" className="text-indigo-400 hover:text-indigo-300">
-                ← Back to Sign In
-              </Link>
+              <Link href="/login" className="text-indigo-400 hover:text-indigo-300">← Back to Sign In</Link>
             </p>
           </form>
         )}

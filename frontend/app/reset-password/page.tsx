@@ -1,21 +1,52 @@
 'use client';
 
-import { useState, Suspense } from 'react';
+import { useEffect, useState, Suspense } from 'react';
 import Link from 'next/link';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import BhudiLogo from '@/shared/components/BhudiLogo';
 import { confirmPasswordReset } from '@/lib/auth-client';
+import { getSupabaseBrowserClient } from '@/lib/supabase-browser';
 
 function ResetPasswordForm() {
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const token = searchParams.get('token') || '';
-
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
   const [loading, setLoading] = useState(false);
+  const [checkingSession, setCheckingSession] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    const supabase = getSupabaseBrowserClient();
+
+    async function checkRecoverySession() {
+      const { data, error: sessionError } = await supabase.auth.getSession();
+      if (!active) return;
+      if (sessionError || !data.session) {
+        setError('This reset link is invalid or has expired. Please request a new one.');
+      } else {
+        setReady(true);
+      }
+      setCheckingSession(false);
+    }
+
+    checkRecoverySession();
+    const { data: listener } = supabase.auth.onAuthStateChange((event, session) => {
+      if (!active) return;
+      if (event === 'PASSWORD_RECOVERY' && session) {
+        setReady(true);
+        setError('');
+        setCheckingSession(false);
+      }
+    });
+
+    return () => {
+      active = false;
+      listener.subscription.unsubscribe();
+    };
+  }, []);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -29,14 +60,14 @@ function ResetPasswordForm() {
       setError('Passwords do not match.');
       return;
     }
-    if (!token) {
-      setError('Invalid or missing reset token. Please request a new link.');
+    if (!ready) {
+      setError('Reset session is not ready. Please request a new link.');
       return;
     }
 
     setLoading(true);
     try {
-      await confirmPasswordReset(token, password);
+      await confirmPasswordReset(password);
       setSuccess(true);
       setTimeout(() => router.push('/login'), 2500);
     } catch (err: any) {
@@ -46,17 +77,8 @@ function ResetPasswordForm() {
     }
   }
 
-  if (!token) {
-    return (
-      <div className="space-y-6 text-center">
-        <p className="rounded-xl border border-red-500/40 bg-red-950/40 px-4 py-3 text-sm text-red-300">
-          Invalid or missing reset link. Please request a new one.
-        </p>
-        <Link href="/forgot-password" className="text-sm text-indigo-400 hover:text-indigo-300">
-          Request a new reset link
-        </Link>
-      </div>
-    );
+  if (checkingSession) {
+    return <p className="text-center text-slate-400">Validating reset link…</p>;
   }
 
   if (success) {
@@ -65,9 +87,18 @@ function ResetPasswordForm() {
         <div className="rounded-xl border border-emerald-500/30 bg-emerald-950/40 px-4 py-4 text-sm text-emerald-300">
           Password updated successfully. Redirecting you to sign in…
         </div>
-        <Link href="/login" className="text-sm text-indigo-400 hover:text-indigo-300">
-          Go to Sign In now
-        </Link>
+        <Link href="/login" className="text-sm text-indigo-400 hover:text-indigo-300">Go to Sign In now</Link>
+      </div>
+    );
+  }
+
+  if (!ready) {
+    return (
+      <div className="space-y-6 text-center">
+        <p className="rounded-xl border border-red-500/40 bg-red-950/40 px-4 py-3 text-sm text-red-300">
+          {error || 'Invalid or missing reset link. Please request a new one.'}
+        </p>
+        <Link href="/forgot-password" className="text-sm text-indigo-400 hover:text-indigo-300">Request a new reset link</Link>
       </div>
     );
   }
@@ -76,40 +107,14 @@ function ResetPasswordForm() {
     <form onSubmit={handleSubmit} className="space-y-5">
       <div>
         <label className="text-xs font-medium text-slate-400">New password</label>
-        <input
-          type="password"
-          placeholder="At least 12 characters"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-3 text-sm text-white outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/30"
-          required
-          minLength={12}
-        />
+        <input type="password" placeholder="At least 12 characters" value={password} onChange={(e) => setPassword(e.target.value)} className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-3 text-sm text-white outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/30" required minLength={12} />
       </div>
       <div>
         <label className="text-xs font-medium text-slate-400">Confirm password</label>
-        <input
-          type="password"
-          placeholder="Repeat new password"
-          value={confirm}
-          onChange={(e) => setConfirm(e.target.value)}
-          className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-3 text-sm text-white outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/30"
-          required
-          minLength={12}
-        />
+        <input type="password" placeholder="Repeat new password" value={confirm} onChange={(e) => setConfirm(e.target.value)} className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-3 text-sm text-white outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/30" required minLength={12} />
       </div>
-
-      {error && (
-        <p className="rounded-xl border border-red-500/40 bg-red-950/40 px-3 py-2 text-center text-sm text-red-300">
-          {error}
-        </p>
-      )}
-
-      <button
-        type="submit"
-        disabled={loading}
-        className="w-full rounded-xl bg-indigo-600 py-3 text-sm font-semibold text-white transition hover:bg-indigo-500 disabled:opacity-50"
-      >
+      {error && <p className="rounded-xl border border-red-500/40 bg-red-950/40 px-3 py-2 text-center text-sm text-red-300">{error}</p>}
+      <button type="submit" disabled={loading} className="w-full rounded-xl bg-indigo-600 py-3 text-sm font-semibold text-white transition hover:bg-indigo-500 disabled:opacity-50">
         {loading ? 'Updating…' : 'Set New Password'}
       </button>
     </form>
