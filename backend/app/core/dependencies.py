@@ -46,7 +46,16 @@ def get_current_user(
     token: str = Depends(get_access_token),
     db: Session = Depends(get_db),
 ):
-    """Resolve a Bhudi user from the legacy JWT or a Supabase access token."""
+    """Resolve a Bhudi user from a Supabase access token or legacy Bhudi JWT."""
+    # Supabase tokens are JWTs, but they do not carry Bhudi's legacy JWT
+    # claims. Resolve them first so the legacy decoder cannot reject a valid
+    # Supabase token before the Supabase identity fallback is attempted.
+    try:
+        return resolve_supabase_user(db, token)
+    except SupabaseIdentityError:
+        pass
+
+    # Preserve compatibility with existing Bhudi-issued JWT sessions.
     try:
         user_id = UUID(extract_access_token_subject(token))
         user = UserRepository(db).get_by_id(user_id)
@@ -59,10 +68,7 @@ def get_current_user(
     except Exception:
         pass
 
-    try:
-        return resolve_supabase_user(db, token)
-    except SupabaseIdentityError:
-        raise authentication_error("Invalid authentication credentials")
+    raise authentication_error("Invalid authentication credentials")
 
 
 def get_optional_user(
