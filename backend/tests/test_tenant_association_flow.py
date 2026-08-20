@@ -25,3 +25,23 @@ def test_tenant_context_binds_existing_tenant():
     assert user.tenant_id == tenant_id
     assert result["tenant_id"] == str(tenant_id)
     assert result["tenant_name"] == "Customer One"
+
+
+def test_tenant_context_can_clear_workspace_context():
+    user = SimpleNamespace(id=uuid4(), tenant_id=uuid4())
+
+    class DB:
+        def get(self, model, key):
+            raise AssertionError("Tenant lookup should not occur when clearing context")
+        def add(self, value):
+            assert value is user
+        def commit(self):
+            pass
+        def refresh(self, value):
+            pass
+
+    result = set_tenant_context(TenantContextRequest(tenant_id=None), user, DB())
+
+    assert user.tenant_id is None
+    assert result["tenant_id"] is None
+    assert result["tenant_name"] is None
