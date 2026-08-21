@@ -1,0 +1,69 @@
+name: Bhudi Agent Release
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows-agent:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
+      - name: Build native Windows agent
+        working-directory: agent/native
+        shell: pwsh
+        run: |
+          go mod tidy
+          go mod verify
+          New-Item -ItemType Directory -Force dist | Out-Null
+          $env:GOOS = "windows"
+          $env:GOARCH = "amd64"
+          $env:CGO_ENABLED = "0"
+          go build -ldflags="-s -w" -o dist/bhudi-agent-windows-amd64.exe .
+          Copy-Item dist/bhudi-agent-windows-amd64.exe dist/bhudi-agent.exe
+
+      - name: Build customer installer base
+        working-directory: agent/cmd/bhudi-agent-setup
+        shell: pwsh
+        run: |
+          $env:GOOS = "windows"
+          $env:GOARCH = "amd64"
+          $env:CGO_ENABLED = "0"
+          go build -ldflags="-s -w" -o ../../native/dist/BhudiAgent-Setup.exe .
+
+      - name: Upload Windows agent artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bhudi-agent-windows
+          path: |
+            agent/native/dist/bhudi-agent.exe
+            agent/native/dist/bhudi-agent-windows-amd64.exe
+            agent/native/dist/BhudiAgent-Setup.exe
+
+      - name: Publish agent release
+        if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: agent-native-latest
+          name: Bhudi Native Agent
+          body: |
+            Customer installer base and Windows native agent.
+          files: |
+            agent/native/dist/BhudiAgent-Setup.exe
+            agent/native/dist/bhudi-agent.exe
+            agent/native/dist/bhudi-agent-windows-amd64.exe
+          make_latest: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
