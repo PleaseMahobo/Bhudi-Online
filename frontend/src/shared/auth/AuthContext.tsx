@@ -4,7 +4,7 @@ import { createContext, useContext, useEffect, useState, ReactNode } from "react
 import { getCurrentUser } from "@/lib/api";
 import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
 
-type User = { id: string; email: string; firstName: string; lastName: string; role: string; active: boolean };
+type User = { id: string; email: string; firstName: string; lastName: string; role: string; active: boolean; mfa_enabled: boolean };
 type AuthContextType = {
   user: User | null;
   loading: boolean;
@@ -24,6 +24,7 @@ function normalizeUser(data: any): User | null {
     lastName: String(value.last_name ?? value.lastName ?? ""),
     role: String(value.role ?? ""),
     active: Boolean(value.active ?? true),
+    mfa_enabled: Boolean(value.mfa_enabled ?? value.mfaEnabled ?? false),
   };
 }
 
@@ -41,6 +42,21 @@ async function syncSupabaseSession(accessToken: string): Promise<void> {
   }
 }
 
+async function verifyMfaLogin(email: string, password: string, mfaCode: string): Promise<void> {
+  const response = await fetch("/api/auth/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify({ email, password, mfa_code: mfaCode }),
+    credentials: "include",
+    cache: "no-store",
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => null);
+    const detail = body?.detail;
+    throw new Error(typeof detail === "string" ? detail : "MFA authentication failed");
+  }
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
@@ -55,7 +71,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }
 
-  async function login(email: string, password: string, _mfaCode?: string): Promise<boolean> {
+  async function login(email: string, password: string, mfaCode?: string): Promise<boolean> {
     const supabase = getSupabaseBrowserClient();
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) throw new Error(error.message);
@@ -65,8 +81,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     await syncSupabaseSession(data.session.access_token);
     const current = normalizeUser(await getCurrentUser());
+    if (!current) {
+      throw new Error("Unable to resolve Bhudi user");
+    }
+
+    if (current.mfa_enabled) {
+      if (!mfaCode) {
+        throw new Error("mfa_required");
+      }
+      await verifyMfaLogin(email, password, mfaCode);
+    }
+
     setUser(current);
-    return Boolean(current);
+    return true;
   }
 
   async function logout(): Promise<void> {
