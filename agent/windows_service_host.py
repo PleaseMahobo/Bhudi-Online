@@ -55,9 +55,12 @@ class SERVICE_TABLE_ENTRY(ctypes.Structure):
     ]
 
 
+# SC_HANDLE is a Windows API HANDLE. ctypes.wintypes does not define
+# SC_HANDLE on all supported Python versions, so use HANDLE explicitly.
+SC_HANDLE = wintypes.HANDLE
 advapi32.RegisterServiceCtrlHandlerW.argtypes = [wintypes.LPCWSTR, HANDLER]
-advapi32.RegisterServiceCtrlHandlerW.restype = wintypes.SC_HANDLE
-advapi32.SetServiceStatus.argtypes = [wintypes.SC_HANDLE, ctypes.POINTER(SERVICE_STATUS)]
+advapi32.RegisterServiceCtrlHandlerW.restype = SC_HANDLE
+advapi32.SetServiceStatus.argtypes = [SC_HANDLE, ctypes.POINTER(SERVICE_STATUS)]
 advapi32.SetServiceStatus.restype = wintypes.BOOL
 advapi32.StartServiceCtrlDispatcherW.argtypes = [ctypes.POINTER(SERVICE_TABLE_ENTRY)]
 advapi32.StartServiceCtrlDispatcherW.restype = wintypes.BOOL
@@ -128,12 +131,10 @@ def service_main(argc: int, argv) -> None:
         env["BHUDI_HOSTNAME"] = os.environ.get("COMPUTERNAME", "unknown")
         env.setdefault("BHUDI_HEARTBEAT_INTERVAL", "30")
 
-        report(SERVICE_RUNNING, SERVICE_ACCEPT_STOP)
-        log(f"launching bundled agent: {PYTHON} {AGENT}")
-
-        # Both command elements are fixed paths derived from ROOT and validated
-        # immediately above; no service configuration or network input controls them.
+        # Launch the bundled agent before reporting RUNNING so SCM and the
+        # installer do not receive a false-positive service state.
         command = (os.fspath(PYTHON), os.fspath(AGENT))
+        log(f"launching bundled agent: {PYTHON} {AGENT}")
         agent_process = subprocess.Popen(
             command,
             cwd=os.fspath(ROOT),
@@ -145,6 +146,14 @@ def service_main(argc: int, argv) -> None:
             bufsize=1,
         )
         assert agent_process.stdout is not None
+        time.sleep(0.25)
+        if agent_process.poll() is not None:
+            output = agent_process.stdout.read().strip()
+            log(f"agent exited during startup with code {agent_process.returncode}: {output}")
+            report(SERVICE_STOPPED, 0, agent_process.returncode or 1)
+            return
+
+        report(SERVICE_RUNNING, SERVICE_ACCEPT_STOP)
         try:
             while not stop_event.is_set():
                 line = agent_process.stdout.readline()
@@ -172,22 +181,16 @@ def service_main(argc: int, argv) -> None:
 
 
 def run_service() -> int:
-    # The SCM supplies this table when starting the service.
     table = (SERVICE_TABLE_ENTRY * 2)()
     table[0].lpServiceName = SERVICE_NAME
     table[0].lpServiceProc = service_main
-    # ctypes does not accept None directly for a function-pointer field.
-    # Cast a NULL pointer to the callback type for the required terminator.
     table[1].lpServiceName = None
     table[1].lpServiceProc = ctypes.cast(None, MAIN)
 
-    # StartServiceCtrlDispatcherW expects a pointer to the first
-    # SERVICE_TABLE_ENTRY, not a pointer to the array object itself.
     table_ptr = ctypes.cast(table, ctypes.POINTER(SERVICE_TABLE_ENTRY))
     ok = advapi32.StartServiceCtrlDispatcherW(table_ptr)
     if not ok:
         error = ctypes.get_last_error()
-        # 1063 means this executable was not launched by SCM; useful for debug.
         log(f"StartServiceCtrlDispatcher failed: {error}")
         return error
     return 0
