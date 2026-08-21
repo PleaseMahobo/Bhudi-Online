@@ -26,6 +26,13 @@ func main() {
 		if err := uninstallService(); err != nil {
 			fatal(err)
 		}
+	case "service":
+		fs := flag.NewFlagSet("service", flag.ExitOnError)
+		server := fs.String("server", envOr("BHUDI_SERVER_URL", defaultServerURL), "Bhudi backend base URL")
+		_ = fs.Parse(os.Args[2:])
+		if err := runWindowsService(strings.TrimRight(*server, "/")); err != nil {
+			fatal(err)
+		}
 	case "run", "start":
 		runAgent(parseRunFlags(os.Args[2:]))
 	case "version", "-version", "--version":
@@ -35,7 +42,8 @@ func main() {
 
   install -server URL   Install Windows Service / systemd / LaunchAgent
   uninstall             Remove service and startup entries
-  run [-server URL]     Run in foreground (used by the service)
+  service [-server URL] Run as a native Windows Service
+  run [-server URL]     Run in foreground
   version
 
 Windows (Administrator):
