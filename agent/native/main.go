@@ -34,6 +34,12 @@ func main() {
 			fatal(err)
 		}
 	case "run", "start":
+		if isWindowsServiceProcess() {
+			if err := runWindowsService(strings.TrimRight(envOr("BHUDI_SERVER_URL", defaultServerURL), "/")); err != nil {
+				fatal(err)
+			}
+			return
+		}
 		runAgent(parseRunFlags(os.Args[2:]))
 	case "version", "-version", "--version":
 		fmt.Println("bhudi-agent", agentVersion)
