@@ -29,20 +29,6 @@ function normalizeUser(data: any): User | null {
   };
 }
 
-async function syncSupabaseSession(accessToken: string): Promise<void> {
-  const response = await fetch("/api/auth/supabase-session", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ access_token: accessToken }),
-    credentials: "include",
-    cache: "no-store",
-  });
-  if (!response.ok) {
-    const body = await response.json().catch(() => null);
-    throw new Error(body?.detail || "Unable to establish Bhudi session");
-  }
-}
-
 async function authenticateBhudiLogin(email: string, password: string, mfaCode?: string): Promise<void> {
   const response = await fetch("/api/auth/login", {
     method: "POST",
@@ -77,14 +63,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const supabase = getSupabaseBrowserClient();
     loginInProgress.current = true;
     try {
-      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+      const { error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) throw new Error(error.message);
-      if (!data.session?.access_token) {
-        throw new Error("Supabase did not return an authentication session");
-      }
 
-      // The Bhudi backend is the MFA gate. Do not copy the Supabase token into
-      // the application session cookie until password + MFA have both passed.
+      // Supabase validates the password, but its client-side session is not
+      // promoted into the Bhudi application session. The backend login below
+      // is the authoritative gate and only issues the application cookies
+      // after password + required MFA have both succeeded.
       try {
         await authenticateBhudiLogin(email, password, mfaCode);
       } catch (error) {
@@ -92,7 +77,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         throw error;
       }
 
-      await syncSupabaseSession(data.session.access_token);
       const current = normalizeUser(await getCurrentUser());
       if (!current) throw new Error("Unable to resolve Bhudi user after authentication");
 
@@ -108,6 +92,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       await fetch("/api/auth/supabase-session", { method: "DELETE", credentials: "include", cache: "no-store" });
       await getSupabaseBrowserClient().auth.signOut();
+      await fetch("/api/auth/logout", { method: "POST", credentials: "include", cache: "no-store" }).catch(() => undefined);
     } finally {
       setUser(null);
     }
@@ -116,17 +101,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let active = true;
     const supabase = getSupabaseBrowserClient();
-    const { data: listener } = supabase.auth.onAuthStateChange(async (_event, session) => {
+    const { data: listener } = supabase.auth.onAuthStateChange(async (_event) => {
       if (!active || loginInProgress.current) return;
-      if (session?.access_token) {
-        try {
-          await syncSupabaseSession(session.access_token);
-          if (active) await refreshUser();
-        } catch {
-          if (active) setUser(null);
-        }
-      } else if (active) {
-        setUser(null);
+      // Supabase client state is deliberately not promoted into the Bhudi
+      // application session here. Dashboard access depends on the backend
+      // session established by /api/auth/login after the MFA gate.
+      try {
+        await refreshUser();
+      } catch {
+        if (active) setUser(null);
       }
       if (active) setLoading(false);
     });
