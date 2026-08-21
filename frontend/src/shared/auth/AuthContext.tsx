@@ -29,11 +29,33 @@ function normalizeUser(data: any): User | null {
   };
 }
 
-async function authenticateBhudiLogin(email: string, password: string, mfaCode?: string): Promise<void> {
+async function persistSupabaseSession(accessToken: string): Promise<void> {
+  const response = await fetch("/api/auth/supabase-session", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify({ access_token: accessToken }),
+    credentials: "include",
+    cache: "no-store",
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => null);
+    throw new Error(body?.detail || "Unable to establish Supabase session");
+  }
+}
+
+async function clearSupabaseSession(): Promise<void> {
+  await fetch("/api/auth/supabase-session", {
+    method: "DELETE",
+    credentials: "include",
+    cache: "no-store",
+  }).catch(() => undefined);
+}
+
+async function authenticateBhudiLogin(mfaCode?: string): Promise<void> {
   const response = await fetch("/api/auth/login", {
     method: "POST",
     headers: { "Content-Type": "application/json", Accept: "application/json" },
-    body: JSON.stringify({ email, password, ...(mfaCode ? { mfa_code: mfaCode } : {}) }),
+    body: JSON.stringify(mfaCode ? { mfa_code: mfaCode } : {}),
     credentials: "include",
     cache: "no-store",
   });
@@ -63,16 +85,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const supabase = getSupabaseBrowserClient();
     loginInProgress.current = true;
     try {
-      const { error } = await supabase.auth.signInWithPassword({ email, password });
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) throw new Error(error.message);
 
-      // Supabase validates the password, but its client-side session is not
-      // promoted into the Bhudi application session. The backend login below
-      // is the authoritative gate and only issues the application cookies
-      // after password + required MFA have both succeeded.
+      const accessToken = data.session?.access_token;
+      if (!accessToken) throw new Error("Supabase authentication succeeded but no session was returned");
+
+      // Supabase is the sole password authority. Persist its verified session
+      // as an HttpOnly same-origin cookie so the Bhudi backend can verify the
+      // identity without ever validating a second local password hash.
+      await persistSupabaseSession(accessToken);
+
       try {
-        await authenticateBhudiLogin(email, password, mfaCode);
+        await authenticateBhudiLogin(mfaCode);
       } catch (error) {
+        const message = String((error as Error)?.message || "");
+        // Keep the verified Supabase session alive while the user completes
+        // the required MFA challenge. It will be replaced by the Bhudi
+        // application session after the correct 6-digit code is supplied.
+        if (message === "mfa_required" || message === "Invalid authenticator code") {
+          throw error;
+        }
+        await clearSupabaseSession();
         await supabase.auth.signOut();
         throw error;
       }
@@ -90,7 +124,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   async function logout(): Promise<void> {
     loginInProgress.current = false;
     try {
-      await fetch("/api/auth/supabase-session", { method: "DELETE", credentials: "include", cache: "no-store" });
+      await clearSupabaseSession();
       await getSupabaseBrowserClient().auth.signOut();
       await fetch("/api/auth/logout", { method: "POST", credentials: "include", cache: "no-store" }).catch(() => undefined);
     } finally {
