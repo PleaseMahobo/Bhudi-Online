@@ -43,6 +43,17 @@ jobs:
           $env:CGO_ENABLED = "0"
           go build -ldflags="-s -w" -o ../../native/dist/BhudiAgent-Setup.exe .
 
+      - name: Build Windows support client
+        working-directory: agent/support-client
+        shell: pwsh
+        run: |
+          go mod tidy
+          go mod verify
+          $env:GOOS = "windows"
+          $env:GOARCH = "amd64"
+          $env:CGO_ENABLED = "0"
+          go build -trimpath -ldflags="-s -w" -o bhudi-support.exe .
+
       - name: Upload Windows agent artifact
         uses: actions/upload-artifact@v4
         with:
@@ -51,6 +62,7 @@ jobs:
             agent/native/dist/bhudi-agent.exe
             agent/native/dist/bhudi-agent-windows-amd64.exe
             agent/native/dist/BhudiAgent-Setup.exe
+            agent/support-client/bhudi-support.exe
 
       - name: Publish agent release
         if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
@@ -59,11 +71,12 @@ jobs:
           tag_name: agent-native-latest
           name: Bhudi Native Agent
           body: |
-            Customer installer base and Windows native agent.
+            Customer-specific installer base, native Windows agent, and support client.
           files: |
             agent/native/dist/BhudiAgent-Setup.exe
             agent/native/dist/bhudi-agent.exe
             agent/native/dist/bhudi-agent-windows-amd64.exe
+            agent/support-client/bhudi-support.exe
           make_latest: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
