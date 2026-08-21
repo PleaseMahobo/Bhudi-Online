@@ -2,23 +2,14 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from pydantic import (
-    BaseModel,
-    EmailStr,
-    Field,
-    ConfigDict,
-)
-
+from pydantic import BaseModel, EmailStr, Field, ConfigDict
 
 PASSWORD_MIN_LENGTH = 12
 
 
 class RegisterRequest(BaseModel):
     email: EmailStr
-    password: str = Field(
-        min_length=PASSWORD_MIN_LENGTH,
-        description="Minimum 12 character password",
-    )
+    password: str = Field(min_length=PASSWORD_MIN_LENGTH, description="Minimum 12 character password")
     first_name: str | None = Field(default=None, max_length=100)
     last_name: str | None = Field(default=None, max_length=100)
 
@@ -26,10 +17,7 @@ class RegisterRequest(BaseModel):
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str
-    mfa_code: str | None = Field(
-        default=None,
-        description="TOTP code only when the account already has MFA enabled",
-    )
+    mfa_code: str | None = Field(default=None, description="TOTP code only when the account already has MFA enabled")
 
 
 class RefreshTokenRequest(BaseModel):
@@ -38,13 +26,13 @@ class RefreshTokenRequest(BaseModel):
 
 class UserResponse(BaseModel):
     """Public user — never expose password_hash."""
-
     id: UUID
     email: EmailStr
     first_name: str | None = None
     last_name: str | None = None
     role: str = "trial"
     active: bool = True
+    tenant_id: UUID | None = None
     mfa_enabled: bool = False
 
     model_config = ConfigDict(from_attributes=True)
