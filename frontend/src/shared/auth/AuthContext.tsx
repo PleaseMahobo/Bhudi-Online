@@ -4,7 +4,7 @@ import { createContext, useContext, useEffect, useState, ReactNode } from "react
 import { getCurrentUser } from "@/lib/api";
 import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
 
-type User = { id: string; email: string; firstName: string; lastName: string; role: string; active: boolean; mfa_enabled: boolean };
+type User = { id: string; email: string; firstName: string; lastName: string; role: string; active: boolean; tenant_id: string | null; mfa_enabled: boolean };
 type AuthContextType = {
   user: User | null;
   loading: boolean;
@@ -24,6 +24,7 @@ function normalizeUser(data: any): User | null {
     lastName: String(value.last_name ?? value.lastName ?? ""),
     role: String(value.role ?? ""),
     active: Boolean(value.active ?? true),
+    tenant_id: value.tenant_id ? String(value.tenant_id) : null,
     mfa_enabled: Boolean(value.mfa_enabled ?? value.mfaEnabled ?? false),
   };
 }
@@ -80,16 +81,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     await syncSupabaseSession(data.session.access_token);
-    const current = normalizeUser(await getCurrentUser());
-    if (!current) {
-      throw new Error("Unable to resolve Bhudi user");
-    }
+    let current = normalizeUser(await getCurrentUser());
+    if (!current) throw new Error("Unable to resolve Bhudi user");
 
     if (current.mfa_enabled) {
-      if (!mfaCode) {
-        throw new Error("mfa_required");
-      }
+      if (!mfaCode) throw new Error("mfa_required");
       await verifyMfaLogin(email, password, mfaCode);
+      current = normalizeUser(await getCurrentUser());
+      if (!current) throw new Error("Unable to refresh Bhudi user after MFA verification");
     }
 
     setUser(current);
@@ -98,11 +97,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   async function logout(): Promise<void> {
     try {
-      await fetch("/api/auth/supabase-session", {
-        method: "DELETE",
-        credentials: "include",
-        cache: "no-store",
-      });
+      await fetch("/api/auth/supabase-session", { method: "DELETE", credentials: "include", cache: "no-store" });
       await getSupabaseBrowserClient().auth.signOut();
     } finally {
       setUser(null);
@@ -127,11 +122,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (active) setLoading(false);
     });
 
-    refreshUser()
-      .catch(() => undefined)
-      .finally(() => {
-        if (active) setLoading(false);
-      });
+    refreshUser().catch(() => undefined).finally(() => {
+      if (active) setLoading(false);
+    });
 
     return () => {
       active = false;
@@ -139,11 +132,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  return (
-    <AuthContext.Provider value={{ user, loading, login, logout, refreshUser }}>
-      {children}
-    </AuthContext.Provider>
-  );
+  return <AuthContext.Provider value={{ user, loading, login, logout, refreshUser }}>{children}</AuthContext.Provider>;
 }
 
 export function useAuth() {
