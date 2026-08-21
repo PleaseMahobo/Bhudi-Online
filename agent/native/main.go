@@ -34,13 +34,14 @@ func main() {
 			fatal(err)
 		}
 	case "run", "start":
+		cfg := parseRunFlags(os.Args[2:])
 		if isWindowsServiceProcess() {
-			if err := runWindowsService(strings.TrimRight(envOr("BHUDI_SERVER_URL", defaultServerURL), "/")); err != nil {
+			if err := runWindowsService(cfg.Server); err != nil {
 				fatal(err)
 			}
 			return
 		}
-		runAgent(parseRunFlags(os.Args[2:]))
+		runAgent(cfg)
 	case "version", "-version", "--version":
 		fmt.Println("bhudi-agent", agentVersion)
 	case "help", "-h", "--help":
