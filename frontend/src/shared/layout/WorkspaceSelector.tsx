@@ -1,29 +1,90 @@
 'use client';
 
-import { useState } from 'react';
-import { Building2, ChevronDown, Globe2, MapPin, RefreshCw } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { useAuth } from '@/shared/auth/AuthContext';
 import { useWorkspace } from '@/shared/context/WorkspaceContext';
 
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || '';
+
+type Workspace = { id: string; name: string; tenant_id?: string | null };
+
 export default function WorkspaceSelector() {
-  const { organizations, sites, organization, site, organizationId, siteId, setOrganizationId, setSiteId, loading, refresh } = useWorkspace();
-  const [open, setOpen] = useState(false);
-  const label = organization ? `${organization.name}${site ? ` · ${site.name}` : ''}` : 'All customers';
+  const { user } = useAuth();
+  const { organization, site } = useWorkspace();
+  const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
+  const [selected, setSelected] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const isSystemAdmin = useMemo(() => {
+    const role = String((user as any)?.role || '').toLowerCase();
+    return ['system_admin', 'system-admin', 'superadmin', 'super_admin'].includes(role);
+  }, [user]);
+
+  useEffect(() => {
+    if (!isSystemAdmin) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const response = await fetch(`${API_BASE}/api/v1/tenants`, { credentials: 'include' });
+        if (!response.ok) return;
+        const data = await response.json();
+        const rows = Array.isArray(data) ? data : data?.items || data?.tenants || [];
+        if (!cancelled) setWorkspaces(rows);
+      } catch {
+        // Keep the existing workspace selector usable if tenant discovery is unavailable.
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [isSystemAdmin]);
+
+  const currentName = organization?.name || site?.name || 'Workspace';
+
+  async function selectTenant(tenantId: string) {
+    if (!tenantId) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const response = await fetch(`${API_BASE}/api/v1/auth/tenant-context`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tenant_id: tenantId }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data?.detail || 'Unable to set tenant context');
+      setSelected(tenantId);
+      window.dispatchEvent(new CustomEvent('bhudi:tenant-context-changed', {
+        detail: { tenantId, tenantName: data?.tenant_name },
+      }));
+      window.location.reload();
+    } catch (e: any) {
+      setError(e?.message || 'Unable to set tenant context');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!isSystemAdmin || workspaces.length === 0) return null;
 
   return (
-    <div className="relative">
-      <button type="button" onClick={() => setOpen((v) => !v)} className="flex max-w-[280px] items-center gap-2 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-left shadow-sm hover:bg-slate-50" aria-expanded={open}>
-        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-indigo-50 text-indigo-600"><Building2 size={15} /></span>
-        <span className="min-w-0 hidden sm:block"><span className="block truncate text-xs font-semibold text-slate-800">{label}</span><span className="block truncate text-[10px] text-slate-500">{organization ? 'Customer workspace' : 'MSP workspace'}</span></span>
-        <ChevronDown size={14} className="ml-auto shrink-0 text-slate-400" />
-      </button>
-      {open && <div className="absolute left-0 top-11 z-50 w-[310px] overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl">
-        <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3"><div><p className="text-sm font-semibold text-slate-900">Workspace</p><p className="text-xs text-slate-500">Choose the operational context</p></div><button type="button" onClick={() => void refresh()} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100" aria-label="Refresh customers"><RefreshCw size={14} className={loading ? 'animate-spin' : ''} /></button></div>
-        <div className="max-h-[360px] overflow-y-auto p-2">
-          <button type="button" onClick={() => { setOrganizationId(null); setOpen(false); }} className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left ${!organizationId ? 'bg-indigo-50' : 'hover:bg-slate-50'}`}><Globe2 size={16} className="text-indigo-500" /><span><span className="block text-sm font-medium text-slate-900">All customers</span><span className="block text-xs text-slate-500">MSP-wide operational view</span></span></button>
-          {organizations.map((org) => <div key={org.id} className="mt-1"><button type="button" onClick={() => setOrganizationId(org.id)} className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left ${organizationId === org.id ? 'bg-indigo-50' : 'hover:bg-slate-50'}`}><Building2 size={16} className="text-slate-500" /><span className="min-w-0"><span className="block truncate text-sm font-medium text-slate-900">{org.name}</span><span className="block text-xs capitalize text-slate-500">{org.org_type} · {org.status}</span></span></button>{organizationId === org.id && <div className="ml-5 border-l border-slate-200 pl-2">{sites.length ? sites.map((item) => <button key={item.id} type="button" onClick={() => { setSiteId(item.id); setOpen(false); }} className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs ${siteId === item.id ? 'bg-indigo-50 font-semibold text-indigo-700' : 'text-slate-600 hover:bg-slate-50'}`}><MapPin size={13} />{item.name}</button>) : <p className="px-3 py-2 text-[11px] text-slate-400">No active sites</p>}</div>}</div>)}
-          {!organizations.length && !loading && <p className="px-3 py-6 text-center text-xs text-slate-500">No customer organizations available.</p>}
-        </div>
-      </div>}
+    <div className="flex flex-col gap-1">
+      <label htmlFor="bhudi-tenant-context" className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+        Tenant context
+      </label>
+      <select
+        id="bhudi-tenant-context"
+        value={selected}
+        disabled={busy}
+        onChange={(event) => selectTenant(event.target.value)}
+        className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-800"
+      >
+        <option value="">{currentName}</option>
+        {workspaces.map((workspace) => (
+          <option key={workspace.id} value={workspace.id}>{workspace.name}</option>
+        ))}
+      </select>
+      {error && <span className="text-xs text-red-600">{error}</span>}
     </div>
   );
 }
