@@ -29,20 +29,6 @@ function normalizeUser(data: any): User | null {
   };
 }
 
-async function persistSupabaseSession(accessToken: string): Promise<void> {
-  const response = await fetch("/api/auth/supabase-session", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Accept: "application/json" },
-    body: JSON.stringify({ access_token: accessToken }),
-    credentials: "include",
-    cache: "no-store",
-  });
-  if (!response.ok) {
-    const body = await response.json().catch(() => null);
-    throw new Error(body?.detail || "Unable to establish Supabase session");
-  }
-}
-
 async function clearSupabaseSession(): Promise<void> {
   await fetch("/api/auth/supabase-session", {
     method: "DELETE",
@@ -51,10 +37,22 @@ async function clearSupabaseSession(): Promise<void> {
   }).catch(() => undefined);
 }
 
-async function authenticateBhudiLogin(mfaCode?: string): Promise<void> {
+async function authenticateBhudiLogin(supabase: ReturnType<typeof getSupabaseBrowserClient>, mfaCode?: string): Promise<void> {
+  // Always obtain the current Supabase session immediately before promotion.
+  // Supabase auto-refreshes browser sessions, so the token captured at
+  // password entry can become stale while the user is completing MFA.
+  const { data, error } = await supabase.auth.getSession();
+  if (error || !data.session?.access_token) {
+    throw new Error("Supabase session unavailable");
+  }
+
   const response = await fetch("/api/auth/login", {
     method: "POST",
-    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      "Accept": "application/json",
+      "Authorization": `Bearer ${data.session.access_token}`,
+    },
     body: JSON.stringify(mfaCode ? { mfa_code: mfaCode } : {}),
     credentials: "include",
     cache: "no-store",
@@ -87,22 +85,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const { data, error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) throw new Error(error.message);
-
-      const accessToken = data.session?.access_token;
-      if (!accessToken) throw new Error("Supabase authentication succeeded but no session was returned");
-
-      // Supabase is the sole password authority. Persist its verified session
-      // as an HttpOnly same-origin cookie so the Bhudi backend can verify the
-      // identity without ever validating a second local password hash.
-      await persistSupabaseSession(accessToken);
+      if (!data.session?.access_token) throw new Error("Supabase authentication succeeded but no session was returned");
 
       try {
-        await authenticateBhudiLogin(mfaCode);
+        await authenticateBhudiLogin(supabase, mfaCode);
       } catch (error) {
         const message = String((error as Error)?.message || "");
         // Keep the verified Supabase session alive while the user completes
-        // the required MFA challenge. It will be replaced by the Bhudi
-        // application session after the correct 6-digit code is supplied.
+        // the required MFA challenge. It is promoted to a Bhudi session only
+        // after the correct 6-digit code is supplied.
         if (message === "mfa_required" || message === "Invalid authenticator code") {
           throw error;
         }
@@ -113,7 +104,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       const current = normalizeUser(await getCurrentUser());
       if (!current) throw new Error("Unable to resolve Bhudi user after authentication");
-
       setUser(current);
       return true;
     } finally {
@@ -137,9 +127,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const supabase = getSupabaseBrowserClient();
     const { data: listener } = supabase.auth.onAuthStateChange(async (_event) => {
       if (!active || loginInProgress.current) return;
-      // Supabase client state is deliberately not promoted into the Bhudi
-      // application session here. Dashboard access depends on the backend
-      // session established by /api/auth/login after the MFA gate.
       try {
         await refreshUser();
       } catch {
