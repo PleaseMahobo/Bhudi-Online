@@ -1,18 +1,18 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- Native Bhudi Agent MSI — no Python required on target PCs -->
+<!-- Native Bhudi Agent MSI — generic deployment package; customer-specific enrollment is performed by the portal EXE. -->
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
      xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
 
   <Package
       Name="Bhudi Agent"
       Manufacturer="Bhudi"
-      Version="2.0.0"
+      Version="2.0.1"
       UpgradeCode="6dcaacf5-f55a-49b5-8632-893587bd4ec3"
       Scope="perMachine"
       Language="1033">
 
     <SummaryInformation
-        Description="Bhudi native RMM agent (standalone — no Python required)"
+        Description="Bhudi native RMM agent — generic MSI deployment package"
         Manufacturer="Bhudi" />
 
     <MajorUpgrade
@@ -42,13 +42,14 @@
             KeyPath="yes"
             Checksum="yes" />
 
+        <!-- Generic MSI has no tenant-bound enrollment secret; do not start it during install. -->
         <ServiceInstall
             Id="BhudiAgentService"
             Name="BhudiAgent"
             DisplayName="Bhudi Agent"
             Description="Bhudi RMM agent — heartbeats, remote access, and support operations."
             Type="ownProcess"
-            Start="auto"
+            Start="demand"
             Account="LocalSystem"
             ErrorControl="normal"
             Arguments="run -server [SERVERURL]"
@@ -57,7 +58,6 @@
         <ServiceControl
             Id="BhudiAgentServiceControl"
             Name="BhudiAgent"
-            Start="install"
             Stop="both"
             Remove="uninstall"
             Wait="yes" />
