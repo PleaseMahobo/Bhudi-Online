@@ -18,6 +18,18 @@ class TenantContextRequest(BaseModel):
     tenant_id: UUID
 
 
+@router.get("/tenants", status_code=200)
+def list_tenant_contexts(
+    current_user: User = Depends(require_admin()),
+    db: Session = Depends(get_db),
+):
+    tenants = db.query(Tenant).order_by(Tenant.name.asc()).all()
+    return [
+        {"id": str(tenant.id), "name": tenant.name}
+        for tenant in tenants
+    ]
+
+
 @router.post("", status_code=200)
 def set_tenant_context(
     payload: TenantContextRequest,
