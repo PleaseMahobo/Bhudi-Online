@@ -1,3 +1,4 @@
+# Trigger native-agent release publication from main after merge.
 name: Build Native Agents (Windows / Linux / macOS)
 
 on:
