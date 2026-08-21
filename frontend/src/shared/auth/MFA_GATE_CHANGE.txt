@@ -1,1 +1,0 @@
-Acceptance target: Logout -> Login -> Password -> MFA challenge -> 6-digit code -> Dashboard
