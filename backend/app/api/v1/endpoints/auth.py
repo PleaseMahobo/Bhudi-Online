@@ -15,11 +15,13 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.dependencies import get_current_user
+from app.core.supabase_auth import get_supabase_user
 from app.database.session import get_db
 from app.models.user import User
 from app.schemas.auth import (
     LoginRequest,
     MessageResponse,
+    MfaLoginRequest,
     RefreshTokenRequest,
     RegisterRequest,
     TokenResponse,
@@ -57,9 +59,21 @@ def register(request: RegisterRequest, db: Session = Depends(get_db)):
 
 
 @router.post("/login", response_model=TokenResponse, status_code=status.HTTP_200_OK)
-def login(request: LoginRequest, response: Response, http_request: Request, db: Session = Depends(get_db)):
+def login(
+    request: MfaLoginRequest,
+    response: Response,
+    http_request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_supabase_user),
+):
+    """Promote a verified Supabase session into a Bhudi session after MFA.
+
+    Supabase is the sole password authority. This endpoint deliberately does
+    not accept or verify a second Bhudi password hash. The Supabase access
+    token proves password authentication; Bhudi then enforces its local MFA
+    policy before issuing the application session cookies.
+    """
     service = AuthService(db)
-    user = service.authenticate(request.email, request.password)
     if bool(getattr(user, "mfa_enabled", False)):
         code = (request.mfa_code or "").strip()
         if not code:

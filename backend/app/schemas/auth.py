@@ -20,6 +20,11 @@ class LoginRequest(BaseModel):
     mfa_code: str | None = Field(default=None, description="TOTP code only when the account already has MFA enabled")
 
 
+class MfaLoginRequest(BaseModel):
+    """Complete the Bhudi session using an already-authenticated Supabase session."""
+    mfa_code: str | None = Field(default=None, description="TOTP code when the Bhudi account has MFA enabled")
+
+
 class RefreshTokenRequest(BaseModel):
     refresh_token: str | None = None
 

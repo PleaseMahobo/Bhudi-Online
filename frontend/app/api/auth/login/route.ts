@@ -19,9 +19,15 @@ function forwardSetCookies(upstream: Response, response: NextResponse) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.text();
+    const headers: HeadersInit = { 'Content-Type': 'application/json' };
+    const authorization = request.headers.get('authorization');
+    const cookie = request.headers.get('cookie');
+    if (authorization) headers.authorization = authorization;
+    if (cookie) headers.cookie = cookie;
+
     const res = await fetch(`${BACKEND}/api/v1/auth/login`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body,
       cache: 'no-store',
     });
