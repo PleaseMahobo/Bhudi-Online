@@ -6,39 +6,46 @@ import { useWorkspace } from '@/shared/context/WorkspaceContext';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || '';
 
-type Workspace = { id: string; name: string; tenant_id?: string | null };
+type Workspace = { id: string; name: string };
 
 export default function WorkspaceSelector() {
   const { user } = useAuth();
   const { organization, site } = useWorkspace();
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
-  const [selected, setSelected] = useState('');
+  const [selected, setSelected] = useState(user?.tenant_id ?? '');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const isSystemAdmin = useMemo(() => {
-    const role = String((user as any)?.role || '').toLowerCase();
+    const role = String(user?.role || '').toLowerCase();
     return ['system_admin', 'system-admin', 'superadmin', 'super_admin'].includes(role);
-  }, [user]);
+  }, [user?.role]);
+
+  useEffect(() => {
+    setSelected(user?.tenant_id ?? '');
+  }, [user?.tenant_id]);
 
   useEffect(() => {
     if (!isSystemAdmin) return;
     let cancelled = false;
     (async () => {
       try {
-        const response = await fetch(`${API_BASE}/api/v1/tenants`, { credentials: 'include' });
-        if (!response.ok) return;
+        const response = await fetch(`${API_BASE}/api/v1/auth/tenant-context/tenants`, {
+          credentials: 'include',
+          cache: 'no-store',
+        });
+        if (!response.ok) throw new Error(`Tenant discovery failed (${response.status})`);
         const data = await response.json();
         const rows = Array.isArray(data) ? data : data?.items || data?.tenants || [];
         if (!cancelled) setWorkspaces(rows);
-      } catch {
-        // Keep the existing workspace selector usable if tenant discovery is unavailable.
+      } catch (e: any) {
+        if (!cancelled) setError(e?.message || 'Unable to load tenant context');
       }
     })();
     return () => { cancelled = true; };
   }, [isSystemAdmin]);
 
-  const currentName = organization?.name || site?.name || 'Workspace';
+  const currentName = workspaces.find((workspace) => workspace.id === selected)?.name || organization?.name || site?.name || 'Select tenant';
 
   async function selectTenant(tenantId: string) {
     if (!tenantId) return;
@@ -48,7 +55,7 @@ export default function WorkspaceSelector() {
       const response = await fetch(`${API_BASE}/api/v1/auth/tenant-context`, {
         method: 'POST',
         credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body: JSON.stringify({ tenant_id: tenantId }),
       });
       const data = await response.json().catch(() => ({}));
@@ -65,7 +72,7 @@ export default function WorkspaceSelector() {
     }
   }
 
-  if (!isSystemAdmin || workspaces.length === 0) return null;
+  if (!isSystemAdmin) return null;
 
   return (
     <div className="flex flex-col gap-1">
@@ -75,15 +82,17 @@ export default function WorkspaceSelector() {
       <select
         id="bhudi-tenant-context"
         value={selected}
-        disabled={busy}
-        onChange={(event) => selectTenant(event.target.value)}
+        disabled={busy || workspaces.length === 0}
+        onChange={(event) => void selectTenant(event.target.value)}
         className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-800"
+        aria-label="Select tenant context"
       >
-        <option value="">{currentName}</option>
+        <option value="">{workspaces.length ? 'Select tenant' : 'Loading tenants…'}</option>
         {workspaces.map((workspace) => (
           <option key={workspace.id} value={workspace.id}>{workspace.name}</option>
         ))}
       </select>
+      {selected && <span className="text-[11px] text-slate-500">Active: {currentName}</span>}
       {error && <span className="text-xs text-red-600">{error}</span>}
     </div>
   );
