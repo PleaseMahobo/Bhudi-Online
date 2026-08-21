@@ -8,11 +8,14 @@ const BACKEND = (
   .replace(/\/$/, '')
   .replace(/\/api\/v1$/, '');
 
-function forwardSetCookies(upstream: Response, response: NextResponse) {
-  const cookies = upstream.headers.getSetCookie?.() ?? [];
-  for (const cookie of cookies) {
-    response.headers.append('set-cookie', cookie);
-  }
+const ACCESS_COOKIE = 'access_token';
+const REFRESH_COOKIE = 'refresh_token';
+const ACCESS_MAX_AGE = 60 * 15;
+const REFRESH_MAX_AGE = 60 * 60 * 24 * 30;
+
+function setSessionCookies(response: NextResponse, accessToken: string, refreshToken: string) {
+  response.cookies.set({ name: ACCESS_COOKIE, value: accessToken, httpOnly: true, secure: true, sameSite: 'lax', path: '/', maxAge: ACCESS_MAX_AGE });
+  response.cookies.set({ name: REFRESH_COOKIE, value: refreshToken, httpOnly: true, secure: true, sameSite: 'lax', path: '/', maxAge: REFRESH_MAX_AGE });
 }
 
 export async function POST(request: NextRequest) {
@@ -31,14 +34,25 @@ export async function POST(request: NextRequest) {
       cache: 'no-store',
     });
 
-    const data = await res.text();
-    const response = new NextResponse(data, {
-      status: res.status,
-      headers: {
-        'Content-Type': res.headers.get('Content-Type') || 'application/json',
-      },
-    });
-    forwardSetCookies(res, response);
+    const raw = await res.text();
+    let data: any = {};
+    try { data = JSON.parse(raw); } catch { data = { detail: raw }; }
+
+    if (!res.ok) {
+      return NextResponse.json(data, { status: res.status });
+    }
+
+    const response = NextResponse.json({
+      token_type: data.token_type,
+      user: data.user,
+      session_id: data.session_id,
+      token_family: data.token_family,
+    }, { status: res.status });
+
+    if (data.access_token && data.refresh_token) {
+      setSessionCookies(response, data.access_token, data.refresh_token);
+    }
+
     return response;
   } catch (e) {
     return NextResponse.json(
