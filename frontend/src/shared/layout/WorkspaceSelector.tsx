@@ -17,8 +17,15 @@ export default function WorkspaceSelector() {
   const [error, setError] = useState<string | null>(null);
 
   const isSystemAdmin = useMemo(() => {
-    const role = String(user?.role || '').toLowerCase();
-    return ['system_admin', 'system-admin', 'superadmin', 'super_admin'].includes(role);
+    const role = String(user?.role || '').trim().toLowerCase();
+    // Keep frontend tenant-context access aligned with backend AuthorizationService.
+    return [
+      'admin',
+      'system_admin',
+      'system-admin',
+      'superadmin',
+      'super_admin',
+    ].includes(role);
   }, [user?.role]);
 
   useEffect(() => {
