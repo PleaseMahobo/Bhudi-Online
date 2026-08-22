@@ -13,8 +13,10 @@ from app.schemas.alert_engine import (
     EscalationPolicyCreate,
     EscalationPolicyUpdate,
     EscalationPolicyResponse,
+    RemediationRunResponse,
 )
 from app.services.alert_rule_service import AlertRuleService
+from app.services.remediation_service import RemediationService
 
 router = APIRouter(prefix="/alert-engine", tags=["Alert Engine"])
 
@@ -165,3 +167,19 @@ def delete_alert_rule(
     success = service.delete_alert_rule(rule_id)
     if not success:
         raise HTTPException(status_code=404, detail="Alert rule not found")
+
+
+# =========================================================
+# Remediation runs (audit)
+# =========================================================
+
+@router.get(
+    "/remediation-runs",
+    response_model=list[RemediationRunResponse],
+)
+def list_remediation_runs(
+    limit: int = 50,
+    db: Session = Depends(get_db),
+):
+    service = RemediationService(db)
+    return service.list_runs(limit=min(max(limit, 1), 200))
