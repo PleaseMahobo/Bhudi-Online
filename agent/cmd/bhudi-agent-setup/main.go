@@ -16,7 +16,6 @@ import (
 
 const (
 	defaultServer = "https://bhudi-online-production.up.railway.app"
-	agentURL = "https://github.com/PleaseMahobo/Bhudi-Online/releases/download/agent-native-latest/bhudi-agent.exe"
 	supportURL = "https://github.com/PleaseMahobo/Bhudi-Online/releases/download/agent-native-latest/bhudi-support.exe"
 	magic = "BHUDI_BOOTSTRAP_V1"
 )
@@ -34,7 +33,7 @@ func main() {
 	tmp, err := os.MkdirTemp("", "bhudi-setup-*"); if err != nil { fail(err.Error()) }; defer os.RemoveAll(tmp)
 
 	agentPath := filepath.Join(tmp, "bhudi-agent.exe")
-	fmt.Println("[1/4] Downloading Bhudi agent..."); if err := download(agentURL, agentPath); err != nil { fail("agent download: "+err.Error()) }
+	fmt.Println("[1/4] Preparing bundled Bhudi agent..."); if err := installBundledAgent(agentPath); err != nil { fail("bundled agent: "+err.Error()) }
 	fmt.Println("[2/4] Installing Windows service and enrolling endpoint...")
 	cmd := exec.Command(agentPath, "install", "-server", server); cmd.Env = append(os.Environ(), "BHUDI_ENROLLMENT_TOKEN="+boot.EnrollmentToken); cmd.Stdout=os.Stdout; cmd.Stderr=os.Stderr; cmd.Stdin=os.Stdin
 	if err := cmd.Run(); err != nil { fail("agent installation failed: "+err.Error()) }
@@ -51,6 +50,11 @@ func main() {
 	fmt.Println("[4/4] Installation complete"); fmt.Println("The Bhudi agent and support client are installed and enrolled."); time.Sleep(2*time.Second)
 }
 
+func installBundledAgent(dest string) error {
+	if len(bundledAgent) == 0 { return fmt.Errorf("bundled Bhudi agent payload is empty") }
+	if err := os.WriteFile(dest, bundledAgent, 0755); err != nil { return err }
+	return nil
+}
 func waitForAgentIdentity(timeout time.Duration) error {
 	path := filepath.Join(os.Getenv("ProgramData"), "Bhudi", "Agent", "agent_identity.json"); deadline:=time.Now().Add(timeout)
 	for time.Now().Before(deadline) { if st,err:=os.Stat(path); err==nil && st.Size()>0 { return nil }; time.Sleep(2*time.Second) }
