@@ -1,10 +1,9 @@
 name: Bhudi Agent Release
 
+# Manual only — avoids racing build-agent-setup on every main push.
+# Use for enrollment-checked Windows installer + support client release.
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
 
 permissions:
   contents: write
@@ -20,6 +19,9 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: "1.22"
+          cache-dependency-path: |
+            agent/native/go.sum
+            agent/support-client/go.sum
 
       - name: Verify customer enrollment bootstrap is included
         working-directory: agent/native
@@ -33,7 +35,7 @@ jobs:
         working-directory: agent/native
         shell: pwsh
         run: |
-          go mod tidy
+          go mod download
           go mod verify
           New-Item -ItemType Directory -Force dist | Out-Null
           $env:GOOS = "windows"
@@ -60,7 +62,7 @@ jobs:
         working-directory: agent/support-client
         shell: pwsh
         run: |
-          go mod tidy
+          go mod download
           go mod verify
           $env:GOOS = "windows"
           $env:GOARCH = "amd64"
@@ -78,13 +80,13 @@ jobs:
             agent/support-client/bhudi-support.exe
 
       - name: Publish agent release
-        if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
         uses: softprops/action-gh-release@v2
         with:
           tag_name: agent-native-latest
           name: Bhudi Native Agent
           body: |
             Customer-specific installer base, native Windows agent, and support client.
+            Triggered via workflow_dispatch (enrollment-checked Windows build).
           files: |
             agent/native/dist/BhudiAgent-Setup.exe
             agent/native/dist/bhudi-agent.exe
