@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import AppShell from '@/shared/components/AppShell';
 import AIAssistant from '@/shared/layout/AIAssistant';
+import Breadcrumbs, { type Crumb } from '@/shared/components/Breadcrumbs';
 import { Activity, ExternalLink, ShieldCheck, Ticket } from 'lucide-react';
 
 function DashboardWorkspaceBar() {
@@ -25,7 +26,7 @@ function DashboardWorkspaceBar() {
         </div>
         <div className="flex flex-wrap gap-2">
           <Link
-            href="/assets"
+            href="/devices"
             className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700"
           >
             <Activity size={14} /> Devices
@@ -72,12 +73,14 @@ export default function ModuleShell({
   children,
   showAI = true,
   actions,
+  breadcrumbs,
 }: {
   title?: string;
   subtitle?: string;
   children: React.ReactNode;
   showAI?: boolean;
   actions?: React.ReactNode;
+  breadcrumbs?: Crumb[];
 }) {
   const { user, loading } = useAuth();
   const router = useRouter();
@@ -98,6 +101,7 @@ export default function ModuleShell({
     <AppShell title={title}>
       <main className="min-w-0 flex-1 overflow-y-auto">
         <div className="mx-auto max-w-[1600px] p-4 sm:p-6">
+          {breadcrumbs && breadcrumbs.length > 0 && <Breadcrumbs items={breadcrumbs} />}
           {(title || subtitle || actions) && (
             <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
               <div>
