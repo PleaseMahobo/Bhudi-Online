@@ -24,6 +24,7 @@ const (
 type bootstrap struct { ServerURL string `json:"server_url"`; EnrollmentToken string `json:"enrollment_token"` }
 
 func main() {
+	ensureElevated()
 	boot, err := readBootstrap(); if err != nil { fail("This is not a customer-specific Bhudi installer. Download a fresh installer from the Bhudi portal.\nDetails: "+err.Error()) }
 	server := strings.TrimRight(strings.TrimSpace(boot.ServerURL), "/"); if server == "" { server = defaultServer }
 	if strings.TrimSpace(boot.EnrollmentToken) == "" { fail("Customer enrollment information is missing. Download a fresh installer from the Bhudi portal.") }
@@ -57,7 +58,6 @@ func waitForAgentIdentity(timeout time.Duration) error {
 }
 func startSupportClient(path string) error {
 	cmd := exec.Command(path); if err:=cmd.Start(); err!=nil{return err}
-	// Persist the tray client for the current Windows user.
 	_ = exec.Command("reg.exe","ADD",`HKCU\Software\Microsoft\Windows\CurrentVersion\Run`,"BhudiSupport","/REG_SZ",path,"/F").Run()
 	return nil
 }
