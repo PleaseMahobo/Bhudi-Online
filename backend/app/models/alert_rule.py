@@ -12,7 +12,7 @@ from app.models.base import Base
 
 
 class AlertRule(Base):
-    """Production-grade Alert Rule definition."""
+    """Production-grade Alert Rule definition with optional remediation actions."""
 
     __tablename__ = "alert_rules"
 
@@ -49,6 +49,11 @@ class AlertRule(Base):
         UUID(as_uuid=True),
         ForeignKey("escalation_policies.id", ondelete="SET NULL"),
         nullable=True,
+    )
+
+    # Remediation actions (JSON list — see RemediationAction schema)
+    remediation_actions: Mapped[list[dict[str, Any]] | None] = mapped_column(
+        JSON, nullable=True, default=list
     )
 
     # Control

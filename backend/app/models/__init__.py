@@ -44,6 +44,7 @@ from .psa import PSAConnection, PSASyncEvent, PSATicketLink
 from .stripe_webhook import StripeWebhookEvent
 from .profile import Profile
 from .refresh_token import RefreshToken
+from .remediation_run import RemediationRun
 from .reporting import ReportDefinition, ReportRun, ReportSchedule, ReportTemplate
 from .response_action import ResponseAction
 from .script import Script
