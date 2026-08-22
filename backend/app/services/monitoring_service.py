@@ -332,10 +332,38 @@ class MonitoringService:
         self.db.commit()
         self.db.refresh(alert)
 
-        # Real-time push to all alert-channel subscribers
         self._broadcast_alert_event("alert.created", alert)
-
+        self._trigger_remediation(alert=alert, check=check)
         return alert
+
+    def _trigger_remediation(self, *, alert: MonitoringAlert, check: MonitoringCheck) -> None:
+        """Fire alert-driven remediation; failures never affect alert persistence."""
+        try:
+            from uuid import UUID as _UUID
+
+            from app.services.remediation_service import RemediationService
+
+            ctx = alert.context or {}
+            rule_id = ctx.get("rule_id")
+            rule_name = ctx.get("rule_name")
+            actions = None
+            if rule_id:
+                try:
+                    rule = self.rule_service.get_alert_rule(_UUID(str(rule_id)))
+                    if rule is not None:
+                        actions = list(getattr(rule, "remediation_actions", None) or [])
+                        rule_name = rule_name or rule.name
+                except Exception:
+                    actions = None
+            RemediationService(self.db).process_alert(
+                alert=alert,
+                check=check,
+                rule_id=str(rule_id) if rule_id else None,
+                rule_name=str(rule_name) if rule_name else None,
+                remediation_actions=actions,
+            )
+        except Exception:
+            pass
 
     def list_checks(self) -> list[MonitoringCheck]:
         return self.db.query(MonitoringCheck).order_by(MonitoringCheck.created_at.desc()).all()
