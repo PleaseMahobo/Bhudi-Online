@@ -4,8 +4,6 @@ import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '@/shared/auth/AuthContext';
 import { useWorkspace } from '@/shared/context/WorkspaceContext';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || '';
-
 type Workspace = { id: string; name: string };
 
 export default function WorkspaceSelector() {
@@ -37,7 +35,10 @@ export default function WorkspaceSelector() {
     let cancelled = false;
     (async () => {
       try {
-        const response = await fetch(`${API_BASE}/api/v1/auth/tenant-context/tenants`, {
+        // Use the same-origin proxy so the HttpOnly Bhudi session cookie is
+        // available to the backend authentication boundary. Do not call the
+        // Railway API directly from the browser for authenticated operations.
+        const response = await fetch('/api/tenant-context/tenants', {
           credentials: 'include',
           cache: 'no-store',
         });
@@ -59,7 +60,7 @@ export default function WorkspaceSelector() {
     setBusy(true);
     setError(null);
     try {
-      const response = await fetch(`${API_BASE}/api/v1/auth/tenant-context`, {
+      const response = await fetch('/api/tenant-context', {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
