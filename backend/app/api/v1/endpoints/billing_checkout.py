@@ -7,13 +7,16 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from typing import Any
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy.orm import Session
 
+from app.core.dependencies import require_tenant_user
 from app.core.config import settings
 from app.database.session import get_db
+from app.models.msp import Organization, TenantSubscription
 
 router = APIRouter(prefix="/billing", tags=["Billing Checkout"])
 
@@ -139,15 +142,47 @@ def _stripe_form_post(path: str, fields: dict[str, str]) -> dict[str, Any]:
         raise HTTPException(e.code, f"Stripe error: {msg}") from e
 
 
+def _organization_for_tenant(db: Session, tenant_id: UUID) -> Organization:
+    org = db.query(Organization).filter(Organization.tenant_id == tenant_id).first()
+    if org is None:
+        raise HTTPException(409, "Billing organization is not configured for this tenant")
+    return org
+
+
+def _existing_subscription(db: Session, tenant_id: UUID) -> TenantSubscription | None:
+    return (
+        db.query(TenantSubscription)
+        .filter(TenantSubscription.tenant_id == tenant_id)
+        .first()
+    )
+
+
 @router.post("/checkout")
-def create_checkout_session(body: CheckoutRequest):
+def create_checkout_session(
+    body: CheckoutRequest,
+    current_user=Depends(require_tenant_user),
+    db: Session = Depends(get_db),
+):
     plan = next((p for p in DEFAULT_PLANS if p["code"] == body.plan_code), None)
     if not plan:
         raise HTTPException(400, f"Unknown plan_code: {body.plan_code}")
 
+    tenant_id = UUID(str(current_user.tenant_id))
+    organization = _organization_for_tenant(db, tenant_id)
+    subscription = _existing_subscription(db, tenant_id)
+
     base = _frontend_base()
     success = body.success_url or f"{base}/billing?success=1&plan={plan['code']}"
     cancel = body.cancel_url or f"{base}/billing?canceled=1"
+
+    # Tenant/organization identity is resolved exclusively from the authenticated
+    # server-side user. Browser-supplied tenant identifiers are never trusted.
+    metadata = {
+        "tenant_id": str(tenant_id),
+        "organization_id": str(organization.id),
+        "plan_code": plan["code"],
+        "product": "bhudi",
+    }
 
     fields: dict[str, str] = {
         "mode": "subscription",
@@ -161,14 +196,31 @@ def create_checkout_session(body: CheckoutRequest):
         "line_items[0][quantity]": "1",
         "payment_method_types[0]": "card",
         "allow_promotion_codes": "true",
-        "client_reference_id": plan["code"],
-        "metadata[plan_code]": plan["code"],
-        "metadata[product]": "bhudi",
+        "client_reference_id": str(tenant_id),
     }
-    if body.email:
-        fields["customer_email"] = str(body.email)
-        fields["metadata[email]"] = str(body.email)
-    if body.customer_name:
+    for key, value in metadata.items():
+        fields[f"metadata[{key}]"] = value
+        # Checkout Session metadata is not automatically copied to the Stripe
+        # Subscription. Set subscription metadata explicitly so later
+        # subscription/invoice webhooks retain the tenant binding.
+        fields[f"subscription_data[metadata][{key}]"] = value
+
+    # Use the authenticated account email, not a browser-provided email, for
+    # billing identity. Existing Stripe customer IDs are reused when present.
+    user_email = getattr(current_user, "email", None)
+    if user_email:
+        fields["customer_email"] = str(user_email)
+    if subscription and subscription.external_customer_id:
+        fields.pop("customer_email", None)
+        fields["customer"] = str(subscription.external_customer_id)
+
+    customer_name = getattr(current_user, "first_name", "") or ""
+    last_name = getattr(current_user, "last_name", "") or ""
+    if customer_name or last_name:
+        fields["metadata[customer_name]"] = " ".join(
+            part for part in (customer_name, last_name) if part
+        )
+    elif body.customer_name:
         fields["metadata[customer_name]"] = body.customer_name
 
     fields["payment_method_types[1]"] = "paypal"
@@ -187,6 +239,8 @@ def create_checkout_session(body: CheckoutRequest):
         "session_id": session.get("id"),
         "plan": plan,
         "mode": session.get("mode"),
+        "tenant_id": str(tenant_id),
+        "organization_id": str(organization.id),
     }
 
 
