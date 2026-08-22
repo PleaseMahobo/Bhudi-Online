@@ -21,6 +21,14 @@ jobs:
         with:
           go-version: "1.22"
 
+      - name: Verify customer enrollment bootstrap is included
+        working-directory: agent/native
+        shell: pwsh
+        run: |
+          if (-not (Test-Path enrollment_bootstrap.go)) {
+            throw "enrollment_bootstrap.go is missing from the native agent build"
+          }
+
       - name: Build native Windows agent
         working-directory: agent/native
         shell: pwsh
