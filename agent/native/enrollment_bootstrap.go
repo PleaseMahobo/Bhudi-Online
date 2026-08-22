@@ -24,21 +24,32 @@ func init() {
 	_ = os.WriteFile(filepath.Join(dataDir(), enrollmentSecretPathName), []byte(secret), 0600)
 }
 
-// MarshalJSON transparently injects the customer bootstrap into the existing
-// enrollment request. This lets the published native agent remain compatible
-// with its existing install command while customer installers get secure,
-// tenant-bound enrollment automatically.
+// MarshalJSON injects the customer bootstrap and stable machine identity into
+// the enrollment request without changing the existing agent request struct.
 func (r enrollReq) MarshalJSON() ([]byte, error) {
 	type plainEnrollReq enrollReq
-	value := plainEnrollReq(r)
-	if value.EnrollmentSecret == nil || strings.TrimSpace(*value.EnrollmentSecret) == "" {
+	base, err := json.Marshal(plainEnrollReq(r))
+	if err != nil {
+		return nil, err
+	}
+
+	var value map[string]any
+	if err := json.Unmarshal(base, &value); err != nil {
+		return nil, err
+	}
+
+	if guid := strings.TrimSpace(machineGUID()); guid != "" {
+		value["machine_guid"] = guid
+	}
+
+	if r.EnrollmentSecret == nil || strings.TrimSpace(*r.EnrollmentSecret) == "" {
 		if b, err := os.ReadFile(filepath.Join(dataDir(), enrollmentSecretPathName)); err == nil {
 			secret := strings.TrimSpace(string(b))
 			if secret != "" {
-				value.EnrollmentSecret = &secret
+				value["enrollment_secret"] = secret
 				// Give the enrollment request time to complete, then remove the
 				// one-time bootstrap from disk. The backend independently enforces
-				// single-use semantics, so the token cannot be reused successfully.
+				// single-use semantics.
 				go func(path string) {
 					time.Sleep(30 * time.Second)
 					_ = os.Remove(path)
