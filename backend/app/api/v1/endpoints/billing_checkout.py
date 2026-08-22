@@ -13,8 +13,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy.orm import Session
 
-from app.core.dependencies import require_tenant_user
 from app.core.config import settings
+from app.core.dependencies import require_tenant_user
 from app.database.session import get_db
 from app.models.msp import Organization, TenantSubscription
 
@@ -150,18 +150,13 @@ def _organization_for_tenant(db: Session, tenant_id: UUID) -> Organization:
 
 
 def _existing_subscription(db: Session, tenant_id: UUID) -> TenantSubscription | None:
-    return (
-        db.query(TenantSubscription)
-        .filter(TenantSubscription.tenant_id == tenant_id)
-        .first()
-    )
+    return db.query(TenantSubscription).filter(TenantSubscription.tenant_id == tenant_id).first()
 
 
-@router.post("/checkout")
-def create_checkout_session(
+def _create_checkout_session(
     body: CheckoutRequest,
-    current_user=Depends(require_tenant_user),
-    db: Session = Depends(get_db),
+    current_user,
+    db: Session,
 ):
     plan = next((p for p in DEFAULT_PLANS if p["code"] == body.plan_code), None)
     if not plan:
@@ -175,8 +170,6 @@ def create_checkout_session(
     success = body.success_url or f"{base}/billing?success=1&plan={plan['code']}"
     cancel = body.cancel_url or f"{base}/billing?canceled=1"
 
-    # Tenant/organization identity is resolved exclusively from the authenticated
-    # server-side user. Browser-supplied tenant identifiers are never trusted.
     metadata = {
         "tenant_id": str(tenant_id),
         "organization_id": str(organization.id),
@@ -200,13 +193,8 @@ def create_checkout_session(
     }
     for key, value in metadata.items():
         fields[f"metadata[{key}]"] = value
-        # Checkout Session metadata is not automatically copied to the Stripe
-        # Subscription. Set subscription metadata explicitly so later
-        # subscription/invoice webhooks retain the tenant binding.
         fields[f"subscription_data[metadata][{key}]"] = value
 
-    # Use the authenticated account email, not a browser-provided email, for
-    # billing identity. Existing Stripe customer IDs are reused when present.
     user_email = getattr(current_user, "email", None)
     if user_email:
         fields["customer_email"] = str(user_email)
@@ -214,11 +202,11 @@ def create_checkout_session(
         fields.pop("customer_email", None)
         fields["customer"] = str(subscription.external_customer_id)
 
-    customer_name = getattr(current_user, "first_name", "") or ""
+    first_name = getattr(current_user, "first_name", "") or ""
     last_name = getattr(current_user, "last_name", "") or ""
-    if customer_name or last_name:
+    if first_name or last_name:
         fields["metadata[customer_name]"] = " ".join(
-            part for part in (customer_name, last_name) if part
+            part for part in (first_name, last_name) if part
         )
     elif body.customer_name:
         fields["metadata[customer_name]"] = body.customer_name
@@ -244,16 +232,30 @@ def create_checkout_session(
     }
 
 
+@router.post("/checkout")
+def create_checkout_session(
+    body: CheckoutRequest,
+    current_user=Depends(require_tenant_user),
+    db: Session = Depends(get_db),
+):
+    return _create_checkout_session(body, current_user, db)
+
+
 @router.post("/checkout/demo")
-def demo_checkout(body: CheckoutRequest):
+def demo_checkout(
+    body: CheckoutRequest,
+    current_user=Depends(require_tenant_user),
+    db: Session = Depends(get_db),
+):
     plan = next((p for p in DEFAULT_PLANS if p["code"] == body.plan_code), None)
     if not plan:
         raise HTTPException(400, f"Unknown plan_code: {body.plan_code}")
     if _stripe_secret():
-        return create_checkout_session(body)
+        return _create_checkout_session(body, current_user, db)
     return {
         "demo": True,
         "message": "Stripe not configured — set STRIPE_SECRET_KEY for live card/PayPal checkout.",
         "plan": plan,
         "checkout_url": None,
+        "tenant_id": str(current_user.tenant_id),
     }
