@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any
 from uuid import UUID
 
@@ -12,7 +12,6 @@ from sqlalchemy.orm import Session
 from app.database.session import get_db
 from app.models.action import Action
 from app.models.automation_log import AutomationLog
-from app.models.remediation_run import RemediationRun
 from app.models.response_action import ResponseAction
 from app.models.script import Script
 from app.models.script_task import ScriptTask
@@ -29,6 +28,16 @@ from app.services.script_execution import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/automation", tags=["automation"])
+
+
+def _try_get_remediation_run_model():
+    """Optional link to alert remediation (present after that feature lands)."""
+    try:
+        from app.models.remediation_run import RemediationRun
+
+        return RemediationRun
+    except Exception:
+        return None
 
 
 class AutomationResponse(BaseModel):
@@ -187,7 +196,12 @@ def run_automation(
 
 @router.get("/logs", response_model=list[AutomationLogResponse])
 def list_automation_logs(db: Session = Depends(_get_db_session)) -> list[AutomationLogResponse]:
-    logs = db.query(AutomationLog).order_by(AutomationLog.created_at.desc()).limit(200).all()
+    logs = (
+        db.query(AutomationLog)
+        .order_by(AutomationLog.created_at.desc())
+        .limit(200)
+        .all()
+    )
     return [AutomationLogResponse.model_validate(log) for log in logs]
 
 
@@ -222,12 +236,6 @@ def update_task_state(
     payload: TaskStateUpdate,
     db: Session = Depends(_get_db_session),
 ) -> AutomationResponse:
-    """
-    Agent callback: report script progress / final result.
-
-    Normalizes status from exit_code and error fields, truncates output,
-    and mirrors outcome onto linked ResponseAction / RemediationRun rows.
-    """
     task = db.get(ScriptTask, str(task_id))
     if task is None:
         raise HTTPException(status_code=404, detail="task not found")
@@ -237,7 +245,6 @@ def update_task_state(
         error_output = truncate_output(payload.error_output or payload.error_message)
         output = truncate_output(payload.output)
 
-        # Explicit agent error envelope
         completed = bool(payload.completed) or bool(payload.error_code)
         if payload.error_code and not payload.status:
             requested = "failed"
@@ -260,16 +267,10 @@ def update_task_state(
         if error_output is not None:
             task.error_output = error_output
 
-        terminal = new_status in {
-            "success",
-            "failed",
-            "timed_out",
-            "cancelled",
-        }
+        terminal = new_status in {"success", "failed", "timed_out", "cancelled"}
         if terminal or completed:
             task.completed_at = payload.completed_at or task.completed_at or utcnow()
             if not task.started_at:
-                # Best-effort: mark started if agent only sent a final state
                 try:
                     task.started_at = task.completed_at
                 except Exception:
@@ -281,7 +282,6 @@ def update_task_state(
             error_output=task.error_output,
         )
 
-        # Link incident response actions
         response_action = None
         task_parameters = task.parameters or {}
         if isinstance(task_parameters, dict):
@@ -307,43 +307,54 @@ def update_task_state(
                 response_action.completed_at = task.completed_at or utcnow()
             db.add(response_action)
 
-        # Link alert remediation runs (by task_id)
-        remediation_runs = (
-            db.query(RemediationRun)
-            .filter(RemediationRun.task_id == str(task.id))
-            .all()
-        )
-        for run in remediation_runs:
-            if terminal:
-                run.status = "completed" if outcome["success"] else "failed"
-                run.completed_at = task.completed_at or utcnow()
-                if not outcome["success"]:
-                    run.skip_reason = outcome.get("reason") or payload.error_code or "execution_failed"
-                details = dict(run.details or {})
-                details.update(
-                    {
-                        "exit_code": task.exit_code,
-                        "outcome": outcome,
-                        "error_code": payload.error_code,
-                        "error_message": (payload.error_message or "")[:500] or None,
-                        "stderr_preview": (task.error_output or "")[:500] or None,
-                    }
+        remediation_updated = 0
+        RemediationRun = _try_get_remediation_run_model()
+        if RemediationRun is not None:
+            try:
+                runs = (
+                    db.query(RemediationRun)
+                    .filter(RemediationRun.task_id == str(task.id))
+                    .all()
                 )
-                run.details = details
-            elif new_status == "running":
-                details = dict(run.details or {})
-                details["agent_status"] = "running"
-                run.details = details
-            db.add(run)
+                for run in runs:
+                    if terminal:
+                        run.status = "completed" if outcome["success"] else "failed"
+                        run.completed_at = task.completed_at or utcnow()
+                        if not outcome["success"]:
+                            run.skip_reason = (
+                                outcome.get("reason")
+                                or payload.error_code
+                                or "execution_failed"
+                            )
+                        details = dict(run.details or {})
+                        details.update(
+                            {
+                                "exit_code": task.exit_code,
+                                "outcome": outcome,
+                                "error_code": payload.error_code,
+                                "error_message": (payload.error_message or "")[:500] or None,
+                                "stderr_preview": (task.error_output or "")[:500] or None,
+                            }
+                        )
+                        run.details = details
+                    elif new_status == "running":
+                        details = dict(run.details or {})
+                        details["agent_status"] = "running"
+                        run.details = details
+                    db.add(run)
+                    remediation_updated += 1
+            except Exception:
+                logger.exception(
+                    "Optional RemediationRun sync failed for task_id=%s", task_id
+                )
 
-        # Audit log line
         log_result = new_status
         if outcome["failed"]:
             log_result = f"failed:{outcome.get('reason') or 'unknown'}"
         db.add(
             AutomationLog(
                 action="automation.task_state",
-                result=log_result[:255] if log_result else new_status,
+                result=(log_result or new_status)[:255],
             )
         )
 
@@ -360,8 +371,8 @@ def update_task_state(
         }
         if response_action is not None:
             response_data["response_action_status"] = response_action.status
-        if remediation_runs:
-            response_data["remediation_runs_updated"] = len(remediation_runs)
+        if remediation_updated:
+            response_data["remediation_runs_updated"] = remediation_updated
 
         message = "task state updated"
         if outcome["failed"]:
