@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Sequence
+from typing import Any, Sequence
 from uuid import UUID
 
 from sqlalchemy.orm import Session
@@ -13,6 +13,18 @@ from app.schemas.alert_engine import (
     EscalationPolicyCreate,
     EscalationPolicyUpdate,
 )
+
+
+def _actions_to_json(actions: list[Any] | None) -> list[dict[str, Any]]:
+    if not actions:
+        return []
+    out: list[dict[str, Any]] = []
+    for a in actions:
+        if hasattr(a, "model_dump"):
+            out.append(a.model_dump())
+        elif isinstance(a, dict):
+            out.append(a)
+    return out
 
 
 class AlertRuleService:
@@ -78,7 +90,9 @@ class AlertRuleService:
     # =========================================================
 
     def create_alert_rule(self, data: AlertRuleCreate) -> AlertRule:
-        rule = AlertRule(**data.model_dump())
+        payload = data.model_dump()
+        payload["remediation_actions"] = _actions_to_json(payload.get("remediation_actions"))
+        rule = AlertRule(**payload)
         self.db.add(rule)
         self.db.commit()
         self.db.refresh(rule)
@@ -98,7 +112,13 @@ class AlertRuleService:
         if not rule:
             return None
 
-        for key, value in data.model_dump(exclude_unset=True).items():
+        update_data = data.model_dump(exclude_unset=True)
+        if "remediation_actions" in update_data:
+            update_data["remediation_actions"] = _actions_to_json(
+                update_data.get("remediation_actions")
+            )
+
+        for key, value in update_data.items():
             setattr(rule, key, value)
 
         self.db.commit()
