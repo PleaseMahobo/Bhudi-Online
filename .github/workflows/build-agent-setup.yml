@@ -1,4 +1,4 @@
-# Trigger native-agent release publication from main after merge.
+# Native agent builds (Windows / Linux / macOS) + MSI + GitHub Release
 name: Build Native Agents (Windows / Linux / macOS)
 
 on:
@@ -8,33 +8,34 @@ on:
       - "agent/native/**"
       - "agent/cmd/bhudi-agent-setup/**"
       - "agent/msi/**"
-      - "frontend/**"
       - ".github/workflows/build-agent-setup.yml"
   pull_request:
     paths:
       - "agent/native/**"
       - "agent/cmd/bhudi-agent-setup/**"
       - "agent/msi/**"
-      - "frontend/**"
       - ".github/workflows/build-agent-setup.yml"
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version: "1.22"
+          cache-dependency-path: agent/native/go.sum
 
-      - name: Resolve native agent dependencies
+      - name: Download modules
         working-directory: agent/native
-        run: go mod tidy
-      - name: Verify native agent dependencies
+        run: go mod download
+      - name: Verify modules
         working-directory: agent/native
         run: go mod verify
 
@@ -63,7 +64,7 @@ jobs:
           path: agent/native/dist/*
 
       - name: Publish native release assets
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: agent-native-latest
@@ -80,7 +81,7 @@ jobs:
             | `bhudi-agent-linux-arm64` | Linux ARM64 |
             | `bhudi-agent-darwin-amd64` | macOS Intel |
             | `bhudi-agent-darwin-arm64` | macOS Apple Silicon |
-            | `bhudi-agent-setup.msi` | Windows MSI |
+            | `bhudi-agent-setup.msi` | Windows MSI (from msi job) |
 
             The portal creates the customer-specific `BhudiAgent-Setup.exe` by appending a short-lived, single-use tenant enrollment bootstrap to this base executable.
           files: |
@@ -98,21 +99,19 @@ jobs:
   msi:
     needs: build
     runs-on: windows-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/download-artifact@v4
         with:
-          go-version: "1.22"
-      - name: Resolve native agent dependencies
-        working-directory: agent/native
-        run: go mod tidy
-      - name: Build Windows agent
-        working-directory: agent/native
-        env:
-          GOOS: windows
-          GOARCH: amd64
-          CGO_ENABLED: "0"
-        run: go build -ldflags="-s -w" -o ..\msi\bhudi-agent.exe .
+          name: bhudi-agent-native
+          path: agent/native/dist
+      - name: Stage agent for WiX
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force agent\msi | Out-Null
+          Copy-Item agent\native\dist\bhudi-agent.exe agent\msi\bhudi-agent.exe -Force
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: "8.0.x"
@@ -128,7 +127,7 @@ jobs:
           name: bhudi-agent-msi
           path: agent/msi/bhudi-agent-setup.msi
       - name: Publish MSI release asset
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: agent-native-latest
