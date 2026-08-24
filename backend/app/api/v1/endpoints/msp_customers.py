@@ -1,7 +1,5 @@
-"""Customer wizard, org delete helpers, and user invite endpoints."""
+"""Customer wizard and user invite endpoints."""
 from __future__ import annotations
-
-from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
@@ -18,7 +16,6 @@ from app.schemas.msp import (
     SiteResponse,
 )
 from app.services.msp_customer_ops import MspCustomerOps
-from app.services.msp_service import MspService
 
 router = APIRouter(prefix="/msp", tags=["MSP Multi-Tenant"])
 
@@ -58,14 +55,3 @@ def invite_user(
         return MspCustomerOps(db).invite_user(payload)
     except ValueError as e:
         raise HTTPException(400, str(e))
-
-
-@router.delete("/organizations/{org_id}", status_code=204)
-def delete_organization_admin(
-    org_id: UUID,
-    db: Session = Depends(get_db),
-    _admin=Depends(require_admin()),
-):
-    """Admin-guarded delete (also available on base msp router)."""
-    if not MspService(db).delete_organization(org_id):
-        raise HTTPException(404, "Organization not found")
