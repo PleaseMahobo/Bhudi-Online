@@ -28,6 +28,9 @@ function qs(params?: Record<string, string | number | boolean | undefined | null
 // ─── MSP ───────────────────────────────────────────────────────────────
 export async function listOrganizations(params?: { org_type?: string; status?: string; parent_id?: string; tenant_id?: string }) { return request<any[]>(`/api/v1/msp/organizations${qs(params)}`); }
 export async function createOrganization(data: Record<string, unknown>) { return request<any>(`/api/v1/msp/organizations`, { method: "POST", body: JSON.stringify(data) }); }
+export async function deleteOrganization(orgId: string) { return request<void>(`/api/v1/msp/organizations/${orgId}`, { method: "DELETE" }); }
+export async function createCustomerWizard(data: Record<string, unknown>) { return request<any>(`/api/v1/msp/customers/wizard`, { method: "POST", body: JSON.stringify(data) }); }
+export async function inviteUser(data: { email: string; role: string; tenant_id: string; first_name?: string; last_name?: string; temporary_password?: string }) { return request<any>(`/api/v1/msp/users/invite`, { method: "POST", body: JSON.stringify(data) }); }
 export async function listSites(params?: { organization_id?: string; tenant_id?: string; enabled_only?: boolean }) { return request<any[]>(`/api/v1/msp/sites${qs(params)}`); }
 export async function listContacts(params?: { organization_id?: string; tenant_id?: string; contact_type?: string }) { return request<any[]>(`/api/v1/msp/contacts${qs(params)}`); }
 export async function listTechnicians(params?: { organization_id?: string; tenant_id?: string; status?: string }) { return request<any[]>(`/api/v1/msp/technicians${qs(params)}`); }
@@ -61,7 +64,7 @@ export async function aiRemediation(data: { issue: string; environment?: Record<
 export async function aiTicketSummary(data: { title: string; description?: string; work_notes?: string[]; ticket_id?: string; tenant_id?: string }) { return request<any>(`/api/v1/ai/ticket-summary`, { method: "POST", body: JSON.stringify(data) }); }
 export async function aiKnowledgeSearch(query: string, limit = 5) { return request<any>(`/api/v1/ai/knowledge/search`, { method: "POST", body: JSON.stringify({ query, limit }) }); }
 export async function aiPredictiveFailure(data: { target_id: string; target_type?: string; metrics?: Record<string, unknown>; horizon_hours?: number }) { return request<any>(`/api/v1/ai/predictive-failure`, { method: "POST", body: JSON.stringify(data) }); }
-export async function aiCapacityForecast(data: { resource: string; history?: { value: number }[]; horizon_hours?: number }) { return request<any>(`/api/v1/ai/capacity-forecast`, { method: "POST", body: JSON.stringify(data) }); }
+export async function aiCapacityForecast(data: { resource: string; history?: { value: number }[]; horizon_hours?: number }) { return request<any>(`/api/v1/ai/capacity-forecast`, { method: "POST", body: JSON.stringify({ resource: data.resource, history: data.history, horizon_hours: data.horizon_hours }) }); }
 export async function listAiRuns(taskType?: string, limit = 50) { return request<any[]>(`/api/v1/ai/runs${qs({ task_type: taskType, limit })}`); }
 export async function listKnowledgeArticles(publishedOnly = true) { return request<any[]>(`/api/v1/ai/knowledge${qs({ published_only: publishedOnly })}`); }
 
