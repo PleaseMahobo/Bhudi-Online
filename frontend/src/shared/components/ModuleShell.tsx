@@ -1,8 +1,8 @@
 'use client';
 
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { useAuth } from '@/shared/auth/AuthContext';
-import { useRouter } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import AppShell from '@/shared/components/AppShell';
 import AIAssistant from '@/shared/layout/AIAssistant';
@@ -84,10 +84,16 @@ export default function ModuleShell({
 }) {
   const { user, loading } = useAuth();
   const router = useRouter();
+  const pathname = usePathname();
+  const contentRef = useRef<HTMLElement | null>(null);
 
-  React.useEffect(() => {
+  useEffect(() => {
     if (!loading && !user) router.push('/login');
   }, [loading, user, router]);
+
+  useEffect(() => {
+    contentRef.current?.scrollTo({ top: 0, behavior: 'auto' });
+  }, [pathname]);
 
   if (loading) {
     return (
@@ -99,35 +105,40 @@ export default function ModuleShell({
 
   return (
     <AppShell title={title}>
-      <main className="min-w-0 flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-[1600px] p-4 sm:p-6">
-          {breadcrumbs && breadcrumbs.length > 0 && <Breadcrumbs items={breadcrumbs} />}
-          {(title || subtitle || actions) && (
-            <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-              <div>
-                {title && (
-                  <h1 className="text-2xl font-bold tracking-tight text-slate-900">{title}</h1>
-                )}
-                {subtitle && <p className="mt-1 text-sm text-slate-500">{subtitle}</p>}
+      <div className="flex min-h-0 flex-1 flex-row overflow-hidden">
+        <main
+          ref={contentRef}
+          className="min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain"
+        >
+          <div className="mx-auto max-w-[1600px] p-4 sm:p-6">
+            {breadcrumbs && breadcrumbs.length > 0 && <Breadcrumbs items={breadcrumbs} />}
+            {(title || subtitle || actions) && (
+              <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+                <div>
+                  {title && (
+                    <h1 className="text-2xl font-bold tracking-tight text-slate-900">{title}</h1>
+                  )}
+                  {subtitle && <p className="mt-1 text-sm text-slate-500">{subtitle}</p>}
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  {actions}
+                  {title === 'Dashboard' && (
+                    <Link
+                      href="/reporting"
+                      className="inline-flex items-center gap-1 text-xs font-semibold text-indigo-600 hover:text-indigo-500"
+                    >
+                      View reports <ExternalLink size={12} />
+                    </Link>
+                  )}
+                </div>
               </div>
-              <div className="flex flex-wrap items-center gap-2">
-                {actions}
-                {title === 'Dashboard' && (
-                  <Link
-                    href="/reporting"
-                    className="inline-flex items-center gap-1 text-xs font-semibold text-indigo-600 hover:text-indigo-500"
-                  >
-                    View reports <ExternalLink size={12} />
-                  </Link>
-                )}
-              </div>
-            </div>
-          )}
-          {title === 'Dashboard' && <DashboardWorkspaceBar />}
-          {children}
-        </div>
-      </main>
-      {showAI && <AIAssistant />}
+            )}
+            {title === 'Dashboard' && <DashboardWorkspaceBar />}
+            {children}
+          </div>
+        </main>
+        {showAI && <AIAssistant />}
+      </div>
     </AppShell>
   );
 }
