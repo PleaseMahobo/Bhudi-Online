@@ -1,0 +1,14 @@
+# Railway service config for Bhudi FastAPI (GitHub → main auto-deploy).
+# Dashboard: Service → Settings → Source = PleaseMahobo/Bhudi-Online, branch main.
+# Root Directory can stay "/" when using this dockerfilePath, or set to "backend"
+# and switch dockerfilePath to "Dockerfile".
+
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "backend/Dockerfile"
+
+[deploy]
+healthcheckPath = "/api/v1/health"
+healthcheckTimeout = 30
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 5
