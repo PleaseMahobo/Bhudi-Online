@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class OrganizationCreate(BaseModel):
@@ -433,7 +433,7 @@ class CustomerWizardResponse(BaseModel):
 
 
 class InviteUserRequest(BaseModel):
-    email: EmailStr
+    email: str = Field(..., min_length=3, max_length=320)
     role: str = Field(
         "viewer",
         pattern="^(viewer|technician|manager|admin|customer|system_admin)$",
