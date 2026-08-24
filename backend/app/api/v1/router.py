@@ -2,10 +2,11 @@
 from fastapi import APIRouter
 
 api_router = APIRouter()
-from app.api.v1.endpoints import health, devices, agent_runtime, agent_runtime_enrollment, agent_enrollment_portal, agent_runtime_portal, supabase_auth
+from app.api.v1.endpoints import health, devices, agent_runtime, agent_runtime_enrollment, agent_enrollment_portal, agent_runtime_portal, supabase_auth, alerts
 
 api_router.include_router(health.router, prefix="/health", tags=["health"])
 api_router.include_router(devices.router, prefix="/devices", tags=["devices"])
+api_router.include_router(alerts.router, tags=["Alerts"])
 api_router.include_router(agent_runtime_enrollment.router, tags=["agent-runtime"])
 api_router.include_router(agent_runtime_portal.router, tags=["agent-runtime"])
 api_router.include_router(agent_runtime.router, tags=["agent-runtime"])
@@ -22,7 +23,6 @@ def _safe_include(mod_path: str, attr: str = "router", **kwargs):
         print(f"[router] included {mod_path}")
     except Exception as e:
         print(f"[router] skipped {mod_path}: {e}")
-
 
 _safe_include("app.api.v1.endpoints.agents", tags=["agents"])
 _safe_include("app.api.v1.endpoints.auth", tags=["auth"])
