@@ -14,11 +14,11 @@ export default function AppShell({
   const [mobileOpen, setMobileOpen] = useState(false);
 
   return (
-    <div className="flex min-h-screen bg-slate-50">
+    <div className="flex h-screen min-h-0 overflow-hidden bg-slate-50">
       <AppSidebar mobileOpen={mobileOpen} onMobileClose={() => setMobileOpen(false)} />
-      <div className="flex min-w-0 flex-1 flex-col md:ml-64">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col md:ml-64">
         <AppTopBar title={title} onMenuClick={() => setMobileOpen(true)} />
-        {children}
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">{children}</div>
       </div>
     </div>
   );
