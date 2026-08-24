@@ -22,6 +22,15 @@ func main() {
 		if err := installService(strings.TrimRight(*server, "/")); err != nil {
 			fatal(err)
 		}
+	case "enroll":
+		fs := flag.NewFlagSet("enroll", flag.ExitOnError)
+		server := fs.String("server", envOr("BHUDI_SERVER_URL", defaultServerURL), "Bhudi backend base URL")
+		_ = fs.Parse(os.Args[2:])
+		serverURL := strings.TrimRight(*server, "/")
+		if _, err := enroll(serverURL); err != nil {
+			fatal(fmt.Errorf("enroll: %w", err))
+		}
+		fmt.Println("Enrollment successful.")
 	case "uninstall":
 		if err := uninstallService(); err != nil {
 			fatal(err)
@@ -47,6 +56,7 @@ func main() {
 	case "help", "-h", "--help":
 		fmt.Print(`Bhudi agent — install once, starts at every boot
 
+  enroll [-server URL]   Enroll this machine and persist its identity
   install -server URL   Install Windows Service / systemd / LaunchAgent
   uninstall             Remove service and startup entries
   service [-server URL] Run as a native Windows Service
@@ -54,9 +64,11 @@ func main() {
   version
 
 Windows (Administrator):
+  bhudi-agent.exe enroll -server https://bhudi-online-production.up.railway.app
   bhudi-agent.exe install -server https://bhudi-online-production.up.railway.app
 
 Linux (preferred with sudo for boot-wide service):
+  sudo ./bhudi-agent-linux-amd64 enroll -server https://bhudi-online-production.up.railway.app
   sudo ./bhudi-agent-linux-amd64 install -server https://bhudi-online-production.up.railway.app
 `)
 	default:

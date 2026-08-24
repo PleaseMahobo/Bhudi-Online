@@ -22,6 +22,8 @@ const (
 
 type bootstrap struct { ServerURL string `json:"server_url"`; EnrollmentToken string `json:"enrollment_token"` }
 
+type installedIdentity struct { AgentID string `json:"agent_id"`; AgentToken string `json:"agent_token"` }
+
 func main() {
 	ensureElevated()
 	boot, err := readBootstrap(); if err != nil { fail("This is not a customer-specific Bhudi installer. Download a fresh installer from the Bhudi portal.\nDetails: "+err.Error()) }
@@ -34,8 +36,22 @@ func main() {
 
 	agentPath := filepath.Join(tmp, "bhudi-agent.exe")
 	fmt.Println("[1/4] Preparing bundled Bhudi agent..."); if err := installBundledAgent(agentPath); err != nil { fail("bundled agent: "+err.Error()) }
-	fmt.Println("[2/4] Installing Windows service and enrolling endpoint...")
-	cmd := exec.Command(agentPath, "install", "-server", server); cmd.Env = append(os.Environ(), "BHUDI_ENROLLMENT_TOKEN="+boot.EnrollmentToken); cmd.Stdout=os.Stdout; cmd.Stderr=os.Stderr; cmd.Stdin=os.Stdin
+
+	identity := filepath.Join(os.Getenv("ProgramData"), "Bhudi", "Agent", "agent_identity.json")
+	if !hasValidIdentity(identity) {
+		fmt.Println("[2/4] Enrolling endpoint before installing Windows service...")
+		cmd := exec.Command(agentPath, "enroll", "-server", server)
+		cmd.Env = append(os.Environ(), "BHUDI_ENROLLMENT_TOKEN="+boot.EnrollmentToken)
+		cmd.Stdout = os.Stdout; cmd.Stderr = os.Stderr; cmd.Stdin = os.Stdin
+		if err := cmd.Run(); err != nil { fail("agent enrollment failed: "+err.Error()) }
+		if !hasValidIdentity(identity) { fail("agent enrollment completed without creating agent_identity.json") }
+	} else {
+		fmt.Println("[2/4] Existing agent identity found; reusing this device identity...")
+	}
+
+	fmt.Println("Installing Windows service and starting agent...")
+	cmd := exec.Command(agentPath, "install", "-server", server)
+	cmd.Stdout = os.Stdout; cmd.Stderr = os.Stderr; cmd.Stdin = os.Stdin
 	if err := cmd.Run(); err != nil { fail("agent installation failed: "+err.Error()) }
 
 	fmt.Println("[3/4] Installing Bhudi Support Client...")
@@ -44,7 +60,7 @@ func main() {
 	if err := os.MkdirAll(supportDir, 0755); err != nil { fail("support directory: "+err.Error()) }
 	supportPath := filepath.Join(supportDir, "bhudi-support.exe")
 	if err := download(supportURL, supportPath); err != nil { fail("support-client download: "+err.Error()) }
-	if err := waitForAgentIdentity(60 * time.Second); err != nil { fail("agent enrollment: "+err.Error()) }
+	if !hasValidIdentity(identity) { fail("agent identity disappeared after service installation") }
 	if err := startSupportClient(supportPath); err != nil { fail("support-client start: "+err.Error()) }
 
 	fmt.Println("[4/4] Installation complete"); fmt.Println("The Bhudi agent and support client are installed and enrolled."); time.Sleep(2*time.Second)
@@ -55,11 +71,13 @@ func installBundledAgent(dest string) error {
 	if err := os.WriteFile(dest, bundledAgent, 0755); err != nil { return err }
 	return nil
 }
-func waitForAgentIdentity(timeout time.Duration) error {
-	path := filepath.Join(os.Getenv("ProgramData"), "Bhudi", "Agent", "agent_identity.json"); deadline:=time.Now().Add(timeout)
-	for time.Now().Before(deadline) { if st,err:=os.Stat(path); err==nil && st.Size()>0 { return nil }; time.Sleep(2*time.Second) }
-	return fmt.Errorf("agent identity was not created within %s", timeout)
+
+func hasValidIdentity(path string) bool {
+	data, err := os.ReadFile(path); if err != nil { return false }
+	var id installedIdentity
+	return json.Unmarshal(data, &id) == nil && strings.TrimSpace(id.AgentID) != "" && strings.TrimSpace(id.AgentToken) != ""
 }
+
 func startSupportClient(path string) error {
 	cmd := exec.Command(path); if err:=cmd.Start(); err!=nil{return err}
 	_ = exec.Command("reg.exe","ADD",`HKCU\Software\Microsoft\Windows\CurrentVersion\Run`,"BhudiSupport","/REG_SZ",path,"/F").Run()
