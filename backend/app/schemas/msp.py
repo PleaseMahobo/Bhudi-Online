@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 
 class OrganizationCreate(BaseModel):
@@ -391,3 +391,66 @@ class TenantIsolationSummary(BaseModel):
     technicians: int = 0
     has_branding: bool = False
     subscription_status: str | None = None
+
+
+class CustomerWizardSite(BaseModel):
+    name: str = Field(..., min_length=1, max_length=255)
+    code: str | None = None
+    address_line1: str | None = None
+    city: str | None = None
+    state: str | None = None
+    postal_code: str | None = None
+    country: str | None = None
+    phone: str | None = None
+
+
+class CustomerWizardContact(BaseModel):
+    first_name: str = Field(..., min_length=1, max_length=100)
+    last_name: str | None = None
+    email: str | None = None
+    phone: str | None = None
+    title: str | None = None
+
+
+class CustomerWizardCreate(BaseModel):
+    """Create organization + default site + primary contact in one call."""
+
+    name: str = Field(..., min_length=1, max_length=255)
+    org_type: str = Field("client", pattern="^(msp|client|internal)$")
+    status: str = Field("active", pattern="^(active|trial|suspended|churned)$")
+    email: str | None = None
+    phone: str | None = None
+    website: str | None = None
+    notes: str | None = None
+    site: CustomerWizardSite
+    contact: CustomerWizardContact
+
+
+class CustomerWizardResponse(BaseModel):
+    organization: OrganizationResponse
+    site: SiteResponse
+    contact: ContactResponse
+
+
+class InviteUserRequest(BaseModel):
+    email: EmailStr
+    role: str = Field(
+        "viewer",
+        pattern="^(viewer|technician|manager|admin|customer|system_admin)$",
+    )
+    tenant_id: UUID
+    first_name: str | None = None
+    last_name: str | None = None
+    temporary_password: str | None = Field(
+        None,
+        description="Optional. If omitted, a secure temporary password is generated.",
+    )
+
+
+class InviteUserResponse(BaseModel):
+    user_id: UUID
+    email: str
+    role: str
+    tenant_id: UUID
+    temporary_password: str
+    message: str
