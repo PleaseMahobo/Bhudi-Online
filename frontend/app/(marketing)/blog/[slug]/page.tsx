@@ -2,18 +2,22 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { BLOG_POSTS, getPost } from '@/shared/marketing/blog';
 
+type BlogParams = Promise<{ slug: string }>;
+
 export function generateStaticParams() {
   return BLOG_POSTS.map((p) => ({ slug: p.slug }));
 }
 
-export function generateMetadata({ params }: { params: { slug: string } }) {
-  const post = getPost(params.slug);
+export async function generateMetadata({ params }: { params: BlogParams }) {
+  const { slug } = await params;
+  const post = getPost(slug);
   if (!post) return { title: 'Post — Bhudi' };
   return { title: `${post.title} — Bhudi`, description: post.excerpt };
 }
 
-export default function BlogPostPage({ params }: { params: { slug: string } }) {
-  const post = getPost(params.slug);
+export default async function BlogPostPage({ params }: { params: BlogParams }) {
+  const { slug } = await params;
+  const post = getPost(slug);
   if (!post) notFound();
 
   return (
