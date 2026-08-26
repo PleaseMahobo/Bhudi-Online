@@ -90,7 +90,6 @@ def _bootstrap_metadata_for_engine() -> MetaData:
             ResponseAction,
             Script,
             ScriptTask,
-            # ITSM core and operational tables.
             ServiceTicket,
             TicketAssetLink,
             TicketWorkNote,
@@ -100,7 +99,6 @@ def _bootstrap_metadata_for_engine() -> MetaData:
             ITSMTicketAttachment,
             ITSMTicketAssignment,
             ITSMSLAEscalation,
-            # Direct foreign-key dependencies of the ITSM models.
             Asset,
             Contract,
             Vendor,
@@ -112,10 +110,41 @@ def _bootstrap_metadata_for_engine() -> MetaData:
     return Base.metadata
 
 
+def ensure_alert_engine_schema() -> list[str]:
+    """Add columns introduced after the original alert_rules migration.
+
+    create_all() does not ALTER existing tables; production DBs created from the
+    first migration lack remediation_actions, which makes GET /rules return 500.
+    """
+    applied: list[str] = []
+    if engine is None:
+        return applied
+    statements = [
+        (
+            "alert_rules.remediation_actions",
+            "ALTER TABLE alert_rules ADD COLUMN IF NOT EXISTS remediation_actions JSON",
+        ),
+    ]
+    try:
+        from sqlalchemy import text as sql_text
+
+        with engine.begin() as conn:
+            for label, stmt in statements:
+                try:
+                    conn.execute(sql_text(stmt))
+                    applied.append(label)
+                except Exception as col_exc:
+                    print(f"[bootstrap] skip {label}: {col_exc}")
+    except Exception as exc:
+        print(f"[bootstrap] ensure_alert_engine_schema failed: {exc}")
+    return applied
+
+
 def initialize_database() -> dict[str, Any]:
     """Create tables and seed RBAC/auth data when the database is reachable."""
     try:
         _bootstrap_metadata_for_engine().create_all(bind=engine)
+        ensure_alert_engine_schema()
     except SQLAlchemyError as exc:
         return {"status": "skipped", "reason": f"database unavailable: {exc}"}
 
