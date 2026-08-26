@@ -23,7 +23,7 @@ def _enrollment(tenant_id):
     )
 
 
-def test_secure_enrollment_runs_credential_tenant_machine_agent_commit(monkeypatch):
+def test_secure_enrollment_runs_credential_tenant_machine_agent_commit():
     tenant_id = uuid4()
     enrollment = _enrollment(tenant_id)
     tenant = Tenant(id=tenant_id, name="Customer A")
@@ -53,7 +53,7 @@ def test_secure_enrollment_runs_credential_tenant_machine_agent_commit(monkeypat
     assert db.scalar.call_count == 2
     db.flush.assert_called_once_with()
     db.commit.assert_called_once_with()
-    db.refresh.assert_called_once_with(row)
+    assert db.method_calls.index(db.flush.call_args) < db.method_calls.index(db.commit.call_args)
 
 
 def test_secure_enrollment_rejects_machine_owned_by_another_tenant():
