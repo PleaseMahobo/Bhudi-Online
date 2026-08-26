@@ -82,17 +82,17 @@ export default function AppSidebar({
   return (
     <>
       {mobileOpen && (
-        <div className="fixed inset-0 z-40 bg-slate-900/40 lg:hidden" onClick={onMobileClose} />
+        <div className="fixed inset-0 z-40 bg-slate-900/40 md:hidden" onClick={onMobileClose} />
       )}
       <aside
         className={
-          'fixed inset-y-0 left-0 z-50 flex w-64 flex-col border-r border-slate-200 bg-slate-950 text-slate-100 transition-transform lg:static lg:translate-x-0 ' +
-          (mobileOpen ? 'translate-x-0' : '-translate-x-full')
+          'fixed inset-y-0 left-0 z-50 flex w-64 flex-col border-r border-slate-200 bg-slate-950 text-slate-100 transition-transform duration-200 ease-out ' +
+          (mobileOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0')
         }
       >
         <div className="flex h-14 items-center justify-between border-b border-white/10 px-4">
           <BhudiLogo href="/dashboard" size="sm" inverted withWordmark variant="mark" />
-          <button type="button" className="lg:hidden text-slate-400" onClick={onMobileClose}>
+          <button type="button" className="md:hidden text-slate-400" onClick={onMobileClose}>
             <X size={18} />
           </button>
         </div>
