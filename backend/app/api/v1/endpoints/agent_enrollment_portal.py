@@ -18,7 +18,9 @@ def create_agent_enrollment_token(
     raw, record = AgentEnrollmentService(db).create(user.tenant_id)
     return {
         "token": raw,
-        "expires_at": record.expires_at,
+        "expires_at": None,
         "tenant_id": str(user.tenant_id),
-        "single_use": True,
+        "single_use": False,
+        "reusable": True,
+        "revocable": True,
     }
