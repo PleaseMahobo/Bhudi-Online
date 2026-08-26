@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 from uuid import uuid4
-from unittest.mock import Mock
+from unittest.mock import Mock, call
 
 import pytest
 from fastapi import HTTPException
@@ -53,7 +53,7 @@ def test_secure_enrollment_runs_credential_tenant_machine_agent_commit():
     assert db.scalar.call_count == 2
     db.flush.assert_called_once_with()
     db.commit.assert_called_once_with()
-    assert db.method_calls.index(db.flush.call_args) < db.method_calls.index(db.commit.call_args)
+    assert db.method_calls.index(call.flush()) < db.method_calls.index(call.commit())
 
 
 def test_secure_enrollment_rejects_machine_owned_by_another_tenant():
