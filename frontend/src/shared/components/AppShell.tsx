@@ -5,10 +5,9 @@ import AppSidebar from '@/shared/layout/AppSidebar';
 import AppTopBar from '@/shared/layout/AppTopBar';
 
 /**
- * Shell layout:
- * - Sidebar is position:fixed (out of document flow), width 16rem (w-64).
- * - Main column uses a single md:ml-64 so content sits flush next to the rail.
- * - Do NOT use lg:static on the sidebar — that reintroduces a second 16rem gap.
+ * In-flow sidebar on md+: takes exactly w-64 in the flex row.
+ * No md:ml-64 / fixed dual positioning — that combination caused the empty gap.
+ * Mobile: sidebar is an off-canvas overlay (handled inside AppSidebar).
  */
 export default function AppShell({
   children,
@@ -20,9 +19,9 @@ export default function AppShell({
   const [mobileOpen, setMobileOpen] = useState(false);
 
   return (
-    <div className="relative flex h-screen min-h-0 overflow-hidden bg-slate-50">
+    <div className="flex h-screen min-h-0 w-full overflow-hidden bg-slate-50">
       <AppSidebar mobileOpen={mobileOpen} onMobileClose={() => setMobileOpen(false)} />
-      <div className="flex min-h-0 min-w-0 w-full flex-1 flex-col md:ml-64">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <AppTopBar title={title} onMenuClick={() => setMobileOpen(true)} />
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden">{children}</div>
       </div>
