@@ -116,7 +116,6 @@ class AgentEnrollmentService:
         self.db.add(enrollment)
         self.db.flush()
         self.db.commit()
-        self.db.refresh(existing)
         return existing, agent_token, tenant.id
 
     def revoke(self, tenant_id: uuid.UUID, token_id: uuid.UUID) -> AgentEnrollment:
