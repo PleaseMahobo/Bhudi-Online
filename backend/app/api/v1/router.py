@@ -2,7 +2,7 @@
 from fastapi import APIRouter
 
 api_router = APIRouter()
-from app.api.v1.endpoints import health, devices, agent_runtime, agent_runtime_enrollment, agent_enrollment_portal, agent_runtime_portal, supabase_auth
+from app.api.v1.endpoints import health, devices, agent_runtime, agent_runtime_enrollment, agent_enrollment_portal, agent_enrollment_admin, agent_runtime_portal, supabase_auth
 
 api_router.include_router(health.router, prefix="/health", tags=["health"])
 api_router.include_router(devices.router, prefix="/devices", tags=["devices"])
@@ -10,6 +10,7 @@ api_router.include_router(agent_runtime_enrollment.router, tags=["agent-runtime"
 api_router.include_router(agent_runtime_portal.router, tags=["agent-runtime"])
 api_router.include_router(agent_runtime.router, tags=["agent-runtime"])
 api_router.include_router(agent_enrollment_portal.router, tags=["agents"])
+api_router.include_router(agent_enrollment_admin.router, tags=["agent-enrollment"])
 api_router.include_router(supabase_auth.router, tags=["supabase-auth"])
 
 
