@@ -57,6 +57,7 @@ class EnrollRequest(BaseModel):
     hostname: str
     agent_version: str = "1.0.0"
     platform: str | None = None
+    machine_guid: str | None = None
     enrollment_secret: str | None = None
 
 

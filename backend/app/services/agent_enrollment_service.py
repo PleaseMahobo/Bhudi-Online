@@ -3,12 +3,15 @@ from __future__ import annotations
 import hashlib
 import secrets
 import uuid
+from datetime import datetime, timezone
 
 from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.models.agent import Agent
 from app.models.agent_enrollment import AgentEnrollment
+from app.models.tenant import Tenant
 
 
 class AgentEnrollmentService:
@@ -40,6 +43,81 @@ class AgentEnrollmentService:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid enrollment credentials")
         return record
 
+    def enroll_agent(
+        self,
+        *,
+        enrollment_secret: str,
+        hostname: str,
+        agent_version: str,
+        platform: str | None,
+        machine_guid: str | None,
+    ) -> tuple[Agent, str, uuid.UUID]:
+        """Atomically validate credentials and persist a tenant-bound agent.
+
+        The caller owns the request transaction. This method performs no commit
+        until credential validation, tenant lookup, machine identity lookup, and
+        Agent insert/update have all succeeded.
+        """
+        enrollment = self.consume(enrollment_secret)
+        tenant = self.db.get(Tenant, enrollment.tenant_id)
+        if tenant is None:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid enrollment credentials")
+
+        normalized_guid = (machine_guid or "").strip().lower() or None
+        existing = None
+        if normalized_guid:
+            existing = self.db.scalar(
+                select(Agent).where(Agent.machine_guid == normalized_guid)
+            )
+            if existing is not None and existing.tenant_id != tenant.id:
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Machine is already enrolled")
+
+        now = datetime.now(timezone.utc)
+        agent_token = existing.enrollment_token if existing is not None and existing.enrollment_token else str(uuid.uuid4())
+
+        if existing is None:
+            existing = Agent(
+                id=uuid.uuid4(),
+                hostname=hostname,
+                agent_version=agent_version,
+                platform=platform,
+                machine_guid=normalized_guid,
+                tenant_id=tenant.id,
+                enrollment_token=agent_token,
+                registration_state="approved",
+                approved=True,
+                trusted=True,
+                status="online",
+                enabled=True,
+                registered_at=now,
+                last_seen=now,
+                last_heartbeat=now,
+            )
+            self.db.add(existing)
+        else:
+            existing.hostname = hostname
+            existing.agent_version = agent_version
+            existing.platform = platform
+            existing.machine_guid = normalized_guid
+            existing.status = "online"
+            existing.last_seen = now
+            existing.last_heartbeat = now
+            existing.enabled = True
+            existing.registration_state = "approved"
+            existing.approved = True
+            existing.trusted = True
+            existing.revoked = False
+            existing.enrollment_token = agent_token
+
+        # Keep first-use audit linkage, but do not commit here. The Agent row
+        # and enrollment record must commit as one transaction.
+        if enrollment.agent_id is None:
+            enrollment.agent_id = existing.id
+        self.db.add(enrollment)
+        self.db.flush()
+        self.db.commit()
+        return existing, agent_token, tenant.id
+
     def revoke(self, tenant_id: uuid.UUID, token_id: uuid.UUID) -> AgentEnrollment:
         record = self.db.scalar(
             select(AgentEnrollment).where(
@@ -56,8 +134,7 @@ class AgentEnrollmentService:
         return record
 
     def mark_used(self, record: AgentEnrollment, agent_id: uuid.UUID) -> None:
-        # Preserve first-use audit linkage without invalidating a reusable credential.
+        """Stage first-use audit linkage without committing the surrounding transaction."""
         if record.agent_id is None:
             record.agent_id = agent_id
-            self.db.add(record)
-            self.db.commit()
+        self.db.add(record)
