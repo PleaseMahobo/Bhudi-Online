@@ -11,7 +11,7 @@ from app.models.base import Base
 
 
 class AgentEnrollment(Base):
-    """Single-use enrollment credential owned by exactly one tenant."""
+    """Reusable tenant-scoped enrollment credential."""
 
     __tablename__ = "agent_enrollment_tokens"
 
@@ -22,7 +22,7 @@ class AgentEnrollment(Base):
         UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True
     )
     token_hash: Mapped[str] = mapped_column(Text, nullable=False, unique=True, index=True)
-    expires_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), nullable=False)
+    expires_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True), nullable=True)
     used_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True), nullable=True)
     agent_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("agents.id", ondelete="SET NULL"), nullable=True, index=True
