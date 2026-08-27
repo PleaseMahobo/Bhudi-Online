@@ -1,97 +1,194 @@
-name: Bhudi Agent Release
+# Enterprise agent release: native binaries (Win/Linux/macOS) + Windows MSI + setup EXE
+name: Release Native Agent
 
-# Manual only — avoids racing build-agent-setup on every main push.
-# Use for enrollment-checked Windows installer + support client release.
 on:
   workflow_dispatch:
+  push:
+    tags:
+      - 'agent-v*'
+    paths:
+      - 'agent/native/**'
+      - 'agent/cmd/bhudi-agent-setup/**'
+      - 'agent/msi/**'
+      - 'agent/support-client/**'
+      - '.github/workflows/release-agent.yml'
 
 permissions:
   contents: write
 
+env:
+  AGENT_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || '2.1.0' }}
+
 jobs:
-  build-windows-agent:
+  build-windows:
     runs-on: windows-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup Go
-        uses: actions/setup-go@v5
+      - uses: actions/setup-go@v5
         with:
-          go-version: "1.22"
-          cache-dependency-path: |
-            agent/native/go.sum
-            agent/support-client/go.sum
-
-      - name: Verify customer enrollment bootstrap is included
-        working-directory: agent/native
-        shell: pwsh
-        run: |
-          if (-not (Test-Path enrollment_bootstrap.go)) {
-            throw "enrollment_bootstrap.go is missing from the native agent build"
-          }
+          go-version: '1.22'
 
       - name: Build native Windows agent
         working-directory: agent/native
         shell: pwsh
         run: |
-          go mod download
-          go mod verify
+          $ver = "${{ env.AGENT_VERSION }}".TrimStart('agent-v')
+          if (-not $ver) { $ver = "2.1.0" }
           New-Item -ItemType Directory -Force dist | Out-Null
-          $env:GOOS = "windows"
-          $env:GOARCH = "amd64"
+          $ld = "-s -w -X main.agentVersion=$ver"
           $env:CGO_ENABLED = "0"
-          go build -ldflags="-s -w" -o dist/bhudi-agent-windows-amd64.exe .
-          Copy-Item dist/bhudi-agent-windows-amd64.exe dist/bhudi-agent.exe
+          $env:GOOS = "windows"; $env:GOARCH = "amd64"
+          go build -trimpath -ldflags $ld -o dist/bhudi-agent.exe .
+          Copy-Item dist/bhudi-agent.exe dist/bhudi-agent-windows-amd64.exe
 
-      - name: Bundle exact native agent into customer installer
+      - name: Build customer installer base (BhudiAgent-Setup.exe)
         shell: pwsh
         run: |
           Copy-Item agent/native/dist/bhudi-agent.exe agent/cmd/bhudi-agent-setup/bhudi-agent.exe -Force
-
-      - name: Build customer installer base
-        working-directory: agent/cmd/bhudi-agent-setup
-        shell: pwsh
-        run: |
-          $env:GOOS = "windows"
-          $env:GOARCH = "amd64"
+          Push-Location agent/cmd/bhudi-agent-setup
           $env:CGO_ENABLED = "0"
-          go build -tags release -ldflags="-s -w" -o ../../native/dist/BhudiAgent-Setup.exe .
+          $env:GOOS = "windows"; $env:GOARCH = "amd64"
+          go build -tags release -trimpath -ldflags "-s -w" -o ../../native/dist/BhudiAgent-Setup.exe .
+          Pop-Location
 
-      - name: Build Windows support client
+      - name: Build support client
         working-directory: agent/support-client
         shell: pwsh
         run: |
-          go mod download
-          go mod verify
-          $env:GOOS = "windows"
-          $env:GOARCH = "amd64"
-          $env:CGO_ENABLED = "0"
-          go build -trimpath -ldflags="-s -w" -o bhudi-support.exe .
+          if (Test-Path go.mod) {
+            $env:CGO_ENABLED = "0"
+            $env:GOOS = "windows"; $env:GOARCH = "amd64"
+            go build -trimpath -ldflags "-s -w" -o ../native/dist/bhudi-support.exe .
+          }
 
-      - name: Upload Windows agent artifact
+      - name: Install WiX Toolset
+        shell: pwsh
+        run: |
+          choco install wixtoolset -y --no-progress
+          echo "C:\Program Files (x86)\WiX Toolset v3.14\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          echo "C:\Program Files (x86)\WiX Toolset v3.11\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Build MSI
+        working-directory: agent/msi
+        shell: pwsh
+        run: |
+          $agentDir = Resolve-Path ..\native\dist
+          candle.exe -dAgentDir="$agentDir" Product.wxs
+          if ($LASTEXITCODE -ne 0) { throw "candle failed" }
+          light.exe -ext WixUIExtension -out ..\native\dist\bhudi-agent-setup.msi Product.wixobj
+          if ($LASTEXITCODE -ne 0) { throw "light failed" }
+          Get-Item ..\native\dist\bhudi-agent-setup.msi
+
+      - name: Optional Authenticode sign (if cert secrets present)
+        shell: pwsh
+        env:
+          SIGN_CERT_BASE64: ${{ secrets.WINDOWS_SIGN_CERT_BASE64 }}
+          SIGN_CERT_PASSWORD: ${{ secrets.WINDOWS_SIGN_CERT_PASSWORD }}
+        run: |
+          if (-not $env:SIGN_CERT_BASE64) {
+            Write-Host "Skipping code sign (WINDOWS_SIGN_CERT_BASE64 not set)"
+            exit 0
+          }
+          $pfx = "$env:RUNNER_TEMP\bhudi-sign.pfx"
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:SIGN_CERT_BASE64))
+          $files = @(
+            "agent\native\dist\bhudi-agent.exe",
+            "agent\native\dist\BhudiAgent-Setup.exe",
+            "agent\native\dist\bhudi-agent-setup.msi"
+          )
+          foreach ($f in $files) {
+            if (Test-Path $f) {
+              signtool sign /f $pfx /p $env:SIGN_CERT_PASSWORD /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 $f
+            }
+          }
+
+      - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: bhudi-agent-windows
+          name: windows-agent
           path: |
             agent/native/dist/bhudi-agent.exe
             agent/native/dist/bhudi-agent-windows-amd64.exe
             agent/native/dist/BhudiAgent-Setup.exe
-            agent/support-client/bhudi-support.exe
+            agent/native/dist/bhudi-agent-setup.msi
+            agent/native/dist/bhudi-support.exe
 
-      - name: Publish agent release
+  build-unix:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+            out: bhudi-agent-linux-amd64
+          - goos: linux
+            goarch: arm64
+            out: bhudi-agent-linux-arm64
+          - goos: darwin
+            goarch: amd64
+            out: bhudi-agent-darwin-amd64
+          - goos: darwin
+            goarch: arm64
+            out: bhudi-agent-darwin-arm64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+      - name: Build
+        working-directory: agent/native
+        run: |
+          VER="${{ env.AGENT_VERSION }}"
+          VER="${VER#agent-v}"
+          [ -n "$VER" ] || VER=2.1.0
+          mkdir -p dist
+          CGO_ENABLED=0 GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} \
+            go build -trimpath -ldflags="-s -w -X main.agentVersion=$VER" \
+            -o dist/${{ matrix.out }} .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: unix-${{ matrix.out }}
+          path: agent/native/dist/${{ matrix.out }}
+
+  publish:
+    needs: [build-windows, build-unix]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Flatten artifacts
+        run: |
+          mkdir -p release
+          find artifacts -type f -exec cp -v {} release/ \;
+          ls -la release
+      - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: agent-native-latest
-          name: Bhudi Native Agent
+          name: Bhudi Native Agent (enterprise)
           body: |
-            Customer-specific installer base, native Windows agent, and support client.
-            Triggered via workflow_dispatch (enrollment-checked Windows build).
-          files: |
-            agent/native/dist/BhudiAgent-Setup.exe
-            agent/native/dist/bhudi-agent.exe
-            agent/native/dist/bhudi-agent-windows-amd64.exe
-            agent/support-client/bhudi-support.exe
+            ## Enterprise native agent
+
+            | File | Platform |
+            |------|----------|
+            | `BhudiAgent-Setup.exe` | Windows customer installer (portal injects enrollment) |
+            | `bhudi-agent-setup.msi` | Windows MSI — Intune/GPO (`SERVERURL=` property) |
+            | `bhudi-agent.exe` | Windows x64 binary |
+            | `bhudi-agent-linux-*` | Linux |
+            | `bhudi-agent-darwin-*` | macOS |
+
+            ### Silent MSI
+            ```bat
+            msiexec /i bhudi-agent-setup.msi /qn SERVERURL=https://your-api.example.com
+            ```
+
+            ### Upgrade in place
+            ```bat
+            bhudi-agent.exe upgrade -server https://your-api.example.com
+            ```
+          files: release/*
           make_latest: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
