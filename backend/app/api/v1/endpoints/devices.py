@@ -1,13 +1,16 @@
-"""Device listing + status for dashboard (unified DB + runtime agents)."""
+"""Tenant-scoped device listing + status for dashboard (DB + runtime agents)."""
 from __future__ import annotations
 
 from datetime import datetime, timezone
 from typing import Any
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
+from app.core.dependencies import get_current_user
 from app.database.session import get_db
+from app.models.user import User
 from app.state import device_state
 from app.services import device_service
 
@@ -76,13 +79,16 @@ def _normalize_row(raw: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _runtime_agents() -> list[dict[str, Any]]:
+def _runtime_agents(tenant_id: UUID) -> list[dict[str, Any]]:
     try:
         from app.api.v1.endpoints import agent_runtime
 
         agents = getattr(agent_runtime, "_agents", {}) or {}
         out = []
         for a in agents.values():
+            raw_tenant = a.get("tenant_id")
+            if not raw_tenant or str(raw_tenant) != str(tenant_id):
+                continue
             row = dict(a)
             row["source"] = "runtime"
             row["id"] = a.get("agent_id")
@@ -95,24 +101,41 @@ def _runtime_agents() -> list[dict[str, Any]]:
 
 
 @router.get("/status")
-def device_status():
-    return list_devices_unified()
+def device_status(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    return list_devices_unified(db, current_user.tenant_id)
 
 
 @router.get("/")
-def list_devices(db: Session = Depends(get_db)):
-    return list_devices_unified(db)
+def list_devices(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    if current_user.tenant_id is None:
+        raise HTTPException(status_code=403, detail="Tenant context required")
+    return list_devices_unified(db, current_user.tenant_id)
 
 
-def list_devices_unified(db: Session | None = None) -> dict[str, Any]:
+def list_devices_unified(
+    db: Session | None = None,
+    tenant_id: UUID | None = None,
+) -> dict[str, Any]:
+    if tenant_id is None:
+        return {"devices": [], "count": 0, "counts": {"online": 0, "offline": 0, "overdue": 0, "unknown": 0}}
+
     by_id: dict[str, dict[str, Any]] = {}
 
-    for row in _runtime_agents():
+    for row in _runtime_agents(tenant_id):
         if row["id"]:
             by_id[row["id"]] = row
 
     try:
         for d in device_state.get_devices():
+            raw_tenant = d.get("tenant_id")
+            if not raw_tenant or str(raw_tenant) != str(tenant_id):
+                continue
             row = _normalize_row({**d, "source": d.get("source") or "memory"})
             if not row["id"]:
                 continue
@@ -131,7 +154,7 @@ def list_devices_unified(db: Session | None = None) -> dict[str, Any]:
 
     if db is not None:
         try:
-            rows = device_service.get_devices(db)
+            rows = device_service.get_devices(db, tenant_id=tenant_id)
             for d in rows:
                 rid = str(getattr(d, "id", "") or "")
                 row = _normalize_row(
@@ -166,27 +189,35 @@ def list_devices_unified(db: Session | None = None) -> dict[str, Any]:
     return {"devices": devices, "count": len(devices), "counts": counts}
 
 
-def _find_agent(device_id: str) -> dict[str, Any] | None:
+def _find_agent(device_id: str, tenant_id: UUID) -> dict[str, Any] | None:
     try:
         from app.api.v1.endpoints import agent_runtime
 
         agents = getattr(agent_runtime, "_agents", {}) or {}
-        if device_id in agents:
-            return agents[device_id]
         for a in agents.values():
+            if not a.get("tenant_id") or str(a.get("tenant_id")) != str(tenant_id):
+                continue
             if str(a.get("agent_id")) == device_id or str(a.get("hostname")) == device_id:
                 return a
     except Exception:
         pass
     for d in device_state.get_devices():
+        if str(d.get("tenant_id")) != str(tenant_id):
+            continue
         if str(d.get("device_id") or d.get("id")) == device_id:
             return d
     return None
 
 
 @router.get("/{device_id}")
-def get_device(device_id: str, db: Session = Depends(get_db)):
-    unified = list_devices_unified(db)
+def get_device(
+    device_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    if current_user.tenant_id is None:
+        raise HTTPException(status_code=403, detail="Tenant context required")
+    unified = list_devices_unified(db, current_user.tenant_id)
     for d in unified["devices"]:
         if d.get("id") == device_id or d.get("hostname") == device_id:
             return d
@@ -194,12 +225,18 @@ def get_device(device_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/{device_id}/inventory/{kind}")
-def request_inventory(device_id: str, kind: str):
+def request_inventory(
+    device_id: str,
+    kind: str,
+    current_user: User = Depends(get_current_user),
+):
+    if current_user.tenant_id is None:
+        raise HTTPException(status_code=403, detail="Tenant context required")
     kind = kind.lower().strip()
     if kind not in ("processes", "software"):
         raise HTTPException(400, "kind must be processes or software")
 
-    agent = _find_agent(device_id)
+    agent = _find_agent(device_id, current_user.tenant_id)
     if not agent:
         raise HTTPException(404, "Agent not found — device must be enrolled and online")
 
@@ -246,14 +283,20 @@ def request_inventory(device_id: str, kind: str):
 
 
 @router.get("/{device_id}/commands/{command_id}")
-def get_device_command(device_id: str, command_id: str):
+def get_device_command(
+    device_id: str,
+    command_id: str,
+    current_user: User = Depends(get_current_user),
+):
+    if current_user.tenant_id is None:
+        raise HTTPException(status_code=403, detail="Tenant context required")
     try:
         from app.api.v1.endpoints import agent_runtime
 
-        agent_id = device_id
-        agent = _find_agent(device_id)
-        if agent:
-            agent_id = str(agent.get("agent_id") or device_id)
+        agent = _find_agent(device_id, current_user.tenant_id)
+        if not agent:
+            raise HTTPException(404, "Device not found")
+        agent_id = str(agent.get("agent_id") or device_id)
         for c in agent_runtime._commands.get(agent_id, []):
             if c.get("command_id") == command_id:
                 return {
