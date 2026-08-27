@@ -53,11 +53,19 @@ except Exception as e:
 app.include_router(api_router, prefix="/api/v1")
 
 
+async def _run_database_bootstrap():
+    """Run database bootstrap without blocking FastAPI readiness."""
+    try:
+        result = await asyncio.to_thread(initialize_database)
+        print(f"[startup] bootstrap: {result}")
+    except Exception as exc:
+        print(f"[startup] bootstrap failed: {type(exc).__name__}: {exc}")
+
+
 @app.on_event("startup")
 async def startup_event():
     print("Bhudi RMM API starting...")
-    bootstrap_result = initialize_database()
-    print(f"[startup] bootstrap: {bootstrap_result}")
+    asyncio.create_task(_run_database_bootstrap())
     try:
         from app.core.monitor import monitor_devices
         asyncio.create_task(monitor_devices())
