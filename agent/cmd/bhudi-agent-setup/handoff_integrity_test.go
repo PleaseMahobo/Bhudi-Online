@@ -5,7 +5,6 @@ package main
 import (
 	"bytes"
 	"crypto/sha256"
-	"fmt"
 	"os"
 	"testing"
 )
@@ -27,12 +26,8 @@ func TestBundledAgentMatchesStagedBinary(t *testing.T) {
 	}
 }
 
-func TestBootstrapPayloadContract(t *testing.T) {
+func TestBootstrapContract(t *testing.T) {
 	if magic != "BHUDI_BOOTSTRAP_V1" {
 		t.Fatalf("unexpected bootstrap magic: %q", magic)
 	}
-	if len(magic) == 0 {
-		t.Fatal("bootstrap magic is empty")
-	}
-	_ = fmt.Sprintf("%d", len(bundledAgent))
 }
