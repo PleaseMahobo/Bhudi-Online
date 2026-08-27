@@ -28,7 +28,6 @@ func installService(server string) error {
 		_ = os.MkdirAll(destDir, 0755)
 		dest = filepath.Join(destDir, "bhudi-agent")
 	} else {
-		// Prefer system path when root; else user local
 		destDir := "/opt/bhudi/agent"
 		if os.Geteuid() != 0 {
 			home, _ := os.UserHomeDir()
@@ -60,6 +59,15 @@ func installService(server string) error {
 		fmt.Println("Installed binary; started process (no service manager for this OS).")
 		return nil
 	}
+}
+
+func upgradeService(server string) error {
+	server = strings.TrimRight(server, "/")
+	if server == "" {
+		server = defaultServerURL
+	}
+	logInstall("upgrade: reinstalling service (identity preserved)")
+	return installService(server)
 }
 
 func uninstallService() error {
@@ -97,14 +105,12 @@ Restart=always
 RestartSec=5
 TimeoutStopSec=20
 KillMode=process
-# Allow agent to keep running across brief network drops
 Environment=BHUDI_SERVER_URL=%s
 
 [Install]
 WantedBy=multi-user.target
 `, dest, server, server)
 
-	// Prefer system-wide service when root (starts at boot for all users)
 	if os.Geteuid() == 0 {
 		unitPath := filepath.Join("/etc/systemd/system", systemdUnitName)
 		if err := os.WriteFile(unitPath, []byte(unitBody), 0644); err != nil {
@@ -126,7 +132,6 @@ WantedBy=multi-user.target
 		return nil
 	}
 
-	// Non-root: user unit + enable linger so it survives logout on many distros
 	home, _ := os.UserHomeDir()
 	userDir := filepath.Join(home, ".config/systemd/user")
 	_ = os.MkdirAll(userDir, 0755)
@@ -160,13 +165,11 @@ WantedBy=default.target
 		fmt.Println("systemd user service enabled:", unitPath)
 	}
 
-	// Best-effort linger so user services start at boot without interactive login
 	if u := os.Getenv("USER"); u != "" {
 		if out, err := exec.Command("loginctl", "enable-linger", u).CombinedOutput(); err != nil {
 			fmt.Println("Note: enable-linger failed (optional):", strings.TrimSpace(string(out)))
-			fmt.Println("  For boot-without-login, re-run install with: sudo ./bhudi-agent install -server ...")
 		} else {
-			fmt.Println("linger enabled for", u, "— user service can start at boot")
+			fmt.Println("linger enabled for", u)
 		}
 	}
 
