@@ -4,72 +4,95 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"runtime"
 	"strings"
 )
 
-const agentVersion = "2.4.0-service"
+// Set at link time: -ldflags "-X main.agentVersion=2.1.0"
+var agentVersion = "2.1.0-dev"
 
 func main() {
 	if len(os.Args) < 2 {
-		runAgent(parseRunFlags(os.Args[1:]))
-		return
-	}
-	switch strings.ToLower(os.Args[1]) {
-	case "install":
-		fs := flag.NewFlagSet("install", flag.ExitOnError)
-		server := fs.String("server", envOr("BHUDI_SERVER_URL", defaultServerURL), "Bhudi backend base URL")
-		_ = fs.Parse(os.Args[2:])
-		if err := installService(strings.TrimRight(*server, "/")); err != nil {
-			fatal(err)
-		}
-	case "enroll":
-		fs := flag.NewFlagSet("enroll", flag.ExitOnError)
-		server := fs.String("server", envOr("BHUDI_SERVER_URL", defaultServerURL), "Bhudi backend base URL")
-		_ = fs.Parse(os.Args[2:])
-		serverURL := strings.TrimRight(*server, "/")
-		if _, err := enroll(serverURL); err != nil {
-			fatal(fmt.Errorf("enroll: %w", err))
-		}
-		fmt.Println("Enrollment successful.")
-	case "uninstall":
-		if err := uninstallService(); err != nil {
-			fatal(err)
-		}
-	case "service":
-		fs := flag.NewFlagSet("service", flag.ExitOnError)
-		server := fs.String("server", envOr("BHUDI_SERVER_URL", defaultServerURL), "Bhudi backend base URL")
-		_ = fs.Parse(os.Args[2:])
-		if err := runWindowsService(strings.TrimRight(*server, "/")); err != nil {
-			fatal(err)
-		}
-	case "run", "start":
-		cfg := parseRunFlags(os.Args[2:])
-		if isWindowsServiceProcess() {
-			if err := runWindowsService(cfg.Server); err != nil {
-				fatal(err)
-			}
+		if runtime.GOOS == "windows" && isWindowsServiceProcess() {
+			_ = runWindowsService(envOr("BHUDI_SERVER_URL", defaultServerURL))
 			return
 		}
-		runAgent(cfg)
-	case "version", "-version", "--version":
+		runAgent(parseRunFlags(nil))
+		return
+	}
+
+	cmd := strings.ToLower(os.Args[1])
+	switch cmd {
+	case "enroll":
+		cfg := parseRunFlags(os.Args[2:])
+		ident, err := loadOrEnroll(cfg.Server)
+		if err != nil {
+			fatal(err)
+		}
+		fmt.Printf("enrolled agent_id=%s server=%s\n", ident.AgentID, cfg.Server)
+	case "install":
+		cfg := parseRunFlags(os.Args[2:])
+		logInstall("install start version=%s os=%s/%s server=%s", agentVersion, runtime.GOOS, runtime.GOARCH, cfg.Server)
+		if err := installService(cfg.Server); err != nil {
+			logInstall("install FAILED: %v", err)
+			fatal(err)
+		}
+		logInstall("install OK")
+	case "upgrade":
+		cfg := parseRunFlags(os.Args[2:])
+		logInstall("upgrade start version=%s server=%s", agentVersion, cfg.Server)
+		if err := upgradeService(cfg.Server); err != nil {
+			logInstall("upgrade FAILED: %v", err)
+			fatal(err)
+		}
+		logInstall("upgrade OK")
+	case "uninstall":
+		logInstall("uninstall start")
+		if err := uninstallService(); err != nil {
+			logInstall("uninstall FAILED: %v", err)
+			fatal(err)
+		}
+		logInstall("uninstall OK")
+	case "service":
+		cfg := parseRunFlags(os.Args[2:])
+		if err := runWindowsService(cfg.Server); err != nil {
+			fatal(err)
+		}
+	case "run":
+		runAgent(parseRunFlags(os.Args[2:]))
+	case "version", "-v", "--version":
 		fmt.Println("bhudi-agent", agentVersion)
 	case "help", "-h", "--help":
-		fmt.Print(`Bhudi agent — install once, starts at every boot
+		fmt.Print(`Bhudi Agent — enterprise RMM endpoint agent (native, no Python)
 
-  enroll [-server URL]   Enroll this machine and persist its identity
-  install -server URL   Install Windows Service / systemd / LaunchAgent
-  uninstall             Remove service and startup entries
-  service [-server URL] Run as a native Windows Service
-  run [-server URL]     Run in foreground
+Commands:
+  enroll   [-server URL]   Enroll and persist identity
+  install  [-server URL]   Install as OS service (requires elevation on Windows)
+  upgrade  [-server URL]   Replace binary & restart service (keeps identity)
+  uninstall                Remove service, tasks, and startup entries
+  service  [-server URL]   Run as native Windows Service (SCM entrypoint)
+  run      [-server URL]   Foreground run (debug)
   version
 
 Windows (Administrator):
-  bhudi-agent.exe enroll -server https://bhudi-online-production.up.railway.app
-  bhudi-agent.exe install -server https://bhudi-online-production.up.railway.app
+  bhudi-agent.exe install -server https://api.example.com
+  bhudi-agent.exe upgrade -server https://api.example.com
+  bhudi-agent.exe uninstall
 
-Linux (preferred with sudo for boot-wide service):
-  sudo ./bhudi-agent-linux-amd64 enroll -server https://bhudi-online-production.up.railway.app
-  sudo ./bhudi-agent-linux-amd64 install -server https://bhudi-online-production.up.railway.app
+Linux (prefer sudo for boot-wide systemd unit):
+  sudo ./bhudi-agent-linux-amd64 install -server https://api.example.com
+
+macOS:
+  sudo ./bhudi-agent-darwin-arm64 install -server https://api.example.com
+
+Install log:
+  Windows: %ProgramData%\Bhudi\Agent\install.log
+  Linux:   /var/log/bhudi-agent-install.log (root) or ~/.local/share/bhudi-agent/install.log
+  macOS:   ~/Library/Logs/Bhudi/install.log
+
+MSI / enterprise deploy:
+  Use bhudi-agent-setup.msi (per-machine, auto-start service) from the Bhudi portal or
+  GitHub release tag agent-native-latest.
 `)
 	default:
 		runAgent(parseRunFlags(os.Args[1:]))
@@ -77,7 +100,8 @@ Linux (preferred with sudo for boot-wide service):
 }
 
 func parseRunFlags(args []string) runConfig {
-	fs := flag.NewFlagSet("run", flag.ExitOnError)
+	fs := flag.NewFlagSet("run", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
 	server := fs.String("server", envOr("BHUDI_SERVER_URL", defaultServerURL), "server")
 	interval := fs.Int("interval", 10, "heartbeat seconds")
 	_ = fs.Parse(args)
