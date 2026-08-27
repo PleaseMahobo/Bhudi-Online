@@ -55,6 +55,11 @@ jobs:
           cp agent/native/dist/bhudi-agent.exe agent/cmd/bhudi-agent-setup/bhudi-agent.exe
           test -s agent/cmd/bhudi-agent-setup/bhudi-agent.exe
 
+      - name: Prove embedded agent byte integrity
+        working-directory: agent/cmd/bhudi-agent-setup
+        run: |
+          go test -tags release ./... -run 'TestBundledAgentMatchesStagedBinary|TestBootstrapContract' -count=1
+
       - name: Build customer installer base with embedded native agent
         working-directory: agent/cmd/bhudi-agent-setup
         env:
