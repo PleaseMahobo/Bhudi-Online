@@ -55,6 +55,11 @@ jobs:
           cp agent/native/dist/bhudi-agent.exe agent/cmd/bhudi-agent-setup/bhudi-agent.exe
           test -s agent/cmd/bhudi-agent-setup/bhudi-agent.exe
 
+      - name: Prove embedded agent byte integrity
+        working-directory: agent/cmd/bhudi-agent-setup
+        run: |
+          go test -tags release ./... -run 'TestBundledAgentMatchesStagedBinary|TestBootstrapContract' -count=1
+
       - name: Build customer installer base with embedded native agent
         working-directory: agent/cmd/bhudi-agent-setup
         env:
@@ -94,7 +99,7 @@ jobs:
             | `bhudi-agent-darwin-arm64` | macOS Apple Silicon |
             | `bhudi-agent-setup.msi` | Windows MSI (from msi job) |
 
-            The portal creates the customer-specific `BhudiAgent-Setup.exe` by appending a short-lived, single-use tenant enrollment bootstrap to this base executable.
+            The portal creates the customer-specific `BhudiAgent-Setup.exe` by appending a tenant enrollment bootstrap to this base executable.
           files: |
             agent/native/dist/BhudiAgent-Setup.exe
             agent/native/dist/bhudi-agent.exe
