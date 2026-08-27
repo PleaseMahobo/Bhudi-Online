@@ -41,6 +41,7 @@ func installService(server string) error {
 		}
 	}
 	dest := filepath.Join(destDir, "bhudi-agent.exe")
+	logInstall("install: dest=%s", dest)
 	if err := copyFile(exe, dest); err != nil {
 		return fmt.Errorf("copy agent: %w", err)
 	}
@@ -49,7 +50,6 @@ func installService(server string) error {
 		fmt.Println("Warning: could not write config:", err)
 	}
 
-	// Primary: Windows Service (starts at boot, before user logon)
 	if err := installWindowsService(dest, server); err != nil {
 		fmt.Printf("Warning: Windows Service install failed: %v\n", err)
 		fmt.Println("Falling back to ONSTART scheduled task...")
@@ -60,7 +60,6 @@ func installService(server string) error {
 		fmt.Println("Windows Service installed:", windowsServiceName, "(Start=Automatic)")
 	}
 
-	// Watchdog every 5 minutes (covers service crash / delayed network)
 	cmdLine := fmt.Sprintf("\"%s\" run -server %s", dest, server)
 	_ = exec.Command("schtasks", "/Delete", "/TN", windowsWatchdogName, "/F").Run()
 	watch := exec.Command("schtasks", "/Create", "/TN", windowsWatchdogName,
@@ -71,7 +70,6 @@ func installService(server string) error {
 		fmt.Println("Watchdog task:", windowsWatchdogName, "(every 5 minutes)")
 	}
 
-	// Optional user logon Run key (backup if service not elevated)
 	if err := writeRunKey(dest, server); err != nil {
 		fmt.Println("Warning: Run key not set:", err)
 	} else {
@@ -84,7 +82,6 @@ func installService(server string) error {
 		fmt.Println("Registered in Apps & features as", displayName)
 	}
 
-	// Start now
 	if err := startWindowsService(); err != nil {
 		fmt.Println("Service start deferred; starting process directly:", err)
 		if err := startDetached(dest, server); err != nil {
@@ -106,13 +103,22 @@ func installService(server string) error {
 	return nil
 }
 
+func upgradeService(server string) error {
+	server = strings.TrimRight(server, "/")
+	if server == "" {
+		server = defaultServerURL
+	}
+	logInstall("upgrade: stopping service")
+	_ = exec.Command("sc", "stop", windowsServiceName).Run()
+	time.Sleep(800 * time.Millisecond)
+	return installService(server)
+}
+
 func installWindowsService(dest, server string) error {
-	// Remove previous service if present
 	_ = exec.Command("sc", "stop", windowsServiceName).Run()
 	_ = exec.Command("sc", "delete", windowsServiceName).Run()
 	time.Sleep(500 * time.Millisecond)
 
-	// sc.exe requires a space after '='
 	binPath := fmt.Sprintf("\"%s\" run -server %s", dest, server)
 	create := exec.Command("sc", "create", windowsServiceName,
 		"binPath=", binPath,
@@ -127,16 +133,11 @@ func installWindowsService(dest, server string) error {
 
 	_ = exec.Command("sc", "description", windowsServiceName,
 		"Bhudi RMM agent — heartbeats, remote access, command execution").Run()
-
-	// Restart on failure
 	_ = exec.Command("sc", "failure", windowsServiceName,
 		"reset=", "86400",
 		"actions=", "restart/5000/restart/10000/restart/30000").Run()
 	_ = exec.Command("sc", "failureflag", windowsServiceName, "1").Run()
-
-	// Delayed auto-start so network is more likely ready
 	_ = exec.Command("sc", "config", windowsServiceName, "start=", "delayed-auto").Run()
-
 	return nil
 }
 
@@ -144,7 +145,6 @@ func startWindowsService() error {
 	out, err := exec.Command("sc", "start", windowsServiceName).CombinedOutput()
 	if err != nil {
 		msg := strings.TrimSpace(string(out))
-		// 1056 = already running
 		if strings.Contains(msg, "1056") || strings.Contains(strings.ToLower(msg), "already") {
 			return nil
 		}
@@ -156,14 +156,8 @@ func startWindowsService() error {
 func installOnStartTask(dest, server string) error {
 	cmdLine := fmt.Sprintf("\"%s\" run -server %s", dest, server)
 	_ = exec.Command("schtasks", "/Delete", "/TN", windowsTaskName, "/F").Run()
-	// ONSTART = at system startup (boot), SYSTEM account, highest privileges
 	create := exec.Command("schtasks", "/Create", "/TN", windowsTaskName,
-		"/TR", cmdLine,
-		"/SC", "ONSTART",
-		"/RU", "SYSTEM",
-		"/RL", "HIGHEST",
-		"/F",
-	)
+		"/TR", cmdLine, "/SC", "ONSTART", "/RU", "SYSTEM", "/RL", "HIGHEST", "/F")
 	out, err := create.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("%v: %s", err, strings.TrimSpace(string(out)))
@@ -178,7 +172,7 @@ func startDetached(dest, server string) error {
 	cmd.Stderr = nil
 	cmd.Stdin = nil
 	cmd.SysProcAttr = &syscall.SysProcAttr{
-		CreationFlags: 0x00000008 | 0x00000200, // DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
+		CreationFlags: 0x00000008 | 0x00000200,
 		HideWindow:    true,
 	}
 	return cmd.Start()
@@ -216,6 +210,7 @@ func writeUninstallRegistry(installDir, uninstallExe string) error {
 }
 
 func uninstallService() error {
+	logInstall("uninstall: stopping service %s", windowsServiceName)
 	_ = exec.Command("sc", "stop", windowsServiceName).Run()
 	_ = exec.Command("sc", "delete", windowsServiceName).Run()
 	fmt.Println("Windows Service removed:", windowsServiceName)
