@@ -17,6 +17,7 @@ from app.schemas.alert_engine import (
     EscalationPolicyCreate,
     EscalationPolicyUpdate,
     EscalationPolicyResponse,
+    EscalationLevel,
     RemediationRunResponse,
 )
 from app.services.alert_rule_service import AlertRuleService
@@ -213,14 +214,23 @@ def evaluate_metric(payload: MetricEvaluateRequest, db: Session = Depends(get_db
     }
 
 
-@router.post("/seed-defaults")
-def seed_default_rules(db: Session = Depends(get_db)):
-    service = AlertRuleService(db)
-    existing = service.list_alert_rules()
-    if existing:
-        return {"created": 0, "message": f"Already have {len(existing)} rules"}
+class SeedDefaultsResponse(BaseModel):
+    created: int
+    skipped: int = 0
+    message: str
+    rules: list[AlertRuleResponse] = []
+    policies: list[EscalationPolicyResponse] = []
+    defaults: list[str] = []
 
-    defaults = [
+
+@router.post("/seed-defaults", response_model=SeedDefaultsResponse)
+def seed_default_rules(force: bool = False, db: Session = Depends(get_db)):
+    """Seed baseline agent rules; response includes full rules + policies for UI refresh."""
+    service = AlertRuleService(db)
+    existing = list(service.list_alert_rules())
+    existing_names = {r.name for r in existing}
+
+    default_specs = [
         AlertRuleCreate(
             name="Agent high CPU",
             description="CPU utilization from native agents",
@@ -263,11 +273,67 @@ def seed_default_rules(db: Session = Depends(get_db)):
             priority=5,
         ),
     ]
+    default_names = [d.name for d in default_specs]
+
+    def _ensure_default_policy():
+        policies = list(service.list_escalation_policies())
+        if policies:
+            return policies
+        try:
+            service.create_escalation_policy(
+                EscalationPolicyCreate(
+                    name="Default agent escalation",
+                    description="Warn once, then critical with email",
+                    levels=[
+                        EscalationLevel(repeat_count=1, severity="warning", notify=["email"]),
+                        EscalationLevel(repeat_count=3, severity="critical", notify=["email"]),
+                    ],
+                    enabled=True,
+                )
+            )
+        except Exception as exc:
+            print(f"[alert-engine] policy seed skip: {exc}")
+        return list(service.list_escalation_policies())
+
+    if existing and not force:
+        policies = _ensure_default_policy()
+        return SeedDefaultsResponse(
+            created=0,
+            skipped=len(existing),
+            message=f"Already have {len(existing)} rules — pass force=true to add any missing defaults",
+            rules=existing,
+            policies=policies,
+            defaults=default_names,
+        )
+
     created = 0
-    for item in defaults:
+    skipped = 0
+    created_names: list[str] = []
+    for item in default_specs:
+        if item.name in existing_names:
+            skipped += 1
+            continue
         try:
             service.create_alert_rule(item)
             created += 1
+            created_names.append(item.name)
+            existing_names.add(item.name)
         except Exception as exc:
-            print(f"[alert-engine] seed skip: {exc}")
-    return {"created": created, "message": f"Seeded {created} default rules"}
+            print(f"[alert-engine] seed skip {item.name}: {exc}")
+            skipped += 1
+
+    policies = _ensure_default_policy()
+    rules = list(service.list_alert_rules())
+    msg = f"Seeded {created} default rules"
+    if created_names:
+        msg += f" ({', '.join(created_names)})"
+    if skipped:
+        msg += f"; skipped {skipped}"
+    return SeedDefaultsResponse(
+        created=created,
+        skipped=skipped,
+        message=msg,
+        rules=rules,
+        policies=policies,
+        defaults=default_names,
+    )
