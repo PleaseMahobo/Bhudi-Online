@@ -1,53 +1,35 @@
-# Bhudi Native Agent
+# Bhudi Native Agent (enterprise)
 
-**Standalone static binary. No Python on the endpoint.**
+Static Go agent — **no Python** on the endpoint.
 
-Works on ordinary Windows, Linux, and macOS machines used by end users — the same model as commercial RMM agents.
+## Commands
 
-## Downloads (CI release `agent-native-latest`)
+| Command | Purpose |
+|---------|--------|
+| `enroll -server URL` | Persist agent identity |
+| `install -server URL` | Install OS service (elevated on Windows) |
+| `upgrade -server URL` | Replace binary, restart service, **keep identity** |
+| `uninstall` | Remove service / tasks / startup |
+| `run -server URL` | Foreground (debug) |
+| `version` | Print version |
 
-| File | Platform |
-|------|----------|
-| `bhudi-agent.exe` | Windows x64 |
-| `bhudi-agent-setup.msi` | Windows MSI (Intune / GPO) |
-| `bhudi-agent-linux-amd64` | Linux x64 |
-| `bhudi-agent-linux-arm64` | Linux ARM64 |
-| `bhudi-agent-darwin-amd64` | macOS Intel |
-| `bhudi-agent-darwin-arm64` | macOS Apple Silicon |
+## Enterprise Windows
 
-Release: https://github.com/PleaseMahobo/Bhudi-Online/releases/tag/agent-native-latest
+1. **MSI (preferred for fleets)**  
+   `msiexec /i bhudi-agent-setup.msi /qn SERVERURL=https://api.example.com`
+2. **Customer EXE (portal)** — single-tenant enrollment token embedded.
+3. **Manual** — `bhudi-agent.exe install -server ...` as Administrator.
 
-## Install
+Service: `BhudiAgent` (LocalSystem, delayed auto-start, restart on failure).
 
-### Windows
-```bat
-bhudi-agent.exe install -server https://your-backend.example.com
-```
-Or deploy `bhudi-agent-setup.msi` (runs install automatically).
+## Linux
 
-### Linux
-```bash
-chmod +x bhudi-agent-linux-amd64
-sudo ./bhudi-agent-linux-amd64 install -server https://your-backend.example.com
-```
-
-### macOS
-```bash
-chmod +x bhudi-agent-darwin-arm64
-./bhudi-agent-darwin-arm64 install -server https://your-backend.example.com
-```
-
-## What it does
-
-1. Enrolls with `POST /api/v1/runtime/enroll`
-2. Heartbeats on an interval
-3. Polls and runs shell commands
-4. Persists identity under OS-appropriate data dirs
-5. Installs as Scheduled Task (Windows), systemd user unit (Linux), or LaunchAgent (macOS)
+- **Root:** system unit `/etc/systemd/system/bhudi-agent.service`
+- **User:** `~/.config/systemd/user` + optional `loginctl enable-linger`
 
 ## Build
 
 ```bash
 cd agent/native
-GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o bhudi-agent.exe .
+CGO_ENABLED=0 go build -ldflags="-s -w -X main.agentVersion=2.1.0" -o bhudi-agent .
 ```

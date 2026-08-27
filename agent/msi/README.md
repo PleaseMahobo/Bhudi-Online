@@ -1,62 +1,31 @@
-# Bhudi Agent MSI
+# Bhudi Agent MSI (enterprise)
 
-Windows Installer package built with [WiX Toolset](https://wixtoolset.org/) v4/v5.
+Per-machine Windows Installer for Intune, GPO, PDQ, and SCCM.
 
-## What the MSI does
+## Properties
 
-1. Installs `bhudi-agent-setup.exe` into `Program Files\Bhudi Agent`
-2. Registers Add/Remove Programs entry
-3. Runs the setup EXE once after install (downloads agent code, venv, scheduled task)
-4. Optional property `SERVERURL` sets the Bhudi backend URL
-
-## Install
+| Property | Default | Purpose |
+|----------|---------|--------|
+| `SERVERURL` | Railway production API | Backend base URL (no trailing slash) |
 
 ```bat
-msiexec /i bhudi-agent-setup.msi /qb
+msiexec /i bhudi-agent-setup.msi /qn SERVERURL=https://api.example.com
 ```
 
-With custom server:
+## Build (CI)
+
+The `release-agent` workflow builds `bhudi-agent.exe` then compiles this WiX source into `bhudi-agent-setup.msi`.
+
+Locally (Windows + [WiX 3.14](https://wixtoolset.org/)):
 
 ```bat
-msiexec /i bhudi-agent-setup.msi SERVERURL=https://your-backend.example.com /qb
+cd agent\msi
+candle -dAgentDir=..\native\dist Product.wxs
+light -ext WixUIExtension -out bhudi-agent-setup.msi Product.wixobj
 ```
 
-Silent:
+## Notes
 
-```bat
-msiexec /i bhudi-agent-setup.msi /qn
-```
-
-Uninstall:
-
-```bat
-msiexec /x bhudi-agent-setup.msi /qb
-```
-
-## Build locally (Windows)
-
-1. Install [WiX v5](https://wixtoolset.org/) (`dotnet tool install -g wix` and `wix extension add WixToolset.UI.wixext`)
-2. Build the setup EXE first:
-
-```bat
-cd ..\cmd\bhudi-agent-setup
-set GOOS=windows
-set GOARCH=amd64
-go build -ldflags="-s -w" -o ..\..\msi\bhudi-agent-setup.exe .
-```
-
-3. Build the MSI:
-
-```bat
-cd ..\..\msi
-wix extension add WixToolset.UI.wixext
-wix build Product.wxs -ext WixToolset.UI.wixext -bindpath:setup=. -o bhudi-agent-setup.msi
-```
-
-## CI
-
-`.github/workflows/build-agent-setup.yml` builds both the EXE and MSI and attaches them to the `agent-setup-latest` GitHub release.
-
-## Intune / GPO
-
-Deploy `bhudi-agent-setup.msi` as a Line-of-Business app. Ensure target devices have **Python 3.10+** on PATH (or pre-install via another package). For silent install use `/qn` and set `SERVERURL` if needed.
+- **No enrollment token** in the MSI — suitable for shared gold images; use the portal **customer EXE** for tenant-bound first install.
+- Service runs as **LocalSystem**, start type **Automatic**.
+- Upgrade: major upgrade removes previous version then installs; agent identity under `%ProgramData%\Bhudi\Agent` is preserved when not deleted.
