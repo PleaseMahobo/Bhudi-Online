@@ -28,16 +28,18 @@ def _normalize_role_name(name: str | None) -> str:
 class AuthorizationService:
     """Centralized RBAC authorization engine."""
 
-    ADMIN_ROLES = frozenset(
-        {
-            "admin",
-            "super_admin",
-            "system_admin",
-            "enterprise_admin",
-            "msp_admin",
-            "administrator",
-        }
-    )
+    # Highest → lowest (only these two are active platform roles for now)
+    ROLE_RANK = {
+        "enterprise_admin": 100,
+        "system_admin": 80,
+        # legacy aliases still recognized until migrated
+        "super_admin": 90,
+        "admin": 70,
+        "msp_admin": 60,
+        "administrator": 50,
+    }
+
+    ADMIN_ROLES = frozenset(ROLE_RANK.keys())
 
     def __init__(self, db: Session):
         self.db = db
@@ -47,7 +49,6 @@ class AuthorizationService:
         self.user_role_repository = UserRoleRepository(db)
 
     def get_user_roles(self, user_id: UUID):
-        """Return Role entities, not UserRole assignment rows."""
         return self.user_role_repository.get_roles(user_id)
 
     def get_role_permissions(self, role_id: UUID):
@@ -84,11 +85,15 @@ class AuthorizationService:
             )
 
     def is_admin(self, user_id: UUID) -> bool:
-        # System Admin / Enterprise Admin are production platform operator roles.
         return any(
-            _normalize_role_name(role.name) in self.ADMIN_ROLES
-            for role in self.get_user_roles(user_id)
+            _normalize_role_name(role.name) in self.ADMIN_ROLES for role in self.get_user_roles(user_id)
         )
+
+    def highest_role_rank(self, user_id: UUID) -> int:
+        rank = 0
+        for role in self.get_user_roles(user_id):
+            rank = max(rank, self.ROLE_RANK.get(_normalize_role_name(role.name), 0))
+        return rank
 
     def require_admin(self, user_id: UUID) -> None:
         if not self.is_admin(user_id):
