@@ -4,9 +4,12 @@ from sqlalchemy.orm import Session
 
 from app.models.role_permission import RolePermission
 
-# enterprise_admin = highest; system_admin = operator
-ROLE_PERMISSIONS = {
+# Diminishing matrix (highest → lowest).
+# enterprise_admin inherits everything; system_admin is a strict subset.
+ROLE_PERMISSIONS: dict[str, list[str]] = {
+    # Rank 100 — platform owner
     "enterprise_admin": ["*"],
+    # Rank 80 — operator (no role / permission / billing ownership)
     "system_admin": [
         "device.read",
         "device.create",
@@ -15,14 +18,13 @@ ROLE_PERMISSIONS = {
         "user.read",
         "user.create",
         "user.update",
-        "user.delete",
-        "role.manage",
-        "permission.manage",
+        # no user.delete
         "audit.read",
         "tenant.read",
-        "tenant.manage",
+        # no tenant.manage
         "agent.command",
         "agent.manage",
+        # no role.manage, permission.manage, billing.manage, platform.heal
     ],
 }
 
