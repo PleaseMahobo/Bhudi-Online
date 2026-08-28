@@ -2,8 +2,7 @@
 <!--
   Bhudi Agent — enterprise per-machine MSI (WiX Toolset 3.14+)
   Build:
-    candle -dAgentDir=..\native\dist Product.wxs
-    light -ext WixUIExtension Product.wixobj -out bhudi-agent-setup.msi
+    wix build Product.wxs -ext WixToolset.UI.wixext -bindpath agent=. -o bhudi-agent-setup.msi
 -->
 <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
   <Product
@@ -52,7 +51,7 @@
         <File
             Id="BhudiAgentExe"
             Name="bhudi-agent.exe"
-            Source="$(var.AgentDir)\bhudi-agent.exe"
+            Source="!(bindpath.agent)\bhudi-agent.exe"
             KeyPath="yes"
             Checksum="yes" />
 
