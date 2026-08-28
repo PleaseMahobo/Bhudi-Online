@@ -31,6 +31,7 @@ ADMIN_DOWNLOAD_ROLES = frozenset(
         "admin",
         "super_admin",
         "system_admin",
+        "enterprise_admin",
         "msp_admin",
         "operator",
         "administrator",
