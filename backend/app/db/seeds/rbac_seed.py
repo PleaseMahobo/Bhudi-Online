@@ -6,6 +6,7 @@ from app.models.role import Role
 from app.models.permission import Permission
 from app.db.seeds.role_permission_seed import seed_role_permissions
 
+# Canonical permission catalogue
 PERMISSIONS = [
     "device.read",
     "device.create",
@@ -22,25 +23,42 @@ PERMISSIONS = [
     "tenant.manage",
     "agent.command",
     "agent.manage",
+    "billing.manage",
+    "platform.heal",
 ]
 
-# Hierarchy (highest first):
-#   1. enterprise_admin — platform owner / full control
-#   2. system_admin — platform operator
-# Other legacy roles are no longer seeded.
+# ============================================================
+# Active roles only — diminishing hierarchy (highest → lowest)
+# ============================================================
+#   1. enterprise_admin  rank 100  full platform owner
+#   2. system_admin      rank  80  operator (no role/billing ownership)
+#
+# Legacy names (admin, super_admin, technician, viewer, agent) are
+# not seeded. Existing DB rows are left alone.
 ROLES = [
     "enterprise_admin",
     "system_admin",
 ]
 
+ROLE_RANK = {
+    "enterprise_admin": 100,
+    "system_admin": 80,
+}
+
 ROLE_DESCRIPTIONS = {
-    "enterprise_admin": "Highest platform role — full control of Bhudi Online",
-    "system_admin": "Platform operator — administer tenants, agents, and support",
+    "enterprise_admin": (
+        "Rank 100 — highest. Full control of Bhudi Online: users, roles, "
+        "billing, tenants, agents, and platform heal."
+    ),
+    "system_admin": (
+        "Rank 80 — operator. Day-to-day admin of devices, agents, users, "
+        "and tenants. Cannot manage roles, permissions, or billing."
+    ),
 }
 
 
 def seed_permissions(db: Session) -> dict[str, Permission]:
-    permission_map = {}
+    permission_map: dict[str, Permission] = {}
     for permission_name in PERMISSIONS:
         permission = db.query(Permission).filter(Permission.name == permission_name).first()
         if not permission:
@@ -60,7 +78,7 @@ def seed_permissions(db: Session) -> dict[str, Permission]:
 
 
 def seed_roles(db: Session) -> dict[str, Role]:
-    role_map = {}
+    role_map: dict[str, Role] = {}
     for role_name in ROLES:
         role = db.query(Role).filter(Role.name == role_name).first()
         if not role:
