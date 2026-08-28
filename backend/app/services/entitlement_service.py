@@ -19,6 +19,7 @@ PLAN_DEVICE_LIMITS: dict[str, int] = {
     "pro": 250,
     "professional": 250,
     "enterprise": 1_000_000,
+    "admin": 10_000,
 }
 
 ACTIVE_STATUSES = frozenset({"active", "trialing"})
@@ -192,6 +193,19 @@ class EntitlementService:
                     "billing_path": "/billing",
                 },
             )
+        # Persist admin entitlement so enroll (no user context) still marks devices supportable.
+        if _user_is_admin(user) and tenant_id is not None:
+            sub = self._subscription_for_tenant(tenant_id)
+            status_s = (getattr(sub, "status", None) or "").lower() if sub else ""
+            if sub is None or status_s not in ACTIVE_STATUSES:
+                email = getattr(user, "email", None)
+                self.activate_subscription(
+                    tenant_id=tenant_id,
+                    plan_code="admin",
+                    email=email,
+                    org_name=email or "Bhudi Admin",
+                )
+                ent = self.get_entitlement(tenant_id, user=user)
         return ent
 
     def assign_supportable_on_enroll(self, tenant_id: UUID, agent: Agent) -> bool:
