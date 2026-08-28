@@ -28,11 +28,12 @@ def _normalize_role_name(name: str | None) -> str:
 class AuthorizationService:
     """Centralized RBAC authorization engine."""
 
-    # Highest → lowest (only these two are active platform roles for now)
+    # Diminishing hierarchy — matches rbac_seed.ROLE_RANK
+    # Only enterprise_admin and system_admin are actively seeded.
     ROLE_RANK = {
         "enterprise_admin": 100,
         "system_admin": 80,
-        # legacy aliases still recognized until migrated
+        # legacy aliases recognized until fully migrated off
         "super_admin": 90,
         "admin": 70,
         "msp_admin": 60,
@@ -94,6 +95,13 @@ class AuthorizationService:
         for role in self.get_user_roles(user_id):
             rank = max(rank, self.ROLE_RANK.get(_normalize_role_name(role.name), 0))
         return rank
+
+    def require_min_rank(self, user_id: UUID, min_rank: int) -> None:
+        if self.highest_role_rank(user_id) < min_rank:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Requires role rank >= {min_rank}",
+            )
 
     def require_admin(self, user_id: UUID) -> None:
         if not self.is_admin(user_id):
