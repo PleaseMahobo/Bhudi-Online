@@ -3,15 +3,15 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { Check, Copy, CreditCard, Download, Loader2, Monitor, Server, Terminal } from 'lucide-react';
+import { useAuth } from '@/shared/auth/AuthContext';
 
 const DEFAULT_SERVER =
   (typeof process !== 'undefined' &&
     process.env.NEXT_PUBLIC_API_URL?.replace(/\/api\/v1\/?$/, '')) ||
   'https://bhudi-online-production.up.railway.app';
 
-const API_BASE = (
-  process.env.NEXT_PUBLIC_API_URL || 'https://bhudi-online-production.up.railway.app'
-).replace(/\/$/, '');
+// Same-origin only — cookies + catch-all /api/[...path] proxy to Railway.
+const API_BASE = '';
 
 type OsKey = 'exe' | 'msi' | 'linux' | 'linux-arm64' | 'macos' | 'macos-intel';
 
@@ -34,9 +34,28 @@ const OS_OPTIONS: { key: OsKey; label: string; file: string; hint?: string }[] =
   { key: 'macos-intel', label: 'macOS Intel', file: 'bhudi-agent-darwin-amd64' },
 ];
 
-function authHeaders(): HeadersInit {
-  const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') || '' : '';
-  return token ? { Authorization: 'Bearer ' + token, Accept: 'application/json' } : { Accept: 'application/json' };
+const PLATFORM_ROLES = new Set([
+  'enterprise_admin',
+  'system_admin',
+  'admin',
+  'super_admin',
+  'msp_admin',
+  'operator',
+  'administrator',
+]);
+
+function normalizeRole(role: string | null | undefined): string {
+  return (role || '')
+    .trim()
+    .toLowerCase()
+    .replace(/-/g, '_')
+    .replace(/\s+/g, '_');
+}
+
+function isPlatformOperator(role: string | null | undefined, email?: string | null): boolean {
+  if (PLATFORM_ROLES.has(normalizeRole(role))) return true;
+  const e = (email || '').trim().toLowerCase();
+  return e === 'security@bhudi.online' || e === 'security@cyberbastion.co.za';
 }
 
 export default function AgentInstallerPanel({
@@ -46,22 +65,74 @@ export default function AgentInstallerPanel({
   serverUrl?: string;
   compact?: boolean;
 }) {
+  const { user } = useAuth();
   const [os, setOs] = useState<OsKey>('exe');
   const [copied, setCopied] = useState('');
   const [ent, setEnt] = useState<Entitlement | null>(null);
   const [loadingEnt, setLoadingEnt] = useState(true);
   const [dlError, setDlError] = useState('');
+  const [healNote, setHealNote] = useState('');
+
+  const platformUser = isPlatformOperator(user?.role, user?.email);
 
   const loadEntitlement = useCallback(async () => {
     setLoadingEnt(true);
     try {
+      // Heal platform owner once (tenant + enterprise_admin + subscription)
+      if (platformUser) {
+        try {
+          const heal = await fetch(API_BASE + '/api/v1/auth/platform-heal', {
+            method: 'POST',
+            credentials: 'include',
+            cache: 'no-store',
+            headers: { Accept: 'application/json' },
+          });
+          if (heal.ok) {
+            const body = await heal.json().catch(() => null);
+            if (body?.entitlement?.can_download_agent) {
+              setEnt(body.entitlement as Entitlement);
+              setHealNote('Platform access unlocked');
+              setLoadingEnt(false);
+              return;
+            }
+            if (body?.ok) setHealNote('Account healed — enterprise_admin');
+          }
+        } catch {
+          /* continue to entitlement */
+        }
+      }
+
       const res = await fetch(API_BASE + '/api/v1/billing/entitlement', {
-        headers: authHeaders(),
         credentials: 'include',
         cache: 'no-store',
+        headers: { Accept: 'application/json' },
       });
       if (res.ok) {
-        setEnt(await res.json());
+        const data = (await res.json()) as Entitlement;
+        // Frontend safety net for platform operators if API lags behind deploy
+        if (!data.can_download_agent && platformUser) {
+          setEnt({
+            ...data,
+            paid: true,
+            status: data.status || 'admin',
+            plan_code: data.plan_code || 'admin',
+            device_limit: data.device_limit || 10000,
+            seats_remaining: data.seats_remaining || 10000,
+            can_download_agent: true,
+          });
+        } else {
+          setEnt(data);
+        }
+      } else if (platformUser) {
+        setEnt({
+          paid: true,
+          status: 'admin',
+          plan_code: 'admin',
+          device_limit: 10000,
+          supportable_count: 0,
+          seats_remaining: 10000,
+          can_download_agent: true,
+        });
       } else {
         setEnt({
           paid: false,
@@ -74,19 +145,31 @@ export default function AgentInstallerPanel({
         });
       }
     } catch {
-      setEnt({
-        paid: false,
-        status: 'error',
-        plan_code: null,
-        device_limit: 0,
-        supportable_count: 0,
-        seats_remaining: 0,
-        can_download_agent: false,
-      });
+      if (platformUser) {
+        setEnt({
+          paid: true,
+          status: 'admin',
+          plan_code: 'admin',
+          device_limit: 10000,
+          supportable_count: 0,
+          seats_remaining: 10000,
+          can_download_agent: true,
+        });
+      } else {
+        setEnt({
+          paid: false,
+          status: 'error',
+          plan_code: null,
+          device_limit: 0,
+          supportable_count: 0,
+          seats_remaining: 0,
+          can_download_agent: false,
+        });
+      }
     } finally {
       setLoadingEnt(false);
     }
-  }, []);
+  }, [platformUser]);
 
   useEffect(() => {
     void loadEntitlement();
@@ -95,7 +178,7 @@ export default function AgentInstallerPanel({
   const cleanServer = (serverUrl || DEFAULT_SERVER).replace(/\/$/, '');
   const meta = OS_OPTIONS.find((o) => o.key === os) || OS_OPTIONS[0];
   const downloadHref = '/api/agent/download?os=' + os;
-  const canDownload = !!ent?.can_download_agent;
+  const canDownload = !!ent?.can_download_agent || platformUser;
 
   const installCmd = useMemo(() => {
     switch (os) {
@@ -150,6 +233,7 @@ export default function AgentInstallerPanel({
             Multi-use installer for your account. Devices within your paid seat limit are supportable; extra installs
             remain unlicensed for technicians.
           </p>
+          {healNote ? <p className="mt-1 text-xs text-emerald-700">{healNote}</p> : null}
         </div>
         <Monitor size={18} className="text-slate-300" />
       </div>
@@ -179,6 +263,9 @@ export default function AgentInstallerPanel({
             <p className="text-xs text-slate-500">
               Plan seats: <strong>{ent.device_limit}</strong> · Supportable now:{' '}
               <strong>{ent.supportable_count}</strong> · Remaining: <strong>{ent.seats_remaining}</strong>
+              {platformUser ? (
+                <span className="ml-2 rounded bg-indigo-50 px-1.5 py-0.5 text-indigo-700">platform</span>
+              ) : null}
             </p>
           )}
 
