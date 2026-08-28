@@ -13,5 +13,6 @@ router = APIRouter(prefix="/billing", tags=["Billing Entitlement"])
 
 @router.get("/entitlement")
 def get_entitlement(db: Session = Depends(get_db), user=Depends(current_tenant_user)):
-    ent = EntitlementService(db).get_entitlement(getattr(user, "tenant_id", None))
+    # Pass user so platform admin roles unlock agent download without Stripe.
+    ent = EntitlementService(db).get_entitlement(getattr(user, "tenant_id", None), user=user)
     return ent.to_dict()
