@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from app.models.agent import Agent
 from app.models.agent_enrollment import AgentEnrollment
 from app.models.tenant import Tenant
+from app.services.entitlement_service import EntitlementService
 
 
 class AgentEnrollmentService:
@@ -52,12 +53,6 @@ class AgentEnrollmentService:
         platform: str | None,
         machine_guid: str | None,
     ) -> tuple[Agent, str, uuid.UUID]:
-        """Atomically validate credentials and persist a tenant-bound agent.
-
-        The caller owns the request transaction. This method performs no commit
-        until credential validation, tenant lookup, machine identity lookup, and
-        Agent insert/update have all succeeded.
-        """
         enrollment = self.consume(enrollment_secret)
         tenant = self.db.get(Tenant, enrollment.tenant_id)
         if tenant is None:
@@ -86,9 +81,9 @@ class AgentEnrollmentService:
                 enrollment_token=agent_token,
                 registration_state="approved",
                 approved=True,
-                trusted=True,
+                trusted=False,
                 status="online",
-                enabled=True,
+                enabled=False,
                 registered_at=now,
                 last_seen=now,
                 last_heartbeat=now,
@@ -102,15 +97,12 @@ class AgentEnrollmentService:
             existing.status = "online"
             existing.last_seen = now
             existing.last_heartbeat = now
-            existing.enabled = True
-            existing.registration_state = "approved"
-            existing.approved = True
-            existing.trusted = True
             existing.revoked = False
             existing.enrollment_token = agent_token
 
-        # Keep first-use audit linkage, but do not commit here. The Agent row
-        # and enrollment record must commit as one transaction.
+        # Seat check: supportable only within paid device_limit
+        EntitlementService(self.db).assign_supportable_on_enroll(tenant.id, existing)
+
         if enrollment.agent_id is None:
             enrollment.agent_id = existing.id
         self.db.add(enrollment)
@@ -134,7 +126,6 @@ class AgentEnrollmentService:
         return record
 
     def mark_used(self, record: AgentEnrollment, agent_id: uuid.UUID) -> None:
-        """Stage first-use audit linkage without committing the surrounding transaction."""
         if record.agent_id is None:
             record.agent_id = agent_id
         self.db.add(record)

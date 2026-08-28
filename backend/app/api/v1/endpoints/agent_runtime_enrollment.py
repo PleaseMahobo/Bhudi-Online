@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.core.dependencies import current_tenant_user
 from app.database.session import get_db
 from app.services.agent_enrollment_service import AgentEnrollmentService
+from app.services.entitlement_service import EntitlementService
 from app.state import device_state
 from app.api.v1.endpoints.agent_runtime import (
     EnrollRequest,
@@ -25,6 +26,8 @@ def create_enrollment_token(
     db: Session = Depends(get_db),
     user=Depends(current_tenant_user),
 ):
+    # Multi-use installer is only issued after payment
+    EntitlementService(db).require_download_allowed(user.tenant_id)
     raw, record = AgentEnrollmentService(db).create(user.tenant_id)
     return {
         "token": raw,
@@ -59,6 +62,7 @@ def secure_enroll(req: EnrollRequest, db: Session = Depends(get_db)):
         print(f"[runtime] enrollment database failure: {exc}")
         raise HTTPException(status_code=503, detail="Agent enrollment database transaction failed") from exc
 
+    supportable = bool(getattr(row, "trusted", False) and getattr(row, "enabled", False))
     agent_id = str(row.id)
     now = row.last_seen
     registered_at = row.registered_at
@@ -70,7 +74,8 @@ def secure_enroll(req: EnrollRequest, db: Session = Depends(get_db)):
         "agent_version": row.agent_version,
         "platform": row.platform,
         "platform_metadata": _platform_metadata(row.platform),
-        "status": "online",
+        "status": "online" if supportable else "unlicensed",
+        "supportable": supportable,
         "registered_at": registered_at.isoformat() if registered_at else now.isoformat(),
         "last_seen": now.isoformat(),
         "cpu_percent": None,
@@ -82,7 +87,8 @@ def secure_enroll(req: EnrollRequest, db: Session = Depends(get_db)):
         "commands_failed": 0,
     }
     _commands.setdefault(agent_id, [])
-    device_state.register_device(agent_id)
-    device_state.devices[agent_id]["hostname"] = row.hostname
+    if supportable:
+        device_state.register_device(agent_id)
+        device_state.devices[agent_id]["hostname"] = row.hostname
     _persist_agents()
     return EnrollResponse(agent_id=agent_id, agent_token=agent_token)

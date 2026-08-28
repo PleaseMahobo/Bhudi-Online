@@ -1,0 +1,166 @@
+"""Subscription entitlement: paid access, agent download, supportable device seats."""
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Any
+from uuid import UUID
+
+from fastapi import HTTPException, status
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session
+
+from app.models.agent import Agent
+from app.models.msp import TenantSubscription
+
+# Fallback seat counts when subscription has no device_limit set
+PLAN_DEVICE_LIMITS: dict[str, int] = {
+    "starter": 1,
+    "personal": 1,
+    "pro": 250,
+    "professional": 250,
+    "enterprise": 1_000_000,
+}
+
+ACTIVE_STATUSES = frozenset({"active", "trialing"})
+
+
+@dataclass
+class Entitlement:
+    paid: bool
+    status: str
+    plan_code: str | None
+    device_limit: int
+    supportable_count: int
+    seats_remaining: int
+    can_download_agent: bool
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "paid": self.paid,
+            "status": self.status,
+            "plan_code": self.plan_code,
+            "device_limit": self.device_limit,
+            "supportable_count": self.supportable_count,
+            "seats_remaining": self.seats_remaining,
+            "can_download_agent": self.can_download_agent,
+        }
+
+
+class EntitlementService:
+    def __init__(self, db: Session) -> None:
+        self.db = db
+
+    def _subscription_for_tenant(self, tenant_id: UUID) -> TenantSubscription | None:
+        return (
+            self.db.query(TenantSubscription)
+            .filter(TenantSubscription.tenant_id == tenant_id)
+            .order_by(TenantSubscription.updated_at.desc())
+            .first()
+        )
+
+    def _count_supportable(self, tenant_id: UUID) -> int:
+        # Supportable = enrolled, not revoked, trusted (seat-backed)
+        q = select(func.count()).select_from(Agent).where(
+            Agent.tenant_id == tenant_id,
+            Agent.revoked.is_(False),
+            Agent.trusted.is_(True),
+        )
+        return int(self.db.scalar(q) or 0)
+
+    def get_entitlement(self, tenant_id: UUID | None) -> Entitlement:
+        if tenant_id is None:
+            return Entitlement(
+                paid=False,
+                status="none",
+                plan_code=None,
+                device_limit=0,
+                supportable_count=0,
+                seats_remaining=0,
+                can_download_agent=False,
+            )
+
+        sub = self._subscription_for_tenant(tenant_id)
+        if sub is None:
+            supportable = self._count_supportable(tenant_id)
+            return Entitlement(
+                paid=False,
+                status="none",
+                plan_code=None,
+                device_limit=0,
+                supportable_count=supportable,
+                seats_remaining=0,
+                can_download_agent=False,
+            )
+
+        status_s = (getattr(sub, "status", None) or "").lower()
+        paid = status_s in ACTIVE_STATUSES
+        plan_code = None
+        limit = getattr(sub, "device_limit", None)
+        if limit is None:
+            plan = getattr(sub, "plan", None)
+            if plan is not None:
+                plan_code = getattr(plan, "code", None)
+                included = getattr(plan, "included_devices", None)
+                if included is not None:
+                    limit = int(included)
+            if limit is None and plan_code:
+                limit = PLAN_DEVICE_LIMITS.get(str(plan_code).lower(), 0)
+            if limit is None:
+                # Infer from meta
+                meta = getattr(sub, "meta", None) or {}
+                plan_code = plan_code or meta.get("plan_code")
+                limit = PLAN_DEVICE_LIMITS.get(str(plan_code or "").lower(), 0 if not paid else 1)
+
+        limit = int(limit or 0)
+        if not paid:
+            limit = 0
+
+        supportable = self._count_supportable(tenant_id)
+        remaining = max(0, limit - supportable)
+
+        return Entitlement(
+            paid=paid,
+            status=status_s or "none",
+            plan_code=str(plan_code) if plan_code else None,
+            device_limit=limit,
+            supportable_count=supportable,
+            seats_remaining=remaining,
+            can_download_agent=paid,
+        )
+
+    def require_download_allowed(self, tenant_id: UUID | None) -> Entitlement:
+        ent = self.get_entitlement(tenant_id)
+        if not ent.can_download_agent:
+            raise HTTPException(
+                status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                detail={
+                    "code": "subscription_required",
+                    "message": (
+                        "An active subscription is required to download the agent. "
+                        "Subscribe under Billing, then return here to download."
+                    ),
+                    "billing_path": "/billing",
+                },
+            )
+        return ent
+
+    def assign_supportable_on_enroll(self, tenant_id: UUID, agent: Agent) -> bool:
+        """Mark agent supportable if a seat remains; else unlicensed (install OK, not tech-visible)."""
+        ent = self.get_entitlement(tenant_id)
+        # Re-enroll of already-trusted agent keeps seat
+        if getattr(agent, "trusted", False) and not getattr(agent, "revoked", False):
+            return True
+
+        if ent.paid and ent.seats_remaining > 0:
+            agent.trusted = True
+            agent.approved = True
+            agent.enabled = True
+            agent.registration_state = "approved"
+            return True
+
+        # Over seat or unpaid: allow install, not supportable for technicians
+        agent.trusted = False
+        agent.approved = True
+        agent.enabled = False
+        agent.registration_state = "unlicensed"
+        return False
