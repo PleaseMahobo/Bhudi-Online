@@ -15,6 +15,8 @@ import {
 } from 'lucide-react';
 import ModuleShell from '@/shared/components/ModuleShell';
 import DeviceMetricsChart from '@/shared/components/DeviceMetricsChart';
+import MfaRequiredPanel from '@/shared/components/MfaRequiredPanel';
+import { useMfaGate } from '@/shared/hooks/useMfaGate';
 import {
   getDevice,
   requestInventory,
@@ -48,6 +50,7 @@ export default function DeviceDetailPage() {
   const [processOut, setProcessOut] = useState('');
   const [softwareOut, setSoftwareOut] = useState('');
   const [invError, setInvError] = useState('');
+  const { mfaEnabled, blocked: mfaBlocked } = useMfaGate();
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -131,19 +134,31 @@ export default function DeviceDetailPage() {
             </span>
             <span className="text-sm text-slate-600">{device.platform || '—'}</span>
             <span className="font-mono text-xs text-slate-500">{device.ip_address || 'no IP'}</span>
-            <div className="ml-auto flex gap-2">
-              <Link
-                href={remoteDeepLink(agentId, 'desktop')}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-2 text-xs font-semibold text-white hover:bg-indigo-500"
-              >
-                <ScreenShare size={14} /> Remote desktop
-              </Link>
-              <Link
-                href={remoteDeepLink(agentId, 'terminal')}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50"
-              >
-                <Terminal size={14} /> Terminal
-              </Link>
+            <div className="ml-auto flex flex-wrap items-center gap-2">
+              {mfaBlocked ? (
+                <Link
+                  href="/mfa/setup"
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-900 hover:bg-amber-100"
+                  title="Enable MFA to unlock remote control"
+                >
+                  <ScreenShare size={14} /> Enable MFA for Remote
+                </Link>
+              ) : (
+                <>
+                  <Link
+                    href={remoteDeepLink(agentId, 'desktop')}
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-2 text-xs font-semibold text-white hover:bg-indigo-500"
+                  >
+                    <ScreenShare size={14} /> Remote desktop
+                  </Link>
+                  <Link
+                    href={remoteDeepLink(agentId, 'terminal')}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                  >
+                    <Terminal size={14} /> Terminal
+                  </Link>
+                </>
+              )}
               <button
                 type="button"
                 onClick={() => {
@@ -243,25 +258,31 @@ export default function DeviceDetailPage() {
           )}
 
           {tab === 'remote' && (
-            <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-              <p className="text-sm text-slate-600">
-                Open a remote session pre-selected for this agent.
-              </p>
-              <div className="mt-4 flex flex-wrap gap-3">
-                <Link
-                  href={remoteDeepLink(agentId, 'desktop')}
-                  className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white hover:bg-indigo-500"
-                >
-                  <ScreenShare size={16} /> Start remote desktop
-                </Link>
-                <Link
-                  href={remoteDeepLink(agentId, 'terminal')}
-                  className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-5 py-3 text-sm font-medium text-slate-800 hover:bg-slate-50"
-                >
-                  <Terminal size={16} /> Start remote terminal
-                </Link>
-              </div>
-              <p className="mt-3 font-mono text-xs text-slate-400">agent={agentId}</p>
+            <div className="space-y-4">
+              {mfaBlocked ? (
+                <MfaRequiredPanel title="Remote access locked" />
+              ) : (
+                <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                  <p className="text-sm text-slate-600">
+                    Open a remote session pre-selected for this agent.
+                  </p>
+                  <div className="mt-4 flex flex-wrap gap-3">
+                    <Link
+                      href={remoteDeepLink(agentId, 'desktop')}
+                      className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white hover:bg-indigo-500"
+                    >
+                      <ScreenShare size={16} /> Start remote desktop
+                    </Link>
+                    <Link
+                      href={remoteDeepLink(agentId, 'terminal')}
+                      className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-5 py-3 text-sm font-medium text-slate-800 hover:bg-slate-50"
+                    >
+                      <Terminal size={16} /> Start remote terminal
+                    </Link>
+                  </div>
+                  <p className="mt-3 font-mono text-xs text-slate-400">agent={agentId}</p>
+                </div>
+              )}
             </div>
           )}
         </div>
