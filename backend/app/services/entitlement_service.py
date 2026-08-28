@@ -25,6 +25,7 @@ PLAN_DEVICE_LIMITS: dict[str, int] = {
 ACTIVE_STATUSES = frozenset({"active", "trialing"})
 
 # Platform operators may download/install without a Stripe subscription.
+# Matched after normalizing: lower-case, spaces/hyphens -> underscore.
 ADMIN_DOWNLOAD_ROLES = frozenset(
     {
         "admin",
@@ -32,6 +33,7 @@ ADMIN_DOWNLOAD_ROLES = frozenset(
         "system_admin",
         "msp_admin",
         "operator",
+        "administrator",
     }
 )
 ADMIN_DEVICE_LIMIT = 10_000
@@ -59,17 +61,31 @@ class Entitlement:
         }
 
 
+def _normalize_role(name: str | None) -> str:
+    """system admin / System-Admin / system_admin -> system_admin"""
+    if not name:
+        return ""
+    return (
+        str(name)
+        .strip()
+        .lower()
+        .replace("-", "_")
+        .replace(" ", "_")
+        .replace("__", "_")
+    )
+
+
 def _user_is_admin(user: Any | None) -> bool:
     if user is None:
         return False
-    role = (getattr(user, "role", None) or "").strip().lower()
+    role = _normalize_role(getattr(user, "role", None))
     if role in ADMIN_DOWNLOAD_ROLES:
         return True
     # Some installs store roles only on the user_roles relation.
     try:
         for ur in getattr(user, "user_roles", None) or []:
             rname = getattr(getattr(ur, "role", None), "name", None) or getattr(ur, "name", None)
-            if (rname or "").strip().lower() in ADMIN_DOWNLOAD_ROLES:
+            if _normalize_role(rname) in ADMIN_DOWNLOAD_ROLES:
                 return True
     except Exception:
         pass
