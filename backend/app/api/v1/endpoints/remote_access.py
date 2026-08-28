@@ -7,7 +7,10 @@ from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisco
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy.orm import Session
 
+from app.core.access_tiers import require_mfa_for_actions
+from app.core.dependencies import get_current_user
 from app.database.session import get_db
+from app.models.user import User
 from app.services.remote_access_service import RemoteAccessService
 from app.services.remote_session_manager import remote_session_manager
 
@@ -199,12 +202,19 @@ def _queued_response(command: Any, operation: str, service: RemoteAccessService 
 
 
 @router.get("/capabilities", response_model=list[dict[str, Any]])
-def list_capabilities(service: RemoteAccessService = Depends(_service)) -> list[dict[str, Any]]:
+def list_capabilities(
+    service: RemoteAccessService = Depends(_service),
+    _user: User = Depends(get_current_user),
+) -> list[dict[str, Any]]:
     return service.list_capabilities()
 
 
 @router.post("/desktop", response_model=RemoteAccessQueuedResponse, status_code=status.HTTP_201_CREATED)
-def open_remote_desktop(payload: RemoteDesktopRequest, service: RemoteAccessService = Depends(_service)) -> RemoteAccessQueuedResponse:
+def open_remote_desktop(
+    payload: RemoteDesktopRequest,
+    service: RemoteAccessService = Depends(_service),
+    _user: User = Depends(require_mfa_for_actions),
+) -> RemoteAccessQueuedResponse:
     session = service.create_interactive_session(
         agent_id=payload.agent_id,
         session_type="desktop",
@@ -226,7 +236,11 @@ def open_remote_desktop(payload: RemoteDesktopRequest, service: RemoteAccessServ
 
 
 @router.post("/terminal", response_model=RemoteAccessQueuedResponse, status_code=status.HTTP_201_CREATED)
-def open_remote_terminal(payload: RemoteTerminalRequest, service: RemoteAccessService = Depends(_service)) -> RemoteAccessQueuedResponse:
+def open_remote_terminal(
+    payload: RemoteTerminalRequest,
+    service: RemoteAccessService = Depends(_service),
+    _user: User = Depends(require_mfa_for_actions),
+) -> RemoteAccessQueuedResponse:
     session = None
     request_payload = payload.model_dump(exclude={"agent_id"}, exclude_none=True)
     if payload.interactive:
@@ -253,7 +267,11 @@ def open_remote_terminal(payload: RemoteTerminalRequest, service: RemoteAccessSe
 
 
 @router.post("/file-browser", response_model=RemoteAccessQueuedResponse, status_code=status.HTTP_201_CREATED)
-def queue_file_browser_operation(payload: FileBrowserRequest, service: RemoteAccessService = Depends(_service)) -> RemoteAccessQueuedResponse:
+def queue_file_browser_operation(
+    payload: FileBrowserRequest,
+    service: RemoteAccessService = Depends(_service),
+    _user: User = Depends(require_mfa_for_actions),
+) -> RemoteAccessQueuedResponse:
     command = service.queue_operation(
         agent_id=payload.agent_id,
         operation="file_browser",
@@ -265,7 +283,11 @@ def queue_file_browser_operation(payload: FileBrowserRequest, service: RemoteAcc
 
 
 @router.post("/registry", response_model=RemoteAccessQueuedResponse, status_code=status.HTTP_201_CREATED)
-def queue_registry_operation(payload: RegistryEditorRequest, service: RemoteAccessService = Depends(_service)) -> RemoteAccessQueuedResponse:
+def queue_registry_operation(
+    payload: RegistryEditorRequest,
+    service: RemoteAccessService = Depends(_service),
+    _user: User = Depends(require_mfa_for_actions),
+) -> RemoteAccessQueuedResponse:
     command = service.queue_operation(
         agent_id=payload.agent_id,
         operation="registry_editor",
@@ -277,7 +299,11 @@ def queue_registry_operation(payload: RegistryEditorRequest, service: RemoteAcce
 
 
 @router.post("/task-manager", response_model=RemoteAccessQueuedResponse, status_code=status.HTTP_201_CREATED)
-def queue_task_manager_operation(payload: TaskManagerRequest, service: RemoteAccessService = Depends(_service)) -> RemoteAccessQueuedResponse:
+def queue_task_manager_operation(
+    payload: TaskManagerRequest,
+    service: RemoteAccessService = Depends(_service),
+    _user: User = Depends(require_mfa_for_actions),
+) -> RemoteAccessQueuedResponse:
     command = service.queue_operation(
         agent_id=payload.agent_id,
         operation="task_manager",
@@ -289,7 +315,11 @@ def queue_task_manager_operation(payload: TaskManagerRequest, service: RemoteAcc
 
 
 @router.post("/powershell", response_model=RemoteAccessQueuedResponse, status_code=status.HTTP_201_CREATED)
-def run_remote_powershell(payload: ShellExecutionRequest, service: RemoteAccessService = Depends(_service)) -> RemoteAccessQueuedResponse:
+def run_remote_powershell(
+    payload: ShellExecutionRequest,
+    service: RemoteAccessService = Depends(_service),
+    _user: User = Depends(require_mfa_for_actions),
+) -> RemoteAccessQueuedResponse:
     command = service.queue_operation(
         agent_id=payload.agent_id,
         operation="remote_powershell",
@@ -301,7 +331,11 @@ def run_remote_powershell(payload: ShellExecutionRequest, service: RemoteAccessS
 
 
 @router.post("/cmd", response_model=RemoteAccessQueuedResponse, status_code=status.HTTP_201_CREATED)
-def run_remote_cmd(payload: ShellExecutionRequest, service: RemoteAccessService = Depends(_service)) -> RemoteAccessQueuedResponse:
+def run_remote_cmd(
+    payload: ShellExecutionRequest,
+    service: RemoteAccessService = Depends(_service),
+    _user: User = Depends(require_mfa_for_actions),
+) -> RemoteAccessQueuedResponse:
     command = service.queue_operation(
         agent_id=payload.agent_id,
         operation="remote_cmd",
@@ -313,7 +347,11 @@ def run_remote_cmd(payload: ShellExecutionRequest, service: RemoteAccessService 
 
 
 @router.post("/event-viewer", response_model=RemoteAccessQueuedResponse, status_code=status.HTTP_201_CREATED)
-def queue_event_viewer_query(payload: EventViewerRequest, service: RemoteAccessService = Depends(_service)) -> RemoteAccessQueuedResponse:
+def queue_event_viewer_query(
+    payload: EventViewerRequest,
+    service: RemoteAccessService = Depends(_service),
+    _user: User = Depends(require_mfa_for_actions),
+) -> RemoteAccessQueuedResponse:
     command = service.queue_operation(
         agent_id=payload.agent_id,
         operation="remote_event_viewer",
@@ -325,7 +363,11 @@ def queue_event_viewer_query(payload: EventViewerRequest, service: RemoteAccessS
 
 
 @router.post("/wake-on-lan", response_model=RemoteAccessQueuedResponse, status_code=status.HTTP_201_CREATED)
-def queue_wake_on_lan(payload: WakeOnLanRequest, service: RemoteAccessService = Depends(_service)) -> RemoteAccessQueuedResponse:
+def queue_wake_on_lan(
+    payload: WakeOnLanRequest,
+    service: RemoteAccessService = Depends(_service),
+    _user: User = Depends(require_mfa_for_actions),
+) -> RemoteAccessQueuedResponse:
     command = service.queue_operation(
         agent_id=payload.agent_id,
         operation="wake_on_lan",
@@ -337,7 +379,11 @@ def queue_wake_on_lan(payload: WakeOnLanRequest, service: RemoteAccessService = 
 
 
 @router.post("/reboot", response_model=RemoteAccessQueuedResponse, status_code=status.HTTP_201_CREATED)
-def queue_reboot(payload: RebootRequest, service: RemoteAccessService = Depends(_service)) -> RemoteAccessQueuedResponse:
+def queue_reboot(
+    payload: RebootRequest,
+    service: RemoteAccessService = Depends(_service),
+    _user: User = Depends(require_mfa_for_actions),
+) -> RemoteAccessQueuedResponse:
     command = service.queue_operation(
         agent_id=payload.agent_id,
         operation="remote_reboot",
@@ -350,7 +396,11 @@ def queue_reboot(payload: RebootRequest, service: RemoteAccessService = Depends(
 
 
 @router.post("/safe-mode-reboot", response_model=RemoteAccessQueuedResponse, status_code=status.HTTP_201_CREATED)
-def queue_safe_mode_reboot(payload: SafeModeRebootRequest, service: RemoteAccessService = Depends(_service)) -> RemoteAccessQueuedResponse:
+def queue_safe_mode_reboot(
+    payload: SafeModeRebootRequest,
+    service: RemoteAccessService = Depends(_service),
+    _user: User = Depends(require_mfa_for_actions),
+) -> RemoteAccessQueuedResponse:
     command = service.queue_operation(
         agent_id=payload.agent_id,
         operation="safe_mode_reboot",
@@ -363,7 +413,11 @@ def queue_safe_mode_reboot(payload: SafeModeRebootRequest, service: RemoteAccess
 
 
 @router.get("/operations/{command_id}", response_model=RemoteAccessQueuedResponse)
-def get_remote_access_operation(command_id: UUID, service: RemoteAccessService = Depends(_service)) -> RemoteAccessQueuedResponse:
+def get_remote_access_operation(
+    command_id: UUID,
+    service: RemoteAccessService = Depends(_service),
+    _user: User = Depends(get_current_user),
+) -> RemoteAccessQueuedResponse:
     command = service.get_operation(command_id)
     if command is None or not service.is_remote_access_command(command):
         raise HTTPException(status_code=404, detail="remote access operation not found")
@@ -373,7 +427,11 @@ def get_remote_access_operation(command_id: UUID, service: RemoteAccessService =
 
 
 @router.get("/sessions/{session_id}", response_model=RemoteSessionResponse)
-def get_remote_session(session_id: str, service: RemoteAccessService = Depends(_service)) -> RemoteSessionResponse:
+def get_remote_session(
+    session_id: str,
+    service: RemoteAccessService = Depends(_service),
+    _user: User = Depends(get_current_user),
+) -> RemoteSessionResponse:
     session = service.get_session(session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="remote session not found")
@@ -381,7 +439,11 @@ def get_remote_session(session_id: str, service: RemoteAccessService = Depends(_
 
 
 @router.post("/sessions/{session_id}/close", response_model=RemoteSessionResponse)
-async def close_remote_session(session_id: str, service: RemoteAccessService = Depends(_service)) -> RemoteSessionResponse:
+async def close_remote_session(
+    session_id: str,
+    service: RemoteAccessService = Depends(_service),
+    _user: User = Depends(require_mfa_for_actions),
+) -> RemoteSessionResponse:
     session = await remote_session_manager.close_session(session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="remote session not found")
