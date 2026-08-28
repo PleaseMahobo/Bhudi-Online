@@ -56,7 +56,7 @@
             Start="auto"
             Account="LocalSystem"
             ErrorControl="normal"
-            Arguments="run -server [SERVERURL]"
+            Arguments="service -server [SERVERURL]"
             Vital="yes" />
 
         <ServiceControl
