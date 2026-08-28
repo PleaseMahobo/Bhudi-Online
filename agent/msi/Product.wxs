@@ -1,12 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!--
-  Bhudi Agent — enterprise per-machine MSI (WiX Toolset 5)
-  Build:
-    wix build Product.wxs -ext WixToolset.UI.wixext -bindpath agent=. -o bhudi-agent-setup.msi
--->
+<!-- Bhudi Agent MSI — WiX Toolset 5 -->
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
   <Package
-      Id="*"
       Name="Bhudi Agent"
       Language="1033"
       Version="2.1.0"
@@ -14,8 +9,7 @@
       UpgradeCode="6DCAACF5-F55A-49B5-8632-893587BD4EC3"
       InstallerVersion="500"
       Compressed="yes"
-      Scope="perMachine"
-      Description="Bhudi native RMM agent — no Python required">
+      Scope="perMachine">
 
     <MajorUpgrade
         DowngradeErrorMessage="A newer version of Bhudi Agent is already installed. Remove it first."
@@ -24,6 +18,7 @@
     <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
 
     <Property Id="SERVERURL" Secure="yes" Value="https://bhudi-online-production.up.railway.app" />
+    <Property Id="ARPCOMMENTS" Value="Bhudi native RMM agent — no Python required" />
 
     <Feature Id="ProductFeature" Title="Bhudi Agent" Level="1">
       <ComponentGroupRef Id="ProductComponents" />
