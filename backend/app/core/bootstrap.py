@@ -140,6 +140,20 @@ def ensure_alert_engine_schema() -> list[str]:
     return applied
 
 
+def _ensure_admin_tenant(db: Session, admin_user: User) -> None:
+    """Bootstrap admins historically had null tenant_id — heal that."""
+    if getattr(admin_user, "tenant_id", None) is not None:
+        return
+    email = (admin_user.email or "admin").strip()
+    label = email.split("@", 1)[0] if email else "admin"
+    tenant = Tenant(name=f"{label} workspace")
+    db.add(tenant)
+    db.flush()
+    admin_user.tenant_id = tenant.id
+    db.add(admin_user)
+    print(f"[bootstrap] provisioned tenant {tenant.id} for {email}")
+
+
 def initialize_database() -> dict[str, Any]:
     """Create tables and seed RBAC/auth data when the database is reachable."""
     try:
@@ -156,7 +170,14 @@ def initialize_database() -> dict[str, Any]:
         existing = db.query(User).filter(User.email == admin_email).first()
         force_reset = os.getenv("BHUDI_ADMIN_FORCE_RESET", "").strip().lower() in ("1", "true", "yes")
         if existing is None:
-            admin_user = User(email=admin_email, password_hash=hash_password(admin_password), first_name="System", last_name="Admin", role="admin", active=True)
+            admin_user = User(
+                email=admin_email,
+                password_hash=hash_password(admin_password),
+                first_name="System",
+                last_name="Admin",
+                role="admin",
+                active=True,
+            )
             db.add(admin_user)
             db.flush()
             db.refresh(admin_user)
@@ -171,13 +192,20 @@ def initialize_database() -> dict[str, Any]:
                 if hasattr(admin_user, "locked_until"):
                     admin_user.locked_until = None
                 print(f"[bootstrap] forced password reset for {admin_email}")
+        _ensure_admin_tenant(db, admin_user)
         admin_role = db.query(Role).filter(Role.name == "admin").first()
         if admin_role is not None:
-            existing_assignment = db.query(UserRole).filter(UserRole.user_id == admin_user.id, UserRole.role_id == admin_role.id).first()
+            existing_assignment = db.query(UserRole).filter(
+                UserRole.user_id == admin_user.id, UserRole.role_id == admin_role.id
+            ).first()
             if existing_assignment is None:
                 db.add(UserRole(user_id=admin_user.id, role_id=admin_role.id))
         db.commit()
-        return {"status": "initialized", "admin_email": admin_email}
+        return {
+            "status": "initialized",
+            "admin_email": admin_email,
+            "admin_tenant_id": str(getattr(admin_user, "tenant_id", None) or ""),
+        }
     except SQLAlchemyError as exc:
         return {"status": "skipped", "reason": f"seed failed: {exc}"}
     finally:
