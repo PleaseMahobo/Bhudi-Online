@@ -2,17 +2,17 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models.agent import Agent
-from app.models.msp import TenantSubscription
+from app.models.msp import Organization, TenantSubscription
 
-# Fallback seat counts when subscription has no device_limit set
 PLAN_DEVICE_LIMITS: dict[str, int] = {
     "starter": 1,
     "personal": 1,
@@ -59,7 +59,6 @@ class EntitlementService:
         )
 
     def _count_supportable(self, tenant_id: UUID) -> int:
-        # Supportable = enrolled, not revoked, trusted (seat-backed)
         q = select(func.count()).select_from(Agent).where(
             Agent.tenant_id == tenant_id,
             Agent.revoked.is_(False),
@@ -96,19 +95,18 @@ class EntitlementService:
         paid = status_s in ACTIVE_STATUSES
         plan_code = None
         limit = getattr(sub, "device_limit", None)
+        meta = dict(getattr(sub, "meta", None) or {})
+        plan_code = meta.get("plan_code")
         if limit is None:
             plan = getattr(sub, "plan", None)
             if plan is not None:
-                plan_code = getattr(plan, "code", None)
+                plan_code = getattr(plan, "code", None) or plan_code
                 included = getattr(plan, "included_devices", None)
                 if included is not None:
                     limit = int(included)
             if limit is None and plan_code:
                 limit = PLAN_DEVICE_LIMITS.get(str(plan_code).lower(), 0)
             if limit is None:
-                # Infer from meta
-                meta = getattr(sub, "meta", None) or {}
-                plan_code = plan_code or meta.get("plan_code")
                 limit = PLAN_DEVICE_LIMITS.get(str(plan_code or "").lower(), 0 if not paid else 1)
 
         limit = int(limit or 0)
@@ -145,9 +143,7 @@ class EntitlementService:
         return ent
 
     def assign_supportable_on_enroll(self, tenant_id: UUID, agent: Agent) -> bool:
-        """Mark agent supportable if a seat remains; else unlicensed (install OK, not tech-visible)."""
         ent = self.get_entitlement(tenant_id)
-        # Re-enroll of already-trusted agent keeps seat
         if getattr(agent, "trusted", False) and not getattr(agent, "revoked", False):
             return True
 
@@ -158,9 +154,84 @@ class EntitlementService:
             agent.registration_state = "approved"
             return True
 
-        # Over seat or unpaid: allow install, not supportable for technicians
         agent.trusted = False
         agent.approved = True
         agent.enabled = False
         agent.registration_state = "unlicensed"
         return False
+
+    def _ensure_organization(self, tenant_id: UUID, name: str | None = None) -> Organization:
+        org = (
+            self.db.query(Organization)
+            .filter(Organization.tenant_id == tenant_id)
+            .first()
+        )
+        if org:
+            return org
+        slug = f"t-{str(tenant_id).replace('-', '')[:16]}"
+        org = Organization(
+            id=uuid4(),
+            tenant_id=tenant_id,
+            name=(name or "Bhudi Customer")[:255],
+            slug=slug,
+            org_type="client",
+            status="active",
+        )
+        self.db.add(org)
+        self.db.flush()
+        return org
+
+    def activate_subscription(
+        self,
+        *,
+        tenant_id: UUID,
+        plan_code: str,
+        email: str | None = None,
+        stripe_session_id: str | None = None,
+        stripe_customer_id: str | None = None,
+        stripe_subscription_id: str | None = None,
+        org_name: str | None = None,
+    ) -> TenantSubscription:
+        """Create or update TenantSubscription as active and set device_limit from plan."""
+        limit = PLAN_DEVICE_LIMITS.get(plan_code.lower(), 1)
+        org = self._ensure_organization(tenant_id, name=org_name or email)
+        sub = self._subscription_for_tenant(tenant_id)
+        now = datetime.now(timezone.utc)
+        if sub is None:
+            sub = TenantSubscription(
+                id=uuid4(),
+                tenant_id=tenant_id,
+                organization_id=org.id,
+                status="active",
+                device_limit=limit,
+                seats=limit,
+                current_period_start=now,
+                meta={
+                    "plan_code": plan_code,
+                    "activated_at": now.isoformat(),
+                    "last_checkout_session_id": stripe_session_id,
+                    "email": email,
+                },
+            )
+            self.db.add(sub)
+        else:
+            sub.status = "active"
+            sub.device_limit = limit
+            sub.seats = limit
+            sub.cancelled_at = None
+            sub.updated_at = now
+            meta = dict(sub.meta or {})
+            meta["plan_code"] = plan_code
+            meta["activated_at"] = now.isoformat()
+            if stripe_session_id:
+                meta["last_checkout_session_id"] = stripe_session_id
+            if email:
+                meta["email"] = email
+            sub.meta = meta
+        if stripe_customer_id:
+            sub.external_customer_id = str(stripe_customer_id)
+        if stripe_subscription_id:
+            sub.external_subscription_id = str(stripe_subscription_id)
+        self.db.commit()
+        self.db.refresh(sub)
+        return sub
