@@ -23,6 +23,18 @@ PLAN_DEVICE_LIMITS: dict[str, int] = {
 
 ACTIVE_STATUSES = frozenset({"active", "trialing"})
 
+# Platform operators may download/install without a Stripe subscription.
+ADMIN_DOWNLOAD_ROLES = frozenset(
+    {
+        "admin",
+        "super_admin",
+        "system_admin",
+        "msp_admin",
+        "operator",
+    }
+)
+ADMIN_DEVICE_LIMIT = 10_000
+
 
 @dataclass
 class Entitlement:
@@ -46,6 +58,23 @@ class Entitlement:
         }
 
 
+def _user_is_admin(user: Any | None) -> bool:
+    if user is None:
+        return False
+    role = (getattr(user, "role", None) or "").strip().lower()
+    if role in ADMIN_DOWNLOAD_ROLES:
+        return True
+    # Some installs store roles only on the user_roles relation.
+    try:
+        for ur in getattr(user, "user_roles", None) or []:
+            rname = getattr(getattr(ur, "role", None), "name", None) or getattr(ur, "name", None)
+            if (rname or "").strip().lower() in ADMIN_DOWNLOAD_ROLES:
+                return True
+    except Exception:
+        pass
+    return False
+
+
 class EntitlementService:
     def __init__(self, db: Session) -> None:
         self.db = db
@@ -66,8 +95,18 @@ class EntitlementService:
         )
         return int(self.db.scalar(q) or 0)
 
-    def get_entitlement(self, tenant_id: UUID | None) -> Entitlement:
+    def get_entitlement(self, tenant_id: UUID | None, user: Any | None = None) -> Entitlement:
         if tenant_id is None:
+            if _user_is_admin(user):
+                return Entitlement(
+                    paid=True,
+                    status="admin",
+                    plan_code="admin",
+                    device_limit=ADMIN_DEVICE_LIMIT,
+                    supportable_count=0,
+                    seats_remaining=ADMIN_DEVICE_LIMIT,
+                    can_download_agent=True,
+                )
             return Entitlement(
                 paid=False,
                 status="none",
@@ -78,9 +117,23 @@ class EntitlementService:
                 can_download_agent=False,
             )
 
+        supportable = self._count_supportable(tenant_id)
+
+        # Platform admin / operator always allowed to download and enroll.
+        if _user_is_admin(user):
+            remaining = max(0, ADMIN_DEVICE_LIMIT - supportable)
+            return Entitlement(
+                paid=True,
+                status="admin",
+                plan_code="admin",
+                device_limit=ADMIN_DEVICE_LIMIT,
+                supportable_count=supportable,
+                seats_remaining=remaining,
+                can_download_agent=True,
+            )
+
         sub = self._subscription_for_tenant(tenant_id)
         if sub is None:
-            supportable = self._count_supportable(tenant_id)
             return Entitlement(
                 paid=False,
                 status="none",
@@ -113,7 +166,6 @@ class EntitlementService:
         if not paid:
             limit = 0
 
-        supportable = self._count_supportable(tenant_id)
         remaining = max(0, limit - supportable)
 
         return Entitlement(
@@ -126,8 +178,8 @@ class EntitlementService:
             can_download_agent=paid,
         )
 
-    def require_download_allowed(self, tenant_id: UUID | None) -> Entitlement:
-        ent = self.get_entitlement(tenant_id)
+    def require_download_allowed(self, tenant_id: UUID | None, user: Any | None = None) -> Entitlement:
+        ent = self.get_entitlement(tenant_id, user=user)
         if not ent.can_download_agent:
             raise HTTPException(
                 status_code=status.HTTP_402_PAYMENT_REQUIRED,
