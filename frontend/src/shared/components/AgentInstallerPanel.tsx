@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type MouseEvent } from 'react';
 import Link from 'next/link';
 import { Check, Copy, CreditCard, Download, Loader2, Monitor, Server, Terminal } from 'lucide-react';
 import { useAuth } from '@/shared/auth/AuthContext';
@@ -206,7 +206,7 @@ export default function AgentInstallerPanel({
     });
   }
 
-  async function onDownloadClick(e: React.MouseEvent) {
+  function onDownloadClick(e: MouseEvent<HTMLAnchorElement>) {
     if (!canDownload) {
       e.preventDefault();
       setDlError('Subscribe under Billing before downloading the agent.');
