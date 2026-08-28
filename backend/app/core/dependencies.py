@@ -123,7 +123,85 @@ def get_user_tenant_id(user):
     return getattr(user, "tenant_id", None)
 
 
-def require_tenant_user(user=Depends(get_current_user)):
+def _normalize_role(name: str | None) -> str:
+    if not name:
+        return ""
+    return (
+        str(name)
+        .strip()
+        .lower()
+        .replace("-", "_")
+        .replace(" ", "_")
+        .replace("__", "_")
+    )
+
+
+_ADMIN_ROLES_FOR_TENANT = frozenset(
+    {
+        "admin",
+        "super_admin",
+        "system_admin",
+        "enterprise_admin",
+        "msp_admin",
+        "operator",
+        "administrator",
+    }
+)
+
+
+def _user_looks_admin(user) -> bool:
+    role = _normalize_role(getattr(user, "role", None))
+    if role in _ADMIN_ROLES_FOR_TENANT:
+        return True
+    try:
+        for ur in getattr(user, "user_roles", None) or []:
+            rname = getattr(getattr(ur, "role", None), "name", None) or getattr(ur, "name", None)
+            if _normalize_role(rname) in _ADMIN_ROLES_FOR_TENANT:
+                return True
+    except Exception:
+        pass
+    return False
+
+
+def ensure_user_has_tenant(user, db: Session):
+    """If tenant_id is null, create and attach a personal tenant (bootstrap admins).
+
+    Bootstrap historically created security@ / BHUDI_ADMIN without a tenant.
+    Enrollment, billing entitlement, and agent download all require tenant_id.
+    """
+    if get_user_tenant_id(user) is not None:
+        return user
+
+    from app.models.tenant import Tenant
+
+    email = (getattr(user, "email", None) or "platform").strip()
+    label = email.split("@", 1)[0] if email else "platform"
+    tenant_name = f"{label} workspace".strip() or "Bhudi Admin Workspace"
+
+    tenant = Tenant(name=tenant_name[:200])
+    db.add(tenant)
+    db.flush()
+    user.tenant_id = tenant.id
+    db.add(user)
+    try:
+        db.commit()
+        db.refresh(user)
+    except Exception:
+        db.rollback()
+        raise authorization_error("Could not provision tenant for account")
+    return user
+
+
+def require_tenant_user(
+    user=Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    if get_user_tenant_id(user) is None:
+        # Auto-heal platform admins created by bootstrap without a tenant.
+        if _user_looks_admin(user):
+            user = ensure_user_has_tenant(user, db)
+        else:
+            raise authorization_error("Tenant association required")
     if get_user_tenant_id(user) is None:
         raise authorization_error("Tenant association required")
     return user
@@ -184,6 +262,6 @@ __all__ = [
     "get_optional_access_token", "get_current_user", "get_optional_user",
     "require_active_user", "require_role", "require_admin", "require_permission",
     "has_permission", "require_tenant_user", "get_user_tenant_id",
-    "verify_resource_owner", "get_security_context", "current_user",
-    "current_admin", "current_tenant_user", "is_authenticated",
+    "ensure_user_has_tenant", "verify_resource_owner", "get_security_context",
+    "current_user", "current_admin", "current_tenant_user", "is_authenticated",
 ]
