@@ -12,8 +12,32 @@ from app.repositories.permission_repository import PermissionRepository
 from app.repositories.user_role_repository import UserRoleRepository
 
 
+def _normalize_role_name(name: str | None) -> str:
+    if not name:
+        return ""
+    return (
+        str(name)
+        .strip()
+        .lower()
+        .replace("-", "_")
+        .replace(" ", "_")
+        .replace("__", "_")
+    )
+
+
 class AuthorizationService:
     """Centralized RBAC authorization engine."""
+
+    ADMIN_ROLES = frozenset(
+        {
+            "admin",
+            "super_admin",
+            "system_admin",
+            "enterprise_admin",
+            "msp_admin",
+            "administrator",
+        }
+    )
 
     def __init__(self, db: Session):
         self.db = db
@@ -49,7 +73,8 @@ class AuthorizationService:
             )
 
     def has_role(self, user_id: UUID, role_name: str) -> bool:
-        return any(role.name == role_name for role in self.get_user_roles(user_id))
+        target = _normalize_role_name(role_name)
+        return any(_normalize_role_name(role.name) == target for role in self.get_user_roles(user_id))
 
     def require_role(self, user_id: UUID, role_name: str) -> None:
         if not self.has_role(user_id, role_name):
@@ -59,9 +84,11 @@ class AuthorizationService:
             )
 
     def is_admin(self, user_id: UUID) -> bool:
-        # System Admin is the production role used by the tenant-context UI.
-        admin_roles = {"admin", "super_admin", "system_admin"}
-        return any(role.name in admin_roles for role in self.get_user_roles(user_id))
+        # System Admin / Enterprise Admin are production platform operator roles.
+        return any(
+            _normalize_role_name(role.name) in self.ADMIN_ROLES
+            for role in self.get_user_roles(user_id)
+        )
 
     def require_admin(self, user_id: UUID) -> None:
         if not self.is_admin(user_id):
