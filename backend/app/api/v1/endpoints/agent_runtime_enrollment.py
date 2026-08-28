@@ -26,8 +26,8 @@ def create_enrollment_token(
     db: Session = Depends(get_db),
     user=Depends(current_tenant_user),
 ):
-    # Multi-use installer is only issued after payment
-    EntitlementService(db).require_download_allowed(user.tenant_id)
+    # Multi-use installer: paid tenants or platform admin roles
+    EntitlementService(db).require_download_allowed(user.tenant_id, user=user)
     raw, record = AgentEnrollmentService(db).create(user.tenant_id)
     return {
         "token": raw,
