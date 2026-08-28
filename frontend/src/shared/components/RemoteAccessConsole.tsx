@@ -4,6 +4,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Loader2, Monitor, RefreshCw, Terminal, Wifi, XCircle } from 'lucide-react';
 import { getDevices } from '@/lib/api';
+import MfaRequiredPanel from '@/shared/components/MfaRequiredPanel';
+import { useMfaGate } from '@/shared/hooks/useMfaGate';
 
 type Device = { id: string; device_id?: string; agent_id?: string; hostname?: string; name?: string; status?: string };
 type MonitorInfo = { index: number; name: string; width: number; height: number; primary?: boolean };
@@ -25,6 +27,7 @@ function authHeaders(): HeadersInit {
 }
 
 export default function RemoteAccessConsole() {
+  const { blocked: mfaBlocked } = useMfaGate();
   const searchParams = useSearchParams();
   const [devices, setDevices] = useState<Device[]>([]);
   const [agentId, setAgentId] = useState('');
@@ -99,6 +102,10 @@ export default function RemoteAccessConsole() {
   }
 
   async function startSession() {
+    if (mfaBlocked) {
+      setError('Enable MFA at /mfa/setup before remote access.');
+      return;
+    }
     if (!agentId) {
       setError('Select a device / agent first.');
       return;
@@ -134,11 +141,16 @@ export default function RemoteAccessConsole() {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        throw new Error(
-          (typeof data.detail === 'string' && data.detail) ||
-            res.statusText ||
-            'Failed to start'
-        );
+        const detail = data.detail;
+        const msg =
+          (typeof detail === 'object' && detail?.message) ||
+          (typeof detail === 'string' && detail) ||
+          res.statusText ||
+          'Failed to start';
+        if (res.status === 403 && (detail?.code === 'mfa_setup_required' || String(msg).toLowerCase().includes('mfa'))) {
+          throw new Error('Enable MFA at /mfa/setup before remote access.');
+        }
+        throw new Error(String(msg));
       }
       const sid = data.session_id as string;
       if (!sid) throw new Error('No session_id returned');
@@ -245,6 +257,10 @@ export default function RemoteAccessConsole() {
 
   return (
     <div className="space-y-4">
+      {mfaBlocked && (
+        <MfaRequiredPanel title="Remote access locked" />
+      )}
+
       <div className="flex flex-wrap items-end gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
         <div className="min-w-[220px] flex-1">
           <label className="mb-1 block text-xs font-medium text-slate-500">Device / agent</label>
@@ -252,6 +268,7 @@ export default function RemoteAccessConsole() {
             value={agentId}
             onChange={(e) => setAgentId(e.target.value)}
             className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
+            disabled={mfaBlocked}
           >
             <option value="">Select device…</option>
             {devices.map((d) => {
@@ -270,9 +287,11 @@ export default function RemoteAccessConsole() {
           <button
             type="button"
             onClick={() => setMode('desktop')}
+            disabled={mfaBlocked}
             className={
               'inline-flex items-center gap-1 rounded-xl px-3 py-2 text-sm font-medium ' +
-              (mode === 'desktop' ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-700')
+              (mode === 'desktop' ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-700') +
+              (mfaBlocked ? ' opacity-50' : '')
             }
           >
             <Monitor className="h-4 w-4" /> Desktop
@@ -280,9 +299,11 @@ export default function RemoteAccessConsole() {
           <button
             type="button"
             onClick={() => setMode('terminal')}
+            disabled={mfaBlocked}
             className={
               'inline-flex items-center gap-1 rounded-xl px-3 py-2 text-sm font-medium ' +
-              (mode === 'terminal' ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-700')
+              (mode === 'terminal' ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-700') +
+              (mfaBlocked ? ' opacity-50' : '')
             }
           >
             <Terminal className="h-4 w-4" /> Terminal
@@ -296,6 +317,7 @@ export default function RemoteAccessConsole() {
               value={monitorIndex}
               onChange={(e) => setMonitorIndex(Number(e.target.value))}
               className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
+              disabled={mfaBlocked}
             >
               {monitors.length === 0 ? (
                 <option value={0}>Primary / Display 1</option>
@@ -318,6 +340,7 @@ export default function RemoteAccessConsole() {
               value={shell}
               onChange={(e) => setShell(e.target.value)}
               className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
+              disabled={mfaBlocked}
             >
               <option value="powershell">PowerShell</option>
               <option value="cmd">CMD</option>
@@ -331,7 +354,7 @@ export default function RemoteAccessConsole() {
             <button
               type="button"
               onClick={() => void startSession()}
-              disabled={busy || !agentId}
+              disabled={busy || !agentId || mfaBlocked}
               className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-500 disabled:opacity-50"
             >
               {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wifi className="h-4 w-4" />}
