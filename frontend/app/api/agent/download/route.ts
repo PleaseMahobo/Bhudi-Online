@@ -37,16 +37,31 @@ function authHeaders(req: NextRequest): Headers {
 }
 
 async function customerInstaller(req: NextRequest): Promise<NextResponse> {
-  const tokenResponse = await fetch(`${BACKEND_URL}/api/v1/agents/enrollment-token`, {
+  // Multi-use enrollment token — requires active subscription (402 if unpaid)
+  const tokenResponse = await fetch(`${BACKEND_URL}/api/v1/runtime/enrollment-token`, {
     method: 'POST',
     headers: authHeaders(req),
     cache: 'no-store',
   });
   if (!tokenResponse.ok) {
     const detail = await tokenResponse.text();
+    let parsed: unknown = detail;
+    try {
+      parsed = JSON.parse(detail);
+    } catch {
+      /* keep text */
+    }
+    const status = tokenResponse.status === 401 ? 401 : tokenResponse.status === 402 ? 402 : 502;
     return NextResponse.json(
-      { error: 'Unable to create customer enrollment token', detail },
-      { status: tokenResponse.status === 401 ? 401 : 502 }
+      {
+        error:
+          status === 402
+            ? 'Subscription required to download the agent'
+            : 'Unable to create enrollment token',
+        detail: parsed,
+        billing_path: '/billing',
+      },
+      { status }
     );
   }
 
@@ -74,12 +89,11 @@ async function customerInstaller(req: NextRequest): Promise<NextResponse> {
       enrollment_token: tokenData.token,
       tenant_id: tokenData.tenant_id,
       expires_at: tokenData.expires_at,
+      reusable: true,
     }),
     'utf8'
   );
 
-  // Footer format consumed by the setup EXE:
-  // [JSON payload][uint64 little-endian payload length][magic]
   const length = Buffer.alloc(8);
   length.writeBigUInt64LE(BigInt(payload.length));
   const output = Buffer.concat([base, payload, length, MAGIC]);
@@ -90,7 +104,7 @@ async function customerInstaller(req: NextRequest): Promise<NextResponse> {
       'Content-Type': 'application/vnd.microsoft.portable-executable',
       'Content-Disposition': 'attachment; filename="BhudiAgent-Setup.exe"',
       'Cache-Control': 'private, no-store, max-age=0',
-      'X-Bhudi-Installer': 'customer-specific',
+      'X-Bhudi-Installer': 'customer-multi-use',
     },
   });
 }

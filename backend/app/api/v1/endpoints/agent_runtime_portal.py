@@ -29,20 +29,36 @@ def _tenant_agent(agent_id: str, user):
     return agent
 
 
+def _is_supportable(agent: dict) -> bool:
+    if agent.get("supportable") is False:
+        return False
+    if agent.get("status") == "unlicensed":
+        return False
+    return True
+
+
 @router.get("/agents")
-def list_runtime_agents(user=Depends(current_tenant_user)):
+def list_runtime_agents(user=Depends(current_tenant_user), include_unlicensed: bool = False):
     agents = [a for a in _agents.values() if str(a.get("tenant_id")) == str(user.tenant_id)]
+    if not include_unlicensed:
+        # Technicians only see supportable devices by default
+        agents = [a for a in agents if _is_supportable(a)]
     return {"agents": agents, "count": len(agents)}
 
 
 @router.get("/agents/{agent_id}")
 def agent_details(agent_id: str, user=Depends(current_tenant_user)):
-    return _tenant_agent(agent_id, user)
+    agent = _tenant_agent(agent_id, user)
+    if not _is_supportable(agent):
+        raise HTTPException(status_code=404, detail="Agent not found")
+    return agent
 
 
 @router.get("/agents/{agent_id}/platform")
 def agent_platform(agent_id: str, user=Depends(current_tenant_user)):
     agent = _tenant_agent(agent_id, user)
+    if not _is_supportable(agent):
+        raise HTTPException(status_code=404, detail="Agent not found")
     return {"agent_id": agent_id, "platform": agent.get("platform"), **_platform_metadata(agent.get("platform"))}
 
 
@@ -54,6 +70,8 @@ def create_command(
     user=Depends(current_tenant_user),
 ):
     agent = _tenant_agent(agent_id, user)
+    if not _is_supportable(agent):
+        raise HTTPException(status_code=403, detail="Device is not supportable under your current seat limit")
     command_id = str(uuid.uuid4())
     profile = _platform_metadata(agent.get("platform"))
     cmd = {
@@ -78,13 +96,17 @@ def create_command(
 
 @router.get("/agents/{agent_id}/commands")
 def command_history(agent_id: str, user=Depends(current_tenant_user)):
-    _tenant_agent(agent_id, user)
+    agent = _tenant_agent(agent_id, user)
+    if not _is_supportable(agent):
+        raise HTTPException(status_code=404, detail="Agent not found")
     return {"commands": list(reversed(_commands.get(agent_id, [])))}
 
 
 @router.get("/agents/{agent_id}/commands/{command_id}")
 def command_details(agent_id: str, command_id: str, user=Depends(current_tenant_user)):
-    _tenant_agent(agent_id, user)
+    agent = _tenant_agent(agent_id, user)
+    if not _is_supportable(agent):
+        raise HTTPException(status_code=404, detail="Agent not found")
     for command in _commands.get(agent_id, []):
         if command.get("id") == command_id or command.get("command_id") == command_id:
             return command
@@ -97,7 +119,9 @@ def remote_desktop(
     _mfa_user=Depends(require_mfa_for_actions),
     user=Depends(current_tenant_user),
 ):
-    _tenant_agent(body.agent_id, user)
+    agent = _tenant_agent(body.agent_id, user)
+    if not _is_supportable(agent):
+        raise HTTPException(status_code=403, detail="Device is not supportable under your current seat limit")
     session = remote_session_manager.create_session(
         agent_id=body.agent_id,
         session_type="desktop",
@@ -117,7 +141,9 @@ def remote_terminal(
     _mfa_user=Depends(require_mfa_for_actions),
     user=Depends(current_tenant_user),
 ):
-    _tenant_agent(body.agent_id, user)
+    agent = _tenant_agent(body.agent_id, user)
+    if not _is_supportable(agent):
+        raise HTTPException(status_code=403, detail="Device is not supportable under your current seat limit")
     session = remote_session_manager.create_session(
         agent_id=body.agent_id,
         session_type="terminal",
