@@ -111,11 +111,6 @@ def _bootstrap_metadata_for_engine() -> MetaData:
 
 
 def ensure_alert_engine_schema() -> list[str]:
-    """Add columns introduced after the original alert_rules migration.
-
-    create_all() does not ALTER existing tables; production DBs created from the
-    first migration lack remediation_actions, which makes GET /rules return 500.
-    """
     applied: list[str] = []
     if engine is None:
         return applied
@@ -141,7 +136,6 @@ def ensure_alert_engine_schema() -> list[str]:
 
 
 def _ensure_admin_tenant(db: Session, admin_user: User) -> None:
-    """Bootstrap admins historically had null tenant_id — heal that."""
     if getattr(admin_user, "tenant_id", None) is not None:
         return
     email = (admin_user.email or "admin").strip()
@@ -155,7 +149,6 @@ def _ensure_admin_tenant(db: Session, admin_user: User) -> None:
 
 
 def initialize_database() -> dict[str, Any]:
-    """Create tables and seed RBAC/auth data when the database is reachable."""
     try:
         _bootstrap_metadata_for_engine().create_all(bind=engine)
         ensure_alert_engine_schema()
@@ -173,9 +166,9 @@ def initialize_database() -> dict[str, Any]:
             admin_user = User(
                 email=admin_email,
                 password_hash=hash_password(admin_password),
-                first_name="System",
+                first_name="Enterprise",
                 last_name="Admin",
-                role="admin",
+                role="enterprise_admin",
                 active=True,
             )
             db.add(admin_user)
@@ -183,27 +176,28 @@ def initialize_database() -> dict[str, Any]:
             db.refresh(admin_user)
         else:
             admin_user = existing
+            admin_user.role = "enterprise_admin"
             if force_reset and admin_password:
                 admin_user.password_hash = hash_password(admin_password)
                 admin_user.active = True
-                admin_user.role = getattr(admin_user, "role", None) or "admin"
                 if hasattr(admin_user, "failed_login_attempts"):
                     admin_user.failed_login_attempts = 0
                 if hasattr(admin_user, "locked_until"):
                     admin_user.locked_until = None
                 print(f"[bootstrap] forced password reset for {admin_email}")
         _ensure_admin_tenant(db, admin_user)
-        admin_role = db.query(Role).filter(Role.name == "admin").first()
-        if admin_role is not None:
-            existing_assignment = db.query(UserRole).filter(
-                UserRole.user_id == admin_user.id, UserRole.role_id == admin_role.id
-            ).first()
-            if existing_assignment is None:
-                db.add(UserRole(user_id=admin_user.id, role_id=admin_role.id))
+
+        ea_role = db.query(Role).filter(Role.name == "enterprise_admin").first()
+        if ea_role is not None:
+            # sole assignment: enterprise_admin
+            db.query(UserRole).filter(UserRole.user_id == admin_user.id).delete()
+            db.add(UserRole(user_id=admin_user.id, role_id=ea_role.id))
+
         db.commit()
         return {
             "status": "initialized",
             "admin_email": admin_email,
+            "admin_role": "enterprise_admin",
             "admin_tenant_id": str(getattr(admin_user, "tenant_id", None) or ""),
         }
     except SQLAlchemyError as exc:
