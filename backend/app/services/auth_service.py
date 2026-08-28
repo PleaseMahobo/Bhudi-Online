@@ -27,26 +27,38 @@ from app.repositories.user_repository import UserRepository
 
 
 class AuthService:
-    """Enterprise authentication: register (trial), login, refresh, logout."""
+    """Authentication: register (starter), login, refresh, logout."""
 
     def __init__(self, db: Session) -> None:
         self.db = db
         self.users = UserRepository(db)
         self.refresh_tokens = RefreshTokenRepository(db)
 
-    def register(self, *, email: str, password: str, first_name: str | None = None, last_name: str | None = None) -> User:
+    def register(
+        self,
+        *,
+        email: str,
+        password: str,
+        first_name: str | None = None,
+        last_name: str | None = None,
+        company: str | None = None,
+    ) -> User:
         email = self._normalize_email(email)
         if self.users.get_by_email(email):
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
         self._validate_password(password)
         password_hash = hash_password(password)
-        tenant_name = " ".join(part for part in (first_name, last_name) if part).strip() or email.split("@", 1)[0]
+        tenant_name = (
+            (company or "").strip()
+            or " ".join(part for part in (first_name, last_name) if part).strip()
+            or email.split("@", 1)[0]
+        )
         user = User(
             email=email,
             password_hash=password_hash,
             first_name=first_name,
             last_name=last_name,
-            role="trial",
+            role="user",
         )
         tenant = Tenant(name=tenant_name)
         user.tenant = tenant
@@ -59,8 +71,10 @@ class AuthService:
             self.db.rollback()
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=("Registration failed due to database schema. Run backend/scripts/ensure_auth_and_metrics_schema.sql "
-                        f"in Supabase SQL Editor. ({type(exc).__name__})"),
+                detail=(
+                    "Registration failed due to database schema. Run backend/scripts/ensure_auth_and_metrics_schema.sql "
+                    f"in Supabase SQL Editor. ({type(exc).__name__})"
+                ),
             ) from exc
         return self.users.get_by_email(email) or user
 
@@ -104,10 +118,17 @@ class AuthService:
         self.db.commit()
         return {
             "access_token": access_token, "refresh_token": refresh_token, "token_type": "bearer",
-            "user": {"id": user.id, "email": user.email, "first_name": user.first_name, "last_name": user.last_name,
-                     "role": getattr(user, "role", None) or "trial", "active": getattr(user, "active", True),
-                     "mfa_enabled": bool(getattr(user, "mfa_enabled", False))},
-            "session_id": session_id, "token_family": family,
+            "user": {
+                "id": user.id,
+                "email": user.email,
+                "first_name": user.first_name,
+                "last_name": user.last_name,
+                "role": getattr(user, "role", None) or "user",
+                "active": getattr(user, "active", True),
+                "mfa_enabled": bool(getattr(user, "mfa_enabled", False)),
+            },
+            "session_id": session_id,
+            "token_family": family,
         }
 
     def refresh_access_token(self, refresh_token: str, *, ip_address: str | None = None, user_agent: str | None = None, device_name: str | None = None) -> dict[str, Any]:
@@ -161,9 +182,13 @@ class AuthService:
         except Exception:
             pass
         self.db.commit()
-        return {"access_token": access_token, "refresh_token": new_refresh_token, "token_type": "bearer",
-                "session_id": str(current_token.session_id) if current_token.session_id else None,
-                "token_family": str(current_token.token_family) if current_token.token_family else None}
+        return {
+            "access_token": access_token,
+            "refresh_token": new_refresh_token,
+            "token_type": "bearer",
+            "session_id": str(current_token.session_id) if current_token.session_id else None,
+            "token_family": str(current_token.token_family) if current_token.token_family else None,
+        }
 
     def logout(self, refresh_token: str) -> None:
         token = self.refresh_tokens.get_by_token_hash(hash_refresh_token(refresh_token))
@@ -179,7 +204,6 @@ class AuthService:
         return revoked
 
     def revoke_session(self, user: User, session_id: str, *, reason: str = "session_revoked") -> int:
-        """Revoke a session only when it belongs to the authenticated user."""
         revoked = self.refresh_tokens.revoke_session(user_id=user.id, session_id=session_id, reason=reason)
         self.db.commit()
         return revoked
@@ -194,11 +218,6 @@ class AuthService:
         return user
 
     def _is_password_reused(self, user: User, password: str) -> bool:
-        """Return True when the candidate matches a stored history value or hash.
-
-        Plaintext history is supported only as a legacy migration format; newly
-        written password history must contain password hashes.
-        """
         for stored in getattr(user, "password_history", None) or []:
             if not stored:
                 continue
@@ -213,9 +232,15 @@ class AuthService:
         return False
 
     @staticmethod
-    def _assess_login_risk(*, ip_address: str | None, user_agent: str | None, device_name: str | None,
-                           previous_login_at: datetime | None, current_login_at: datetime | None,
-                           password_history: list[str] | None = None) -> int:
+    def _assess_login_risk(
+        *,
+        ip_address: str | None,
+        user_agent: str | None,
+        device_name: str | None,
+        previous_login_at: datetime | None,
+        current_login_at: datetime | None,
+        password_history: list[str] | None = None,
+    ) -> int:
         score = 0
         if not ip_address:
             score += 15
@@ -233,10 +258,18 @@ class AuthService:
         return max(0, min(100, score))
 
     @staticmethod
-    def _is_session_anomalous(token: Any, *, ip_address: str | None, user_agent: str | None, device_name: str | None) -> bool:
-        for supplied, stored in ((ip_address, getattr(token, "ip_address", None)),
-                                 (user_agent, getattr(token, "user_agent", None)),
-                                 (device_name, getattr(token, "device_name", None))):
+    def _is_session_anomalous(
+        token: Any,
+        *,
+        ip_address: str | None,
+        user_agent: str | None,
+        device_name: str | None,
+    ) -> bool:
+        for supplied, stored in (
+            (ip_address, getattr(token, "ip_address", None)),
+            (user_agent, getattr(token, "user_agent", None)),
+            (device_name, getattr(token, "device_name", None)),
+        ):
             if supplied and stored and supplied != stored:
                 return True
         return False

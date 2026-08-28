@@ -8,7 +8,11 @@ type PostResult<T> = { response: Response; data: T };
 function errorMessage(data: ApiError, statusText: string, status: number): string {
   const detail = data?.detail;
   if (typeof detail === 'string' && detail.trim()) return detail.trim();
-  if (Array.isArray(detail) && detail.length) return detail.map((item: any) => typeof item === 'string' ? item : item?.msg || item?.message || JSON.stringify(item)).filter(Boolean).join('; ');
+  if (Array.isArray(detail) && detail.length)
+    return detail
+      .map((item: any) => (typeof item === 'string' ? item : item?.msg || item?.message || JSON.stringify(item)))
+      .filter(Boolean)
+      .join('; ');
   if (detail && typeof detail === 'object') {
     const message = (detail as any).msg || (detail as any).message;
     if (message) return String(message);
@@ -34,7 +38,13 @@ async function postJson<T>(path: string, body?: unknown): Promise<T> {
   return data;
 }
 
-export async function registerUser(input: { email: string; password: string; first_name?: string; last_name?: string }) {
+export async function registerUser(input: {
+  email: string;
+  password: string;
+  first_name?: string;
+  last_name?: string;
+  company?: string;
+}) {
   return postJson('/api/auth/register', input);
 }
 
