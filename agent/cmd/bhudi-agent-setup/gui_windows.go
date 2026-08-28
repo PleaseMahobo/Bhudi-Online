@@ -33,7 +33,7 @@ $title.AutoSize = $true
 $form.Controls.Add($title)
 
 $body = New-Object Windows.Forms.Label
-$body.Text = 'Welcome to the Bhudi Agent Setup Wizard.`r`n`r`nThis wizard installs and enrolls the Bhudi endpoint agent, registers the Windows service, and installs the Bhudi Support Client.`r`n`r`nClick Next to continue.'
+$body.Text = 'Welcome to the Bhudi Agent Setup Wizard.' + [Environment]::NewLine + '' + [Environment]::NewLine + 'This wizard installs and enrolls the Bhudi endpoint agent, registers the Windows service, and installs the Bhudi Support Client.' + [Environment]::NewLine + '' + [Environment]::NewLine + 'Click Next to continue.'
 $body.Font = New-Object Drawing.Font('Segoe UI',10)
 $body.Location = New-Object Drawing.Point(30,80)
 $body.Size = New-Object Drawing.Size(540,170)
@@ -81,7 +81,7 @@ $cancel.Add_Click({ $form.Close() })
 $back.Add_Click({
     if ($page -eq 1) {
         $page = 0
-        $body.Text = 'Welcome to the Bhudi Agent Setup Wizard.`r`n`r`nThis wizard installs and enrolls the Bhudi endpoint agent, registers the Windows service, and installs the Bhudi Support Client.`r`n`r`nClick Next to continue.'
+        $body.Text = 'Welcome to the Bhudi Agent Setup Wizard.' + [Environment]::NewLine + '' + [Environment]::NewLine + 'This wizard installs and enrolls the Bhudi endpoint agent, registers the Windows service, and installs the Bhudi Support Client.' + [Environment]::NewLine + '' + [Environment]::NewLine + 'Click Next to continue.'
         $back.Enabled = $false
         $next.Text = 'Next >'
         $status.Text = ''
@@ -92,7 +92,7 @@ $back.Add_Click({
 $next.Add_Click({
     if ($page -eq 0) {
         $page = 1
-        $body.Text = 'The installer is ready to install the Bhudi Agent on this computer.`r`n`r`nThe customer enrollment payload embedded in this installer will be used. No credentials will be displayed.'
+        $body.Text = 'The installer is ready to install the Bhudi Agent on this computer.' + [Environment]::NewLine + '' + [Environment]::NewLine + 'The customer enrollment payload embedded in this installer will be used. No credentials will be displayed.'
         $back.Enabled = $true
         $next.Text = 'Install'
         return
@@ -104,7 +104,7 @@ $next.Add_Click({
         $cancel.Enabled = $false
         $next.Enabled = $false
         $next.Text = 'Installing...'
-        $body.Text = 'Installing Bhudi Agent...`r`n`r`nPlease wait while the endpoint is enrolled and the Windows service is registered.'
+        $body.Text = 'Installing Bhudi Agent...' + [Environment]::NewLine + '' + [Environment]::NewLine + 'Please wait while the endpoint is enrolled and the Windows service is registered.'
         $status.Text = 'Preparing installation...'
         $progress.Style = 'Marquee'
         $progress.MarqueeAnimationSpeed = 25
@@ -134,19 +134,19 @@ $next.Add_Click({
                 if ($worker.ExitCode -eq 0) {
                     $progress.Value = 100
                     $status.Text = 'Installation completed successfully.'
-                    $body.Text = 'Bhudi Agent Setup completed successfully.`r`n`r`nThe Bhudi Agent is enrolled and the Windows service has been installed. The agent will start automatically with Windows.'
+                    $body.Text = 'Bhudi Agent Setup completed successfully.' + [Environment]::NewLine + '' + [Environment]::NewLine + 'The Bhudi Agent is enrolled and the Windows service has been installed. The agent will start automatically with Windows.'
                     $next.Text = 'Finish'
                     $next.Enabled = $true
                     $cancel.Enabled = $false
                     $next.Tag = 'finish'
                 } else {
                     $status.Text = 'Installation failed.'
-                    $body.Text = 'Bhudi Agent Setup could not complete the installation.`r`n`r`nPlease contact your administrator and provide the installer log if requested.'
+                    $body.Text = 'Bhudi Agent Setup could not complete the installation.' + [Environment]::NewLine + '' + [Environment]::NewLine + 'Please contact your administrator and provide the installer log if requested.'
                     $next.Text = 'Close'
                     $next.Enabled = $true
                     $cancel.Enabled = $false
                     $next.Tag = 'fail'
-                    [IO.File]::WriteAllText($log, $out + "`r`n" + $err)
+                    [IO.File]::WriteAllText($log, $out + "' + [Environment]::NewLine + '" + $err)
                 }
             }
         })
