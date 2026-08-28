@@ -55,7 +55,13 @@ def clear_auth_cookies(response: Response) -> None:
 
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 def register(request: RegisterRequest, db: Session = Depends(get_db)):
-    return AuthService(db).register(email=request.email, password=request.password, first_name=request.first_name, last_name=request.last_name)
+    return AuthService(db).register(
+        email=request.email,
+        password=request.password,
+        first_name=request.first_name,
+        last_name=request.last_name,
+        company=request.company,
+    )
 
 
 @router.post("/login", response_model=TokenResponse, status_code=status.HTTP_200_OK)
@@ -149,9 +155,6 @@ def revoke_session(session_id: str, current_user: User = Depends(get_current_use
 @router.get("/sessions", status_code=status.HTTP_200_OK)
 def active_sessions(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     return AuthService(db).get_active_sessions(current_user)
-
-
-# MFA setup/verify live in app.api.v1.endpoints.mfa
 
 
 @router.post("/passkeys/register", status_code=status.HTTP_200_OK)
