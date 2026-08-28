@@ -55,13 +55,36 @@ export default function DeviceMetricsChart({
         `/api/v1/metrics/devices/${encodeURIComponent(deviceId)}?minutes=${minutes}&limit=500`,
         { credentials: 'include', cache: 'no-store' }
       );
-      const data = await res.json().catch(() => ({}));
+      const raw = await res.text();
+      let data: any = {};
+      if (raw && raw.trim()) {
+        try {
+          data = JSON.parse(raw);
+        } catch {
+          data = {};
+        }
+      }
       if (!res.ok) {
-        throw new Error(data.detail || data.message || res.statusText);
+        const detail = data?.detail;
+        const msg =
+          typeof detail === 'string'
+            ? detail
+            : detail?.message || data?.message || res.statusText || `HTTP ${res.status}`;
+        if (res.status === 404 || res.status === 204) {
+          setPoints([]);
+          return;
+        }
+        throw new Error(msg);
       }
       setPoints(Array.isArray(data.points) ? data.points : []);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load metrics');
+      const msg = e instanceof Error ? e.message : 'Failed to load metrics';
+      if (/Unexpected end of JSON|Failed to execute 'json'/i.test(msg)) {
+        setPoints([]);
+        setError('');
+      } else {
+        setError(msg);
+      }
     } finally {
       setLoading(false);
     }

@@ -29,7 +29,7 @@ export default function MfaRequiredPanel({
         <span className="flex-1">Enable MFA to use Remote and Run command.</span>
         <Link
           href="/mfa/setup"
-          className="rounded-lg bg-indigo-600 px-2.5 py-1 font-semibold text-white hover:bg-amber-500"
+          className="rounded-lg bg-indigo-600 px-2.5 py-1 font-semibold text-white hover:bg-indigo-500"
         >
           Set up MFA
         </Link>
