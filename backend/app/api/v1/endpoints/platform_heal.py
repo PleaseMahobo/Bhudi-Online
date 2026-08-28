@@ -1,7 +1,7 @@
 """One-shot heal for platform owner accounts (tenant + enterprise_admin + download)."""
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.core.dependencies import get_current_user, ensure_user_has_tenant, _normalize_role
@@ -44,8 +44,6 @@ def platform_heal(
         "administrator",
     }
     if not allowed:
-        from fastapi import HTTPException
-
         raise HTTPException(status_code=403, detail="Not permitted to run platform heal")
 
     # 1) Highest role on user column
