@@ -12,6 +12,7 @@ class RegisterRequest(BaseModel):
     password: str = Field(min_length=PASSWORD_MIN_LENGTH, description="Minimum 12 character password")
     first_name: str | None = Field(default=None, max_length=100)
     last_name: str | None = Field(default=None, max_length=100)
+    company: str | None = Field(default=None, max_length=200, description="Optional organisation name")
 
 
 class LoginRequest(BaseModel):
@@ -35,7 +36,7 @@ class UserResponse(BaseModel):
     email: EmailStr
     first_name: str | None = None
     last_name: str | None = None
-    role: str = "trial"
+    role: str = "user"
     active: bool = True
     tenant_id: UUID | None = None
     mfa_enabled: bool = False

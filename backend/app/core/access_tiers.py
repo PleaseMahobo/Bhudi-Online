@@ -1,9 +1,10 @@
-"""Trial vs privileged access helpers.
+"""Access helpers: MFA for privileged actions; seats control supportable devices.
 
-Roadmap:
-  - Anyone can register (trial) without MFA
-  - Trial users may view dashboard / device inventory
-  - Remote control, shell commands, and destructive ops require MFA enabled
+Product rules:
+  - Anyone can register (starter) without MFA
+  - After payment: Download agent is available
+  - Remote control and commands require MFA enabled
+  - Only devices within paid seat count are supportable for technicians
 """
 from __future__ import annotations
 
@@ -12,41 +13,36 @@ from fastapi import Depends, HTTPException, status
 from app.core.dependencies import get_current_user
 from app.models.user import User
 
-PRIVILEGED_ROLES = {"admin", "operator", "technician", "msp_admin"}
+PRIVILEGED_ROLES = {"admin", "operator", "technician", "msp_admin", "professional"}
 
 
 def user_has_mfa(user: User) -> bool:
     return bool(getattr(user, "mfa_enabled", False))
 
 
-def user_is_trial(user: User) -> bool:
-    role = (getattr(user, "role", None) or "").lower()
-    return role in {"trial", "user", ""} and not user_has_mfa(user)
+def user_is_unpaid_starter(user: User) -> bool:
+    """Starter account without an active paid subscription flag (if present)."""
+    role = (getattr(user, "role", None) or "user").lower()
+    if role in PRIVILEGED_ROLES:
+        return False
+    paid = getattr(user, "subscription_active", None)
+    if paid is True:
+        return False
+    return True
 
 
 def require_mfa_for_actions(user: User = Depends(get_current_user)) -> User:
-    """Block privileged mutations until MFA is enabled.
-
-    Admins who already have MFA pass. New trial accounts must complete /mfa/setup.
-    """
+    """Block Remote / Run command until MFA is enabled."""
     if user_has_mfa(user):
         return user
-
-    role = (getattr(user, "role", None) or "").lower()
-    # Legacy full admins without MFA column still allowed once explicitly admin —
-    # but product policy is: require MFA for actions for everyone going forward.
-    if role == "admin" and getattr(user, "totp_secret", None):
-        # secret present but not enabled → still block
-        pass
 
     raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
         detail={
             "code": "mfa_setup_required",
             "message": (
-                "Multi-factor authentication is required before remote access, "
-                "command execution, or other privileged actions. "
-                "Complete MFA setup at /mfa/setup."
+                "Multi-factor authentication is required before remote access or "
+                "command execution. Complete MFA setup at /mfa/setup."
             ),
             "setup_path": "/mfa/setup",
         },

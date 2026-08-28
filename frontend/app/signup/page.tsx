@@ -7,8 +7,8 @@ import { Sparkles } from 'lucide-react';
 import { loginUser, registerUser } from '@/lib/auth-client';
 
 /**
- * Open trial signup — no MFA at registration.
- * Users can browse the portal; MFA is required later for remote control / commands.
+ * Starter signup — create an account with profile details.
+ * Agent download appears after payment. MFA is required later for Remote / Run command.
  */
 export default function SignupPage() {
   const router = useRouter();
@@ -16,12 +16,17 @@ export default function SignupPage() {
   const [password, setPassword] = useState('');
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
+  const [company, setCompany] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
   async function onRegister(e: React.FormEvent) {
     e.preventDefault();
     setError('');
+    if (!firstName.trim() || !lastName.trim()) {
+      setError('Please enter your first and last name.');
+      return;
+    }
     if (password.length < 12) {
       setError('Password must be at least 12 characters.');
       return;
@@ -31,17 +36,18 @@ export default function SignupPage() {
       await registerUser({
         email,
         password,
-        first_name: firstName || undefined,
-        last_name: lastName || undefined,
+        first_name: firstName.trim(),
+        last_name: lastName.trim(),
+        company: company.trim() || undefined,
       });
-      // Sign in immediately — MFA is NOT required until privileged actions
       const tokens = await loginUser(email, password);
       if (typeof window !== 'undefined') {
         localStorage.setItem('access_token', tokens.access_token);
         if (tokens.refresh_token) localStorage.setItem('refresh_token', tokens.refresh_token);
-        localStorage.setItem('bhudi_access_tier', 'trial');
+        localStorage.setItem('bhudi_access_tier', 'starter');
+        if (company.trim()) localStorage.setItem('bhudi_company', company.trim());
       }
-      router.push('/dashboard?welcome=trial');
+      router.push('/dashboard?welcome=1');
     } catch (err: any) {
       setError(err?.message || 'Registration failed');
     } finally {
@@ -59,9 +65,9 @@ export default function SignupPage() {
             </span>
             Bhudi
           </Link>
-          <p className="mt-3 text-sm text-slate-400">Start your free trial</p>
+          <p className="mt-3 text-sm text-slate-400">Create your account</p>
           <p className="mt-1 text-xs text-slate-500">
-            Create an account in seconds — no authenticator required to sign up.
+            Sign up with your details. After payment you can download the agent.
           </p>
         </div>
 
@@ -70,6 +76,7 @@ export default function SignupPage() {
             <div>
               <label className="text-xs text-slate-400">First name</label>
               <input
+                required
                 value={firstName}
                 onChange={(e) => setFirstName(e.target.value)}
                 className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-800 px-3 py-2.5 text-sm text-white outline-none focus:border-indigo-500"
@@ -78,11 +85,21 @@ export default function SignupPage() {
             <div>
               <label className="text-xs text-slate-400">Last name</label>
               <input
+                required
                 value={lastName}
                 onChange={(e) => setLastName(e.target.value)}
                 className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-800 px-3 py-2.5 text-sm text-white outline-none focus:border-indigo-500"
               />
             </div>
+          </div>
+          <div>
+            <label className="text-xs text-slate-400">Company (optional)</label>
+            <input
+              value={company}
+              onChange={(e) => setCompany(e.target.value)}
+              placeholder="Organisation name"
+              className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-800 px-3 py-2.5 text-sm text-white outline-none focus:border-indigo-500"
+            />
           </div>
           <div>
             <label className="text-xs text-slate-400">Work email</label>
@@ -107,8 +124,8 @@ export default function SignupPage() {
           </div>
 
           <div className="rounded-xl border border-slate-700/80 bg-slate-950/60 px-3 py-2.5 text-xs text-slate-400">
-            After signup you can explore the dashboard and device inventory. Remote control and
-            command execution unlock after you enable multi-factor authentication.
+            After you subscribe, a Download agent button appears on your dashboard.
+            Remote control and commands require multi-factor authentication.
           </div>
 
           {error && (
@@ -122,7 +139,7 @@ export default function SignupPage() {
             disabled={loading}
             className="w-full rounded-xl bg-indigo-600 py-3 text-sm font-semibold text-white hover:bg-indigo-500 disabled:opacity-50"
           >
-            {loading ? 'Creating account…' : 'Create trial account'}
+            {loading ? 'Creating account…' : 'Create account'}
           </button>
         </form>
 
