@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.database.session import get_db
+from app.models.msp import TenantSubscription
 from app.schemas.msp import (
     BillingPlanCreate,
     BillingPlanResponse,
@@ -327,6 +328,18 @@ def create_subscription(payload: SubscriptionCreate, db: Session = Depends(get_d
         return MspService(db).create_subscription(payload)
     except ValueError as e:
         raise HTTPException(400, str(e))
+
+
+@router.get("/billing/subscriptions", response_model=list[SubscriptionResponse])
+def list_subscriptions(
+    status: str | None = Query(None, description="Filter by status"),
+    db: Session = Depends(get_db),
+):
+    """List all tenant subscriptions (optionally filter by status)."""
+    q = db.query(TenantSubscription)
+    if status:
+        q = q.filter(TenantSubscription.status == status)
+    return q.order_by(TenantSubscription.updated_at.desc()).all()
 
 
 @router.get("/tenants/{tenant_id}/subscription", response_model=SubscriptionResponse)
