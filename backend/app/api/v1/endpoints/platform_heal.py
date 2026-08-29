@@ -9,6 +9,7 @@ from app.database.session import get_db
 from app.models.role import Role
 from app.models.user import User
 from app.models.user_role import UserRole
+from app.services.audit_service import record_audit
 from app.services.entitlement_service import EntitlementService
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
@@ -46,6 +47,9 @@ def platform_heal(
     if not allowed:
         raise HTTPException(status_code=403, detail="Not permitted to run platform heal")
 
+    prior_role = getattr(user, "role", None)
+    prior_tenant = str(user.tenant_id) if getattr(user, "tenant_id", None) else None
+
     # 1) Highest role on user column
     user.role = "enterprise_admin"
     user.active = True
@@ -75,6 +79,23 @@ def platform_heal(
     ent_svc = EntitlementService(db)
     ent_svc.require_download_allowed(user.tenant_id, user=user)
     ent = ent_svc.get_entitlement(user.tenant_id, user=user)
+
+    record_audit(
+        db,
+        action="auth.platform_heal",
+        resource=f"user:{user.id}",
+        user_id=user.id,
+        tenant_id=user.tenant_id,
+        details={
+            "actor_email": user.email,
+            "prior_role": prior_role,
+            "prior_tenant_id": prior_tenant,
+            "new_role": user.role,
+            "new_tenant_id": str(user.tenant_id) if user.tenant_id else None,
+            "entitlement": ent.to_dict(),
+        },
+        commit=False,
+    )
 
     db.commit()
     db.refresh(user)

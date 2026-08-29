@@ -12,6 +12,7 @@ from app.core.dependencies import get_current_user, _normalize_role
 from app.database.session import get_db
 from app.models.msp import BillingPlan, Organization, TenantSubscription
 from app.models.user import User
+from app.services.audit_service import record_audit
 from app.services.entitlement_service import EntitlementService, PLAN_DEVICE_LIMITS
 from app.services.msp_service import MspService
 
@@ -117,6 +118,21 @@ def inspect_subscription(
     plans = db.query(BillingPlan).order_by(BillingPlan.code).all()
     ent = EntitlementService(db).get_entitlement(tid, user=user)
 
+    record_audit(
+        db,
+        action="billing.admin.inspect",
+        resource=f"tenant:{tid}",
+        user_id=getattr(user, "id", None),
+        tenant_id=tid,
+        details={
+            "actor_email": getattr(user, "email", None),
+            "subscription_status": sub.status if sub else None,
+            "entitlement_paid": ent.paid,
+            "entitlement_plan": ent.plan_code,
+        },
+        commit=True,
+    )
+
     return {
         "tenant_id": str(tid),
         "organization": {
@@ -165,6 +181,15 @@ def force_activate_subscription(
             f"Unknown plan_code '{plan_code}'. Known: {sorted(PLAN_DEVICE_LIMITS.keys())}",
         )
 
+    # Snapshot prior state for audit
+    prior = (
+        db.query(TenantSubscription)
+        .filter(TenantSubscription.tenant_id == tid)
+        .first()
+    )
+    prior_status = prior.status if prior else None
+    prior_plan = (prior.meta or {}).get("plan_code") if prior else None
+
     # Ensure catalog rows exist
     MspService(db).seed_default_plans()
 
@@ -190,6 +215,25 @@ def force_activate_subscription(
 
     ent = EntitlementService(db).get_entitlement(tid, user=user)
 
+    record_audit(
+        db,
+        action="billing.admin.force_activate",
+        resource=f"tenant:{tid}",
+        user_id=getattr(user, "id", None),
+        tenant_id=tid,
+        details={
+            "actor_email": getattr(user, "email", None),
+            "plan_code": plan_code,
+            "prior_status": prior_status,
+            "prior_plan_code": prior_plan,
+            "new_status": sub.status,
+            "new_device_limit": sub.device_limit,
+            "subscription_id": str(sub.id),
+            "org_name": org_name,
+        },
+        commit=True,
+    )
+
     return {
         "ok": True,
         "message": f"Subscription activated as '{plan_code}' for tenant {tid}",
@@ -207,6 +251,21 @@ def seed_billing_plans(
     if not _is_platform_admin(user):
         raise HTTPException(403, "Platform admin required")
     rows = MspService(db).seed_default_plans()
+
+    record_audit(
+        db,
+        action="billing.admin.seed_plans",
+        resource="billing_plans",
+        user_id=getattr(user, "id", None),
+        tenant_id=getattr(user, "tenant_id", None),
+        details={
+            "actor_email": getattr(user, "email", None),
+            "plan_codes": [r.code for r in rows],
+            "count": len(rows),
+        },
+        commit=True,
+    )
+
     return {
         "ok": True,
         "count": len(rows),
