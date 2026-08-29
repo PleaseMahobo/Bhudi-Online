@@ -197,6 +197,12 @@ class EntitlementService:
         )
 
     def require_download_allowed(self, tenant_id: UUID | None, user: Any | None = None) -> Entitlement:
+        """Gate agent download / enrollment token creation.
+
+        Platform admins / owners always get access. On first use we also
+        persist an active 'enterprise' subscription so later enroll calls
+        (which have no user context) still see seats available.
+        """
         ent = self.get_entitlement(tenant_id, user=user)
         if not ent.can_download_agent:
             raise HTTPException(
@@ -210,7 +216,9 @@ class EntitlementService:
                     "billing_path": "/billing",
                 },
             )
-        # Persist admin entitlement so enroll (no user context) still marks devices supportable.
+
+        # Auto-provision entitlement for platform owner / admin on first use.
+        # Ensures enrollment tokens work during development without Stripe.
         if _user_is_admin(user) and tenant_id is not None:
             sub = self._subscription_for_tenant(tenant_id)
             status_s = (getattr(sub, "status", None) or "").lower() if sub else ""
@@ -218,10 +226,11 @@ class EntitlementService:
                 email = getattr(user, "email", None)
                 self.activate_subscription(
                     tenant_id=tenant_id,
-                    plan_code="admin",
+                    plan_code="enterprise",  # high device limit for owner/dev
                     email=email,
-                    org_name=email or "Bhudi Admin",
+                    org_name=email or "Bhudi Platform Owner",
                 )
+                # Refresh so callers see the new limits immediately
                 ent = self.get_entitlement(tenant_id, user=user)
         return ent
 
