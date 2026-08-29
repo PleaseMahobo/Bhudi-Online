@@ -60,6 +60,8 @@ func installService(server string) error {
 		fmt.Println("Windows Service installed:", windowsServiceName, "(Start=Automatic)")
 	}
 
+	// The watchdog is intentionally a foreground agent invocation. It is a
+	// recovery path, not the SCM service entrypoint.
 	cmdLine := fmt.Sprintf("\"%s\" run -server %s", dest, server)
 	_ = exec.Command("schtasks", "/Delete", "/TN", windowsWatchdogName, "/F").Run()
 	watch := exec.Command("schtasks", "/Create", "/TN", windowsWatchdogName,
@@ -83,16 +85,10 @@ func installService(server string) error {
 	}
 
 	if err := startWindowsService(); err != nil {
-		fmt.Println("Service start deferred; starting process directly:", err)
-		if err := startDetached(dest, server); err != nil {
-			fmt.Println("Warning: could not start agent now:", err)
-		} else {
-			fmt.Println("Agent started in the background.")
-		}
-	} else {
-		fmt.Println("Service started.")
+		return fmt.Errorf("start Windows service: %w", err)
 	}
 
+	fmt.Println("Service started.")
 	fmt.Println()
 	fmt.Println("Install complete — install once; agent starts at every boot.")
 	fmt.Println("  Binary:   ", dest)
@@ -119,7 +115,10 @@ func installWindowsService(dest, server string) error {
 	_ = exec.Command("sc", "delete", windowsServiceName).Run()
 	time.Sleep(500 * time.Millisecond)
 
-	binPath := fmt.Sprintf("\"%s\" run -server %s", dest, server)
+	// Windows Service Control Manager requires the executable to enter the
+	// service dispatcher. The previous "run" entrypoint bypassed SCM and caused
+	// StartService error 1053. Use the native service entrypoint instead.
+	binPath := fmt.Sprintf("\"%s\" service -server %s", dest, server)
 	create := exec.Command("sc", "create", windowsServiceName,
 		"binPath=", binPath,
 		"start=", "auto",

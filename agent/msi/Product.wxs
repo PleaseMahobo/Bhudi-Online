@@ -1,25 +1,15 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!--
-  Bhudi Agent — enterprise per-machine MSI (WiX Toolset 3.14+)
-  Build:
-    candle -dAgentDir=..\native\dist Product.wxs
-    light -ext WixUIExtension Product.wixobj -out bhudi-agent-setup.msi
--->
-<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
-  <Product
-      Id="*"
+<!-- Bhudi Agent MSI — WiX Toolset 5 -->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package
       Name="Bhudi Agent"
       Language="1033"
       Version="2.1.0"
       Manufacturer="Bhudi / Cyber Bastion"
-      UpgradeCode="6DCAACF5-F55A-49B5-8632-893587BD4EC3">
-
-    <Package
-        InstallerVersion="500"
-        Compressed="yes"
-        InstallScope="perMachine"
-        Description="Bhudi native RMM agent — no Python required"
-        Manufacturer="Bhudi / Cyber Bastion" />
+      UpgradeCode="6DCAACF5-F55A-49B5-8632-893587BD4EC3"
+      InstallerVersion="500"
+      Compressed="yes"
+      Scope="perMachine">
 
     <MajorUpgrade
         DowngradeErrorMessage="A newer version of Bhudi Agent is already installed. Remove it first."
@@ -28,31 +18,32 @@
     <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
 
     <Property Id="SERVERURL" Secure="yes" Value="https://bhudi-online-production.up.railway.app" />
+    <Property Id="ARPCOMMENTS" Value="Bhudi native RMM agent — no Python required" />
 
     <Feature Id="ProductFeature" Title="Bhudi Agent" Level="1">
       <ComponentGroupRef Id="ProductComponents" />
     </Feature>
 
-    <UIRef Id="WixUI_Minimal" />
+    <UI>
+      <ui:WixUI Id="WixUI_Minimal" xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui" />
+    </UI>
     <WixVariable Id="WixUILicenseRtf" Value="License.rtf" />
 
-    <Directory Id="TARGETDIR" Name="SourceDir">
-      <Directory Id="ProgramFiles64Folder">
-        <Directory Id="COMPANYDIR" Name="Bhudi">
-          <Directory Id="INSTALLFOLDER" Name="Agent" />
-        </Directory>
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="COMPANYDIR" Name="Bhudi">
+        <Directory Id="INSTALLFOLDER" Name="Agent" />
       </Directory>
-      <Directory Id="ProgramMenuFolder">
-        <Directory Id="ApplicationProgramsFolder" Name="Bhudi Agent" />
-      </Directory>
-    </Directory>
+    </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="ApplicationProgramsFolder" Name="Bhudi Agent" />
+    </StandardDirectory>
 
     <ComponentGroup Id="ProductComponents" Directory="INSTALLFOLDER">
       <Component Id="AgentBinary" Guid="9ECA2463-CE95-489E-BDF4-F435A5D9D969">
         <File
             Id="BhudiAgentExe"
             Name="bhudi-agent.exe"
-            Source="$(var.AgentDir)\bhudi-agent.exe"
+            Source="!(bindpath.agent)\bhudi-agent.exe"
             KeyPath="yes"
             Checksum="yes" />
 
@@ -65,7 +56,7 @@
             Start="auto"
             Account="LocalSystem"
             ErrorControl="normal"
-            Arguments="run -server [SERVERURL]"
+            Arguments="service -server [SERVERURL]"
             Vital="yes" />
 
         <ServiceControl
@@ -94,5 +85,5 @@
         <RegistryValue Root="HKCU" Key="Software\Bhudi\Agent" Name="installed" Type="integer" Value="1" KeyPath="yes" />
       </Component>
     </ComponentGroup>
-  </Product>
+  </Package>
 </Wix>
