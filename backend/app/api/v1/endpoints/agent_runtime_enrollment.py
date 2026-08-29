@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+import logging
+
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -17,6 +19,8 @@ from app.api.v1.endpoints.agent_runtime import (
     _platform_metadata,
 )
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/runtime", tags=["agent-runtime-enrollment"])
 
 
@@ -25,11 +29,40 @@ def create_enrollment_token(
     db: Session = Depends(get_db),
     user=Depends(current_tenant_user),
 ):
-    raw, record = AgentEnrollmentService(db).create(user.tenant_id)
+    tenant_id = getattr(user, "tenant_id", None)
+    if tenant_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Authenticated user has no tenant context",
+        )
+
+    try:
+        raw, _record = AgentEnrollmentService(db).create(tenant_id)
+    except IntegrityError as exc:
+        db.rollback()
+        logger.exception("Enrollment-token integrity failure for tenant=%s", tenant_id)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "code": "enrollment_token_schema_unavailable",
+                "message": "Enrollment-token storage is not ready. Apply the production database migration.",
+            },
+        ) from exc
+    except SQLAlchemyError as exc:
+        db.rollback()
+        logger.exception("Enrollment-token database failure for tenant=%s", tenant_id)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "code": "enrollment_token_database_error",
+                "message": "Unable to persist the enrollment token.",
+            },
+        ) from exc
+
     return {
         "token": raw,
         "expires_at": None,
-        "tenant_id": str(user.tenant_id),
+        "tenant_id": str(tenant_id),
         "single_use": False,
         "reusable": True,
         "revocable": True,
@@ -52,11 +85,11 @@ def secure_enroll(req: EnrollRequest, db: Session = Depends(get_db)):
         raise
     except IntegrityError as exc:
         db.rollback()
-        print(f"[runtime] enrollment integrity failure: {exc}")
+        logger.exception("Enrollment integrity failure")
         raise HTTPException(status_code=409, detail="Machine enrollment conflicts with an existing agent") from exc
     except SQLAlchemyError as exc:
         db.rollback()
-        print(f"[runtime] enrollment database failure: {exc}")
+        logger.exception("Enrollment database failure")
         raise HTTPException(status_code=503, detail="Agent enrollment database transaction failed") from exc
 
     agent_id = str(row.id)
