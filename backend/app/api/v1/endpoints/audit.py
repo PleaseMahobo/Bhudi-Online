@@ -33,6 +33,17 @@ from app.schemas.audit import (
 
 router = APIRouter(prefix="/audit", tags=["audit"])
 
+# Cross-tenant audit access is reserved for explicitly configured platform
+# owners. Tenant roles and permissions never bypass tenant scoping.
+PLATFORM_AUDIT_OWNER_EMAILS = frozenset({
+    "security@bhudi.online",
+    "security@cyberbastion.co.za",
+})
+
+
+def _is_platform_audit_owner(user: User) -> bool:
+    return (user.email or "").strip().lower() in PLATFORM_AUDIT_OWNER_EMAILS
+
 
 def _row_to_item(row: AuditTrail) -> AuditLogItem:
     return AuditLogItem(
@@ -87,7 +98,14 @@ def list_audit_logs(
     actions (platform heal, billing force-activate, plan seed, inspect).
     """
     try:
-        query = db.query(AuditTrail).order_by(AuditTrail.created_at.desc())
+        query = db.query(AuditTrail)
+
+        # Tenant isolation is the default. A platform-global principal is the
+        # only caller allowed to inspect audit rows across tenant boundaries.
+        if not _is_platform_audit_owner(current_user):
+            query = query.filter(AuditTrail.tenant_id == current_user.tenant_id)
+
+        query = query.order_by(AuditTrail.created_at.desc())
 
         if since is not None:
             query = query.filter(AuditTrail.created_at >= since)
