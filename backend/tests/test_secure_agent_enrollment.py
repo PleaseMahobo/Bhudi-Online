@@ -27,11 +27,9 @@ def test_secure_enrollment_runs_credential_tenant_machine_agent_commit():
     tenant_id = uuid4()
     enrollment = _enrollment(tenant_id)
     tenant = Tenant(id=tenant_id, name="Customer A")
-    db = Mock()
+    db = MagicMock()
     db.scalar.side_effect = [enrollment, None, 0]
-    result = MagicMock()
-    result.keys.return_value = []
-    db.execute.return_value = result
+    db.query.return_value.filter.return_value.order_by.return_value.first.return_value = None
     db.get.return_value = tenant
 
     service = AgentEnrollmentService(db)
@@ -97,15 +95,13 @@ def test_mark_used_does_not_break_atomic_transaction():
 
 
 def test_integrity_failure_is_available_for_endpoint_translation():
-    db = Mock()
+    db = MagicMock()
     db.flush.side_effect = IntegrityError("statement", {}, Exception("duplicate machine"))
+    db.query.return_value.filter.return_value.order_by.return_value.first.return_value = None
     service = AgentEnrollmentService(db)
     tenant_id = uuid4()
     enrollment = _enrollment(tenant_id)
     db.scalar.side_effect = [enrollment, None, 0]
-    result = MagicMock()
-    result.keys.return_value = []
-    db.execute.return_value = result
     db.get.return_value = Tenant(id=tenant_id, name="Customer A")
 
     with pytest.raises(IntegrityError):
