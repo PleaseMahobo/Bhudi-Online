@@ -25,4 +25,4 @@ COPY . .
 EXPOSE 8000
 
 # Production-tuned WebSocket settings for Alert Engine / agent sockets
-CMD ["sh", "-c", "python -m alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --ws websockets --ws-max-size ${WS_MAX_SIZE} --ws-max-queue ${WS_MAX_QUEUE} --ws-ping-interval ${WS_PING_INTERVAL} --ws-ping-timeout ${WS_PING_TIMEOUT} --ws-per-message-deflate ${WS_PER_MESSAGE_DEFLATE}"]
+CMD ["sh", "-c", "alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --ws websockets --ws-max-size ${WS_MAX_SIZE} --ws-max-queue ${WS_MAX_QUEUE} --ws-ping-interval ${WS_PING_INTERVAL} --ws-ping-timeout ${WS_PING_TIMEOUT} --ws-per-message-deflate ${WS_PER_MESSAGE_DEFLATE}"]
