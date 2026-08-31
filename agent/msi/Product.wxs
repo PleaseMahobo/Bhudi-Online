@@ -5,21 +5,17 @@
     candle -dAgentDir=..\native\dist Product.wxs
     light -ext WixUIExtension Product.wixobj -out bhudi-agent-setup.msi
 -->
-<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
-  <Product
-      Id="*"
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package
       Name="Bhudi Agent"
       Language="1033"
       Version="2.1.0"
       Manufacturer="Bhudi / Cyber Bastion"
-      UpgradeCode="6DCAACF5-F55A-49B5-8632-893587BD4EC3">
+      UpgradeCode="6DCAACF5-F55A-49B5-8632-893587BD4EC3"
+      InstallerVersion="500"
+      Compressed="yes"
+      Scope="perMachine">
 
-    <Package
-        InstallerVersion="500"
-        Compressed="yes"
-        InstallScope="perMachine"
-        Description="Bhudi native RMM agent — no Python required"
-        Manufacturer="Bhudi / Cyber Bastion" />
 
     <MajorUpgrade
         DowngradeErrorMessage="A newer version of Bhudi Agent is already installed. Remove it first."
@@ -94,5 +90,5 @@
         <RegistryValue Root="HKCU" Key="Software\Bhudi\Agent" Name="installed" Type="integer" Value="1" KeyPath="yes" />
       </Component>
     </ComponentGroup>
-  </Product>
+  </Package>
 </Wix>
