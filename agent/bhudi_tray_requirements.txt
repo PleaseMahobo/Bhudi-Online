@@ -1,0 +1,2 @@
+# Uses the Python standard library only for the initial tray ticket window.
+# Package as BhudiTray.exe with the existing Windows agent build pipeline.
