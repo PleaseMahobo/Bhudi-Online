@@ -30,6 +30,13 @@ config = context.config
 
 database_url = os.getenv("DATABASE_URL")
 
+# Railway/PostgreSQL deployments use psycopg v3. Normalize SQLAlchemy URLs
+# so Alembic never falls back to the psycopg2 dialect.
+if database_url and database_url.startswith("postgresql://"):
+    database_url = database_url.replace("postgresql://", "postgresql+psycopg://", 1)
+elif database_url and database_url.startswith("postgres://"):
+    database_url = database_url.replace("postgres://", "postgresql+psycopg://", 1)
+
 if not database_url:
     raise RuntimeError(
         "DATABASE_URL environment variable is not set."
