@@ -1,13 +1,13 @@
 """add Supabase auth identity mapping
 
 Revision ID: phase_14a_supabase_auth_id
-Revises: abcd1234
+Revises: f7a8b9c0d1e2
 """
 from alembic import op
 import sqlalchemy as sa
 
 revision = "phase_14a_supabase_auth_id"
-down_revision = "abcd1234"
+down_revision = "f7a8b9c0d1e2"
 branch_labels = None
 depends_on = None
 
