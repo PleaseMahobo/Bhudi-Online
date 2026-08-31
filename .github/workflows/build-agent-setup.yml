@@ -136,7 +136,7 @@ jobs:
           wix extension add -g WixToolset.UI.wixext/5.0.2
       - name: Build MSI
         working-directory: agent/msi
-        run: wix build Product.wxs -ext WixToolset.UI.wixext -bindpath agent=. -o bhudi-agent-setup.msi
+        run: wix build Product.wxs -ext WixToolset.UI.wixext -d AgentDir=. -o bhudi-agent-setup.msi
       - uses: actions/upload-artifact@v4
         with:
           name: bhudi-agent-msi
