@@ -108,8 +108,8 @@ class EntitlementService:
     def _count_supportable(self, tenant_id: UUID) -> int:
         q = select(func.count()).select_from(Agent).where(
             Agent.tenant_id == tenant_id,
-            Agent.revoked.is_(False),
             Agent.trusted.is_(True),
+            Agent.revoked.is_(False),
         )
         return int(self.db.scalar(q) or 0)
 
