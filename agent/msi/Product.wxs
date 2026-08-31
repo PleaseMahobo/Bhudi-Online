@@ -5,7 +5,8 @@
     candle -dAgentDir=..\native\dist Product.wxs
     light -ext WixUIExtension Product.wixobj -out bhudi-agent-setup.msi
 -->
-<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
   <Package
       Name="Bhudi Agent"
       Language="1033"
@@ -29,7 +30,7 @@
       <ComponentGroupRef Id="ProductComponents" />
     </Feature>
 
-    <UIRef Id="WixUI_Minimal" />
+    <ui:WixUI Id="WixUI_Minimal" />
     <WixVariable Id="WixUILicenseRtf" Value="License.rtf" />
 
     <Directory Id="TARGETDIR" Name="SourceDir">
