@@ -17,14 +17,16 @@ func ensureElevated() {
     }
     exe, err := os.Executable()
     if err != nil {
-        fatal(fmt.Errorf("unable to determine installer path: %w", err))
+        fmt.Fprintln(os.Stderr, fmt.Errorf("unable to determine installer path: %w", err))
+        os.Exit(1)
     }
     script := "$p=Start-Process -FilePath $env:BHUDI_SETUP_EXE -Verb RunAs -PassThru -Wait; exit $p.ExitCode"
     cmd := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script)
     cmd.Env = append(os.Environ(), "BHUDI_SETUP_ELEVATED=1", "BHUDI_SETUP_EXE="+exe)
     cmd.Stdout, cmd.Stderr, cmd.Stdin = os.Stdout, os.Stderr, os.Stdin
     if err := cmd.Run(); err != nil {
-        fatal(fmt.Errorf("administrator elevation failed: %w", err))
+        fmt.Fprintln(os.Stderr, fmt.Errorf("administrator elevation failed: %w", err))
+        os.Exit(1)
     }
     os.Exit(0)
 }
