@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.core.dependencies import current_tenant_user
 from app.database.session import get_db
 from app.services.agent_enrollment_service import AgentEnrollmentService
+from app.services.entitlement_service import EntitlementService
 from app.state import device_state
 from app.api.v1.endpoints.agent_runtime import (
     EnrollRequest,
@@ -35,6 +36,8 @@ def create_enrollment_token(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Authenticated user has no tenant context",
         )
+
+    EntitlementService(db).require_download_allowed(tenant_id, user=user)
 
     try:
         raw, _record = AgentEnrollmentService(db).create(tenant_id)
