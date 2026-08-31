@@ -20,6 +20,9 @@ from agent.executor import execute_command_record
 from app.api.v1.endpoints import agent_commands, remote_access
 from app.core import bootstrap
 from app.database.session import get_db
+from app.core.dependencies import get_current_user
+from app.core.access_tiers import require_mfa_for_actions
+from app.models.user import User
 from app.models.agent import Agent
 
 
@@ -66,6 +69,9 @@ def _build_client() -> TestClient:
     app.include_router(remote_access.router)
     app.include_router(agent_commands.router)
     app.dependency_overrides[get_db] = override_get_db
+    test_user = User(id=uuid.uuid4(), email="test@example.com", active=True, mfa_enabled=True)
+    app.dependency_overrides[get_current_user] = lambda: test_user
+    app.dependency_overrides[require_mfa_for_actions] = lambda: test_user
     return TestClient(app)
 
 
