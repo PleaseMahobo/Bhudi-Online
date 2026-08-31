@@ -109,6 +109,7 @@ class EntitlementService:
         q = select(func.count()).select_from(Agent).where(
             Agent.tenant_id == tenant_id,
             Agent.trusted.is_(True),
+            Agent.revoked.is_(False),
         )
         return int(self.db.scalar(q) or 0)
 
@@ -235,7 +236,7 @@ class EntitlementService:
 
     def assign_supportable_on_enroll(self, tenant_id: UUID, agent: Agent) -> bool:
         ent = self.get_entitlement(tenant_id)
-        if getattr(agent, "trusted", False):
+        if getattr(agent, "trusted", False) and not getattr(agent, "revoked", False):
             return True
 
         if ent.paid and ent.seats_remaining > 0:
