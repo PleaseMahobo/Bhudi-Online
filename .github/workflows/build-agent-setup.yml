@@ -135,6 +135,9 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force agent\msi | Out-Null
           Copy-Item agent\native\dist\bhudi-agent.exe agent\msi\bhudi-agent.exe -Force
+          Copy-Item dist\BhudiTray.exe agent\msi\BhudiTray.exe -Force
+          if (!(Test-Path agent\msi\bhudi-agent.exe)) { throw "bhudi-agent.exe staging failed" }
+          if (!(Test-Path agent\msi\BhudiTray.exe)) { throw "BhudiTray.exe staging failed" }
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: "8.0.x"
