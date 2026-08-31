@@ -6,6 +6,8 @@ on:
     branches: [main]
     paths:
       - "agent/native/**"
+      - "agent/bhudi_tray.py"
+      - "agent/bhudi_tray_requirements.txt"
       - "agent/cmd/bhudi-agent-setup/**"
       - "agent/msi/**"
       - ".github/workflows/build-agent-setup.yml"
@@ -118,6 +120,14 @@ jobs:
         with:
           name: bhudi-agent-native
           path: agent/native/dist
+      - name: Build Bhudi Tray executable
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip pyinstaller
+          python -m pip install -r agent\bhudi_tray_requirements.txt
+          pyinstaller --noconsole --onefile --name BhudiTray agent\bhudi_tray.py
+          if (!(Test-Path dist\BhudiTray.exe)) { throw "BhudiTray.exe was not produced" }
+
       - name: Stage agent for WiX
         shell: pwsh
         run: |
