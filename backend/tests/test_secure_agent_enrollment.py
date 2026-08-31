@@ -29,7 +29,9 @@ def test_secure_enrollment_runs_credential_tenant_machine_agent_commit():
     tenant = Tenant(id=tenant_id, name="Customer A")
     db = Mock()
     db.scalar.side_effect = [enrollment, None, 0]
-    db.execute.return_value = MagicMock(keys=lambda: [])
+    result = MagicMock()
+    result.keys.return_value = []
+    db.execute.return_value = result
     db.get.return_value = tenant
 
     service = AgentEnrollmentService(db)
@@ -101,7 +103,9 @@ def test_integrity_failure_is_available_for_endpoint_translation():
     tenant_id = uuid4()
     enrollment = _enrollment(tenant_id)
     db.scalar.side_effect = [enrollment, None, 0]
-    db.execute.return_value = MagicMock(keys=lambda: [])
+    result = MagicMock()
+    result.keys.return_value = []
+    db.execute.return_value = result
     db.get.return_value = Tenant(id=tenant_id, name="Customer A")
 
     with pytest.raises(IntegrityError):
