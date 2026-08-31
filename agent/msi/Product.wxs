@@ -33,16 +33,14 @@
     <ui:WixUI Id="WixUI_Minimal" />
     <WixVariable Id="WixUILicenseRtf" Value="License.rtf" />
 
-    <Directory Id="TARGETDIR" Name="SourceDir">
-      <Directory Id="ProgramFiles64Folder">
+    <StandardDirectory Id="ProgramFiles64Folder">
         <Directory Id="COMPANYDIR" Name="Bhudi">
           <Directory Id="INSTALLFOLDER" Name="Agent" />
         </Directory>
-      </Directory>
-      <Directory Id="ProgramMenuFolder">
-        <Directory Id="ApplicationProgramsFolder" Name="Bhudi Agent" />
-      </Directory>
-    </Directory>
+    </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="ApplicationProgramsFolder" Name="Bhudi Agent" />
+    </StandardDirectory>
 
     <ComponentGroup Id="ProductComponents" Directory="INSTALLFOLDER">
       <Component Id="AgentBinary" Guid="9ECA2463-CE95-489E-BDF4-F435A5D9D969">
