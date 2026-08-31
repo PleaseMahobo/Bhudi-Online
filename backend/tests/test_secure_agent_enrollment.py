@@ -28,7 +28,7 @@ def test_secure_enrollment_runs_credential_tenant_machine_agent_commit():
     enrollment = _enrollment(tenant_id)
     tenant = Tenant(id=tenant_id, name="Customer A")
     db = Mock()
-    db.scalar.side_effect = [enrollment, None]
+    db.scalar.side_effect = [enrollment, None, 0]
     db.get.return_value = tenant
 
     service = AgentEnrollmentService(db)
@@ -50,7 +50,7 @@ def test_secure_enrollment_runs_credential_tenant_machine_agent_commit():
     assert enrollment.agent_id == row.id
 
     db.get.assert_called_once_with(Tenant, tenant_id)
-    assert db.scalar.call_count == 2
+    assert db.scalar.call_count == 3
     db.flush.assert_called_once_with()
     db.commit.assert_called_once_with()
     assert db.method_calls.index(call.flush()) < db.method_calls.index(call.commit())
