@@ -50,6 +50,15 @@
     <ComponentGroup Id="ProductComponents" Directory="INSTALLFOLDER">
       <Component Id="AgentBinary" Guid="9ECA2463-CE95-489E-BDF4-F435A5D9D969">
         <File
+            Id="BhudiTrayExe"
+            Name="BhudiTray.exe"
+            Source="BhudiTray.exe"
+            KeyPath="no"
+            Checksum="yes" />
+
+        <RegistryValue Root="HKLM" Key="Software\\Microsoft\\Windows\\CurrentVersion\\Run" Name="BhudiTray" Value="[#BhudiTrayExe]" Type="string" />
+
+        <File
             Id="BhudiAgentExe"
             Name="bhudi-agent.exe"
             Source="$(var.AgentDir)\bhudi-agent.exe"
