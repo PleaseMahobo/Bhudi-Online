@@ -12,7 +12,11 @@ depends_on = None
 
 def upgrade() -> None:
     uuid = postgresql.UUID(as_uuid=True)
-    op.create_table("itsm_sla_policies",
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+
+    if not inspector.has_table("itsm_sla_policies"):
+        op.create_table("itsm_sla_policies",
         sa.Column("id", uuid, primary_key=True), sa.Column("tenant_id", uuid, sa.ForeignKey("tenants.id", ondelete="CASCADE")),
         sa.Column("name", sa.String(255), nullable=False), sa.Column("priority", sa.String(32), nullable=False, server_default="medium"),
         sa.Column("response_minutes", sa.Integer(), nullable=False), sa.Column("resolve_minutes", sa.Integer(), nullable=False),
@@ -20,8 +24,11 @@ def upgrade() -> None:
         sa.Column("enabled", sa.Boolean(), nullable=False, server_default=sa.text("true")),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
-    )
-    op.create_index("ix_itsm_sla_policies_tenant_id", "itsm_sla_policies", ["tenant_id"])
+        )
+    existing_indexes = {idx["name"] for idx in sa.inspect(bind).get_indexes("itsm_sla_policies")}
+    if "ix_itsm_sla_policies_tenant_id" not in existing_indexes:
+        op.create_index("ix_itsm_sla_policies_tenant_id", "itsm_sla_policies", ["tenant_id"])
+
     op.create_table("itsm_assignment_groups",
         sa.Column("id", uuid, primary_key=True), sa.Column("tenant_id", uuid, sa.ForeignKey("tenants.id", ondelete="CASCADE")),
         sa.Column("name", sa.String(128), nullable=False), sa.Column("description", sa.Text()),
