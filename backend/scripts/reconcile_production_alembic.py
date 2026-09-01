@@ -7,7 +7,8 @@ BASELINE = "l6m7n8o9p0q1"
 TARGET = "m7n8o9p0q1r2"
 
 def versions():
-    conn = psycopg.connect(os.environ["DATABASE_URL"])
+    url = os.environ["DATABASE_URL"].replace("postgresql+psycopg://", "postgresql://", 1)
+    conn = psycopg.connect(url)
     try:
         with conn.cursor() as cur:
             cur.execute("""
