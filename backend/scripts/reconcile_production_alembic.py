@@ -1,13 +1,17 @@
 import os
 import subprocess
 import sys
+
 import psycopg
 
 BASELINE = "l6m7n8o9p0q1"
 TARGET = "m7n8o9p0q1r2"
 
+
 def versions():
-    url = os.environ["DATABASE_URL"].replace("postgresql+psycopg://", "postgresql://", 1)
+    url = os.environ["DATABASE_URL"].replace(
+        "postgresql+psycopg://", "postgresql://", 1
+    )
     conn = psycopg.connect(url)
     try:
         with conn.cursor() as cur:
@@ -24,23 +28,32 @@ def versions():
     finally:
         conn.close()
 
+
 before = versions()
 print(f"[reconcile] production alembic state before: {before}")
 
 if before is None or before == []:
-    print(f"[reconcile] stamping existing production schema at merge baseline {BASELINE}")
-    subprocess.run([sys.executable, "-m", "alembic", "stamp", BASELINE], check=True)
+    # An unversioned existing schema is the only state that needs an explicit
+    # reconciliation baseline. Never overwrite a real recorded revision.
+    print(f"[reconcile] stamping unversioned production schema at {BASELINE}")
+    subprocess.run(
+        [sys.executable, "-m", "alembic", "stamp", BASELINE],
+        check=True,
+    )
 elif before == [TARGET]:
     print("[reconcile] production database is already at target revision")
+    print("[reconcile] SUCCESS")
     sys.exit(0)
-elif before != [BASELINE]:
-    print(f"[reconcile] REFUSING to overwrite unexpected Alembic state: {before}", file=sys.stderr)
-    sys.exit(2)
 else:
-    print(f"[reconcile] merge baseline already present: {BASELINE}")
+    # Preserve the authoritative production history and let Alembic calculate
+    # the valid graph path to the single merged head.
+    print("[reconcile] preserving recorded production history and upgrading forward")
 
 print("[reconcile] running forward migrations to head")
-subprocess.run([sys.executable, "-m", "alembic", "upgrade", "head"], check=True)
+subprocess.run(
+    [sys.executable, "-m", "alembic", "upgrade", "head"],
+    check=True,
+)
 
 after = versions()
 print(f"[reconcile] production alembic state after: {after}")
