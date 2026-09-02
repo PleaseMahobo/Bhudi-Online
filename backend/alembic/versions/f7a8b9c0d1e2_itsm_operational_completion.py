@@ -13,7 +13,10 @@ depends_on = None
 
 def upgrade() -> None:
     uuid = postgresql.UUID(as_uuid=True)
-    op.create_table(
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    if not inspector.has_table("itsm_ticket_assignments"):
+        op.create_table(
         "itsm_ticket_assignments",
         sa.Column("id", uuid, primary_key=True),
         sa.Column("ticket_id", uuid, sa.ForeignKey("service_tickets.id", ondelete="CASCADE"), nullable=False),
@@ -26,11 +29,16 @@ def upgrade() -> None:
         sa.Column("unassigned_at", sa.DateTime(timezone=True)),
         sa.UniqueConstraint("ticket_id", "technician_id", name="uq_itsm_ticket_assignment"),
     )
-    op.create_index("ix_itsm_ticket_assignments_ticket_id", "itsm_ticket_assignments", ["ticket_id"])
-    op.create_index("ix_itsm_ticket_assignments_technician_id", "itsm_ticket_assignments", ["technician_id"])
-    op.create_index("ix_itsm_ticket_assignments_tenant_id", "itsm_ticket_assignments", ["tenant_id"])
+    existing = {idx["name"] for idx in sa.inspect(bind).get_indexes("itsm_ticket_assignments")}
+    if "ix_itsm_ticket_assignments_ticket_id" not in existing:
+        op.create_index("ix_itsm_ticket_assignments_ticket_id", "itsm_ticket_assignments", ["ticket_id"])
+    if "ix_itsm_ticket_assignments_technician_id" not in existing:
+        op.create_index("ix_itsm_ticket_assignments_technician_id", "itsm_ticket_assignments", ["technician_id"])
+    if "ix_itsm_ticket_assignments_tenant_id" not in existing:
+        op.create_index("ix_itsm_ticket_assignments_tenant_id", "itsm_ticket_assignments", ["tenant_id"])
 
-    op.create_table(
+    if not inspector.has_table("itsm_sla_escalations"):
+        op.create_table(
         "itsm_sla_escalations",
         sa.Column("id", uuid, primary_key=True),
         sa.Column("ticket_id", uuid, sa.ForeignKey("service_tickets.id", ondelete="CASCADE"), nullable=False),
@@ -44,8 +52,11 @@ def upgrade() -> None:
         sa.Column("notified_at", sa.DateTime(timezone=True)),
         sa.UniqueConstraint("ticket_id", "breach_type", "level", name="uq_itsm_sla_escalation"),
     )
-    op.create_index("ix_itsm_sla_escalations_ticket_id", "itsm_sla_escalations", ["ticket_id"])
-    op.create_index("ix_itsm_sla_escalations_tenant_id", "itsm_sla_escalations", ["tenant_id"])
+    existing = {idx["name"] for idx in sa.inspect(bind).get_indexes("itsm_sla_escalations")}
+    if "ix_itsm_sla_escalations_ticket_id" not in existing:
+        op.create_index("ix_itsm_sla_escalations_ticket_id", "itsm_sla_escalations", ["ticket_id"])
+    if "ix_itsm_sla_escalations_tenant_id" not in existing:
+        op.create_index("ix_itsm_sla_escalations_tenant_id", "itsm_sla_escalations", ["tenant_id"])
 
 
 def downgrade() -> None:
