@@ -29,28 +29,37 @@ def upgrade() -> None:
     if "ix_itsm_sla_policies_tenant_id" not in existing_indexes:
         op.create_index("ix_itsm_sla_policies_tenant_id", "itsm_sla_policies", ["tenant_id"])
 
-    op.create_table("itsm_assignment_groups",
+    if not inspector.has_table("itsm_assignment_groups"):
+        op.create_table("itsm_assignment_groups",
         sa.Column("id", uuid, primary_key=True), sa.Column("tenant_id", uuid, sa.ForeignKey("tenants.id", ondelete="CASCADE")),
         sa.Column("name", sa.String(128), nullable=False), sa.Column("description", sa.Text()),
         sa.Column("escalation_policy_id", uuid, sa.ForeignKey("escalation_policies.id", ondelete="SET NULL")),
         sa.Column("enabled", sa.Boolean(), nullable=False, server_default=sa.text("true")),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
     )
-    op.create_index("ix_itsm_assignment_groups_tenant_id", "itsm_assignment_groups", ["tenant_id"])
-    op.create_table("itsm_ticket_history",
+    existing_indexes = {idx["name"] for idx in sa.inspect(bind).get_indexes("itsm_assignment_groups")}
+    if "ix_itsm_assignment_groups_tenant_id" not in existing_indexes:
+        op.create_index("ix_itsm_assignment_groups_tenant_id", "itsm_assignment_groups", ["tenant_id"])
+    if not inspector.has_table("itsm_ticket_history"):
+        op.create_table("itsm_ticket_history",
         sa.Column("id", uuid, primary_key=True), sa.Column("ticket_id", uuid, sa.ForeignKey("service_tickets.id", ondelete="CASCADE"), nullable=False),
         sa.Column("tenant_id", uuid, sa.ForeignKey("tenants.id", ondelete="CASCADE")), sa.Column("actor", sa.String(255)),
         sa.Column("action", sa.String(64), nullable=False), sa.Column("field", sa.String(128)), sa.Column("old_value", sa.Text()), sa.Column("new_value", sa.Text()),
         sa.Column("metadata", sa.JSON()), sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
     )
-    op.create_index("ix_itsm_ticket_history_ticket_id", "itsm_ticket_history", ["ticket_id"])
-    op.create_table("itsm_ticket_attachments",
+    existing_indexes = {idx["name"] for idx in sa.inspect(bind).get_indexes("itsm_ticket_history")}
+    if "ix_itsm_ticket_history_ticket_id" not in existing_indexes:
+        op.create_index("ix_itsm_ticket_history_ticket_id", "itsm_ticket_history", ["ticket_id"])
+    if not inspector.has_table("itsm_ticket_attachments"):
+        op.create_table("itsm_ticket_attachments",
         sa.Column("id", uuid, primary_key=True), sa.Column("ticket_id", uuid, sa.ForeignKey("service_tickets.id", ondelete="CASCADE"), nullable=False),
         sa.Column("tenant_id", uuid, sa.ForeignKey("tenants.id", ondelete="CASCADE")), sa.Column("filename", sa.String(512), nullable=False),
         sa.Column("content_type", sa.String(255)), sa.Column("storage_key", sa.String(1024), nullable=False), sa.Column("size_bytes", sa.Integer()),
         sa.Column("uploaded_by", sa.String(255)), sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
     )
-    op.create_index("ix_itsm_ticket_attachments_ticket_id", "itsm_ticket_attachments", ["ticket_id"])
+    existing_indexes = {idx["name"] for idx in sa.inspect(bind).get_indexes("itsm_ticket_attachments")}
+    if "ix_itsm_ticket_attachments_ticket_id" not in existing_indexes:
+        op.create_index("ix_itsm_ticket_attachments_ticket_id", "itsm_ticket_attachments", ["ticket_id"])
 
 
 def downgrade() -> None:
