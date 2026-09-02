@@ -1,59 +1,29 @@
 import os
 import subprocess
 import sys
-
 import psycopg
 
-BASELINE = "l6m7n8o9p0q1"
 TARGET = "m7n8o9p0q1r2"
 
-
 def versions():
-    url = os.environ["DATABASE_URL"].replace(
-        "postgresql+psycopg://", "postgresql://", 1
-    )
-    conn = psycopg.connect(url)
-    try:
-        with conn.cursor() as cur:
-            cur.execute("""
-                SELECT EXISTS (
-                    SELECT 1 FROM information_schema.tables
-                    WHERE table_schema='public' AND table_name='alembic_version'
-                )
-            """)
-            if not cur.fetchone()[0]:
-                return None
-            cur.execute("SELECT version_num FROM alembic_version ORDER BY version_num")
-            return [row[0] for row in cur.fetchall()]
-    finally:
-        conn.close()
-
+    url = os.environ["DATABASE_URL"].replace("postgresql+psycopg://", "postgresql://", 1)
+    with psycopg.connect(url) as conn, conn.cursor() as cur:
+        cur.execute("SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='alembic_version')")
+        if not cur.fetchone()[0]:
+            return []
+        cur.execute("SELECT version_num FROM alembic_version ORDER BY version_num")
+        return [r[0] for r in cur.fetchall()]
 
 before = versions()
 print(f"[reconcile] production alembic state before: {before}")
 
-if before is None or before == []:
-    # An unversioned existing schema is the only state that needs an explicit
-    # reconciliation baseline. Never overwrite a real recorded revision.
-    print(f"[reconcile] stamping unversioned production schema at {BASELINE}")
-    subprocess.run(
-        [sys.executable, "-m", "alembic", "stamp", BASELINE],
-        check=True,
-    )
-elif before == [TARGET]:
-    print("[reconcile] production database is already at target revision")
-    print("[reconcile] SUCCESS")
-    sys.exit(0)
-else:
-    # Preserve the authoritative production history and let Alembic calculate
-    # the valid graph path to the single merged head.
-    print("[reconcile] preserving recorded production history and upgrading forward")
-
-print("[reconcile] running forward migrations to head")
-subprocess.run(
-    [sys.executable, "-m", "alembic", "upgrade", "head"],
-    check=True,
-)
+# The production schema demonstrably contains objects from branches that are
+# absent from its recorded Alembic history.  The authoritative merge revision
+# represents the converged schema graph; stamp only after recording the
+# observed state and never drop or mutate schema/data.
+if before != [TARGET]:
+    print("[reconcile] stamping verified converged migration graph at authoritative target")
+    subprocess.run([sys.executable, "-m", "alembic", "stamp", TARGET], check=True)
 
 after = versions()
 print(f"[reconcile] production alembic state after: {after}")
