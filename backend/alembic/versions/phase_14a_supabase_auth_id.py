@@ -13,7 +13,10 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column("users", sa.Column("supabase_auth_id", sa.Uuid(), nullable=True))
+    bind = op.get_bind()
+    columns = {col["name"] for col in sa.inspect(bind).get_columns("users")}
+    if "supabase_auth_id" not in columns:
+        op.add_column("users", sa.Column("supabase_auth_id", sa.Uuid(), nullable=True))
     op.create_index("ix_users_supabase_auth_id", "users", ["supabase_auth_id"], unique=True)
 
 
