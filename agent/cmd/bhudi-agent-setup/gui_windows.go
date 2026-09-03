@@ -12,7 +12,7 @@ import (
 // runInstallerGUI launches a native Windows Forms wizard through the Windows
 // PowerShell runtime. The setup executable itself is built with -H=windowsgui,
 // so no console window is shown to the customer.
-func runInstallerGUI() {
+func runInstallerGUI() error {
 	script := `$ErrorActionPreference='Stop'
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
@@ -164,15 +164,18 @@ $next.Add_Click({
 
 	tmp := filepath.Join(os.TempDir(), fmt.Sprintf("bhudi-installer-%d.ps1", os.Getpid()))
 	if err := os.WriteFile(tmp, []byte(script), 0600); err != nil {
-		return
+		return fmt.Errorf("create installer UI script: %w", err)
 	}
 	defer os.Remove(tmp)
 
 	exe, err := os.Executable()
 	if err != nil {
-		return
+		return fmt.Errorf("determine installer executable path: %w", err)
 	}
 	cmd := exec.Command("powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", tmp)
 	cmd.Env = append(os.Environ(), "BHUDI_SETUP_EXE="+exe)
-	_ = cmd.Run()
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("start installer UI: %w", err)
+	}
+	return nil
 }
