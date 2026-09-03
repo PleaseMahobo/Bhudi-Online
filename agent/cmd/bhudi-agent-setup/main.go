@@ -26,7 +26,9 @@ type installedIdentity struct { AgentID string `json:"agent_id"`; AgentToken str
 
 func main() {
 	if runtime.GOOS == "windows" && len(os.Args) == 1 {
-		runInstallerGUI()
+		if err := runInstallerGUI(); err != nil {
+			fail("Bhudi Agent Setup could not start the installer interface.\nDetails: " + err.Error())
+		}
 		return
 	}
 	if runtime.GOOS == "windows" && len(os.Args) > 1 && strings.EqualFold(os.Args[1], "install-worker") {
