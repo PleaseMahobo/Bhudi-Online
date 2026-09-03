@@ -74,13 +74,12 @@ $cancel.Location = New-Object Drawing.Point(490,325)
 $cancel.Size = New-Object Drawing.Size(80,28)
 $form.Controls.Add($cancel)
 
-$page = 0
-$worker = $null
+$state = [pscustomobject]@{ Page = 0; Worker = $null; Timer = $null }
 
 $cancel.Add_Click({ $form.Close() })
 $back.Add_Click({
-    if ($page -eq 1) {
-        $page = 0
+    if ($state.Page -eq 1) {
+        $state.Page = 0
         $body.Text = 'Welcome to the Bhudi Agent Setup Wizard.' + [Environment]::NewLine + '' + [Environment]::NewLine + 'This wizard installs and enrolls the Bhudi endpoint agent, registers the Windows service, and installs the Bhudi Support Client.' + [Environment]::NewLine + '' + [Environment]::NewLine + 'Click Next to continue.'
         $back.Enabled = $false
         $next.Text = 'Next >'
@@ -90,22 +89,22 @@ $back.Add_Click({
 })
 
 $next.Add_Click({
-    if ($page -eq 0) {
-        $page = 1
+    if ($state.Page -eq 0) {
+        $state.Page = 1
         $body.Text = 'The installer is ready to install the Bhudi Agent on this computer.' + [Environment]::NewLine + '' + [Environment]::NewLine + 'The customer enrollment payload embedded in this installer will be used. No credentials will be displayed.'
         $back.Enabled = $true
         $next.Text = 'Install'
         return
     }
 
-    if ($page -eq 1) {
-        $page = 2
+    if ($state.Page -eq 1) {
+        $state.Page = 2
         $back.Enabled = $false
         $cancel.Enabled = $false
         $next.Enabled = $false
         $next.Text = 'Installing...'
         $body.Text = 'Installing Bhudi Agent...' + [Environment]::NewLine + '' + [Environment]::NewLine + 'Please wait while the endpoint is enrolled and the Windows service is registered.'
-        $status.Text = 'Preparing installation...'
+        $status.Text = 'Starting installation worker...'
         $progress.Style = 'Marquee'
         $progress.MarqueeAnimationSpeed = 25
 
@@ -118,20 +117,20 @@ $next.Add_Click({
         $psi.RedirectStandardOutput = $true
         $psi.RedirectStandardError = $true
         $psi.RedirectStandardInput = $false
-        $worker = New-Object Diagnostics.Process
-        $worker.StartInfo = $psi
-        [void]$worker.Start()
+        $state.Worker = New-Object Diagnostics.Process
+        $state.Worker.StartInfo = $psi
+        [void]$state.Worker.Start()
 
-        $timer = New-Object Windows.Forms.Timer
-        $timer.Interval = 400
-        $timer.Add_Tick({
-            if ($worker.HasExited) {
-                $timer.Stop()
+        $state.Timer = New-Object Windows.Forms.Timer
+        $state.Timer.Interval = 400
+        $state.Timer.Add_Tick({
+            if ($state.Worker.HasExited) {
+                $state.Timer.Stop()
                 $progress.Style = 'Continuous'
                 $progress.MarqueeAnimationSpeed = 0
-                $out = $worker.StandardOutput.ReadToEnd()
-                $err = $worker.StandardError.ReadToEnd()
-                if ($worker.ExitCode -eq 0) {
+                $out = $state.Worker.StandardOutput.ReadToEnd()
+                $err = $state.Worker.StandardError.ReadToEnd()
+                if ($state.Worker.ExitCode -eq 0) {
                     $progress.Value = 100
                     $status.Text = 'Installation completed successfully.'
                     $body.Text = 'Bhudi Agent Setup completed successfully.' + [Environment]::NewLine + '' + [Environment]::NewLine + 'The Bhudi Agent is enrolled and the Windows service has been installed. The agent will start automatically with Windows.'
@@ -150,7 +149,7 @@ $next.Add_Click({
                 }
             }
         })
-        $timer.Start()
+        $state.Timer.Start()
     }
 })
 
