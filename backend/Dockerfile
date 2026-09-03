@@ -5,10 +5,6 @@ WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
-# WebSocket memory / protocol defaults (overridable at runtime)
-# - WS_MAX_SIZE: 1 MiB is enough for alert batches (default uvicorn is 16 MiB)
-# - WS_MAX_QUEUE: smaller inbound queue = less RAM under backpressure
-# - WS_PER_MESSAGE_DEFLATE: set false under very high concurrent socket counts
 ENV WS_MAX_SIZE=1048576
 ENV WS_MAX_QUEUE=16
 ENV WS_PING_INTERVAL=20
@@ -24,5 +20,5 @@ COPY . .
 
 EXPOSE 8000
 
-# Production-tuned WebSocket settings for Alert Engine / agent sockets
-CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --ws websockets --ws-max-size ${WS_MAX_SIZE} --ws-max-queue ${WS_MAX_QUEUE} --ws-ping-interval ${WS_PING_INTERVAL} --ws-ping-timeout ${WS_PING_TIMEOUT} --ws-per-message-deflate ${WS_PER_MESSAGE_DEFLATE}"]
+# Force shell, Python and Uvicorn diagnostics into Railway logs.
+CMD ["sh", "-c", "set -eux; echo '[startup] launching Bhudi API'; echo \"[startup] PORT=$${PORT:-8000}\"; python -u -c 'import app.main; print(\"[startup] app import succeeded\")'; echo '[startup] starting uvicorn'; exec python -u -m uvicorn app.main:app --host 0.0.0.0 --port $${PORT:-8000} --log-level debug --ws websockets --ws-max-size $${WS_MAX_SIZE} --ws-max-queue $${WS_MAX_QUEUE} --ws-ping-interval $${WS_PING_INTERVAL} --ws-ping-timeout $${WS_PING_TIMEOUT} --ws-per-message-deflate $${WS_PER_MESSAGE_DEFLATE} 2>&1"]
