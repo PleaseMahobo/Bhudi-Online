@@ -66,5 +66,5 @@ if after != [TARGET]:
     print(f"[reconcile] incomplete reconciliation: state={after}", file=sys.stderr)
     sys.exit(3)
 
-print("[reconcile] verified agents runtime columns: revoked, revoked_at, revocation_reason")
+print(f"[reconcile] verified agents runtime columns: {", ".join(sorted(REQUIRED_AGENT_COLUMNS))}")
 print("[reconcile] SUCCESS")
