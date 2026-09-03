@@ -25,6 +25,15 @@ type bootstrap struct { ServerURL string `json:"server_url"`; EnrollmentToken st
 type installedIdentity struct { AgentID string `json:"agent_id"`; AgentToken string `json:"agent_token"` }
 
 func main() {
+	if runtime.GOOS == "windows" && len(os.Args) == 1 {
+		if err := runInstallerGUI(); err != nil {
+			fail("Bhudi Agent Setup could not start the installer interface.\nDetails: " + err.Error())
+		}
+		return
+	}
+	if runtime.GOOS == "windows" && len(os.Args) > 1 && strings.EqualFold(os.Args[1], "install-worker") {
+		os.Args = append([]string{os.Args[0]}, os.Args[2:]...)
+	}
 	ensureElevated()
 	boot, err := readBootstrap(); if err != nil { fail("This is not a customer-specific Bhudi installer. Download a fresh installer from the Bhudi portal.\nDetails: "+err.Error()) }
 	server := strings.TrimRight(strings.TrimSpace(boot.ServerURL), "/"); if server == "" { server = defaultServer }
