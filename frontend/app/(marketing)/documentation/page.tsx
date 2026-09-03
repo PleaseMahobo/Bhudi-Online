@@ -11,7 +11,7 @@ const GUIDES = [
   {
     icon: Download,
     title: 'Install the agent',
-    body: 'Windows EXE (install once), Linux binaries, and macOS builds. No Python on the endpoint.',
+    body: 'Windows GUI installer, Linux binaries, and macOS builds. No Python on the endpoint.',
     href: '/agents',
   },
   {
@@ -39,7 +39,7 @@ const STEPS = [
   { t: 'Download an agent', d: 'From Agents, pick Windows, Linux, or macOS and download.' },
   {
     t: 'Install on the endpoint',
-    d: 'Windows: run as Administrator → bhudi-agent.exe install -server <API URL>',
+    d: 'Windows: download BhudiAgent-Setup.exe from the Bhudi Agents page, double-click it, approve UAC, and complete the setup wizard. No command-line installation is required.',
   },
   { t: 'Confirm online', d: 'Device appears online after the first heartbeat.' },
   { t: 'Remote in', d: 'Open Remote Access, select display, Connect.' },
@@ -96,7 +96,7 @@ export default function DocumentationPage() {
             ))}
           </ol>
           <pre className="mt-8 overflow-x-auto rounded-xl bg-slate-900 p-4 text-xs text-slate-200">{
-`# Windows (elevated)\nbhudi-agent.exe install -server https://bhudi-online-production.up.railway.app\n\n# Linux\nchmod +x bhudi-agent-linux-amd64\nsudo ./bhudi-agent-linux-amd64 install -server https://bhudi-online-production.up.railway.app`
+`# Windows\nDownload BhudiAgent-Setup.exe from the Bhudi portal → double-click → approve UAC → complete the setup wizard\n\n# Linux\nchmod +x bhudi-agent-linux-amd64\nsudo ./bhudi-agent-linux-amd64 install -server https://bhudi-online-production.up.railway.app`
           }</pre>
         </div>
       </section>
