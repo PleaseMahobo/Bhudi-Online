@@ -26,9 +26,7 @@
 
     <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
 
-    <!-- Backend API (no trailing slash) -->
     <Property Id="SERVERURL" Secure="yes" Value="https://bhudi-online-production.up.railway.app" />
-    <!-- Optional multi-use enrollment token for Intune/GPO (leave empty for gold image) -->
     <Property Id="ENROLLMENTTOKEN" Secure="yes" Value="" />
 
     <Feature Id="ProductFeature" Title="Bhudi Agent" Level="1">
@@ -43,27 +41,9 @@
           <Directory Id="INSTALLFOLDER" Name="Agent" />
         </Directory>
     </StandardDirectory>
-    <StandardDirectory Id="CommonAppDataFolder">
-        <Directory Id="BhudiDataRoot" Name="Bhudi">
-          <Directory Id="BhudiAgentData" Name="Agent" />
-        </Directory>
-    </StandardDirectory>
     <StandardDirectory Id="ProgramMenuFolder">
       <Directory Id="ApplicationProgramsFolder" Name="Bhudi Agent" />
     </StandardDirectory>
-
-    <!-- After files: write config + optional token for first enroll -->
-    <CustomAction
-        Id="WriteAgentConfig"
-        Directory="BhudiAgentData"
-        ExeCommand="cmd.exe /c "if not exist "[BhudiAgentData]" mkdir "[BhudiAgentData]" & echo {"server_url":"[SERVERURL]"}>"[BhudiAgentData]agent_config.json" & if not "[ENROLLMENTTOKEN]"=="" echo [ENROLLMENTTOKEN]>"[BhudiAgentData]enrollment_token.txt"""
-        Execute="deferred"
-        Impersonate="no"
-        Return="ignore" />
-
-    <InstallExecuteSequence>
-      <Custom Action="WriteAgentConfig" After="InstallFiles" Condition="NOT REMOVE" />
-    </InstallExecuteSequence>
 
     <ComponentGroup Id="ProductComponents" Directory="INSTALLFOLDER">
       <Component Id="AgentBinary" Guid="9ECA2463-CE95-489E-BDF4-F435A5D9D969">
@@ -98,6 +78,7 @@
         <RegistryValue Root="HKLM" Key="Software\Microsoft\Windows\CurrentVersion\Uninstall\BhudiAgent" Name="Publisher" Value="Bhudi / Cyber Bastion" Type="string" />
         <RegistryValue Root="HKLM" Key="Software\Microsoft\Windows\CurrentVersion\Uninstall\BhudiAgent" Name="DisplayVersion" Value="2.2.0" Type="string" />
         <RegistryValue Root="HKLM" Key="Software\Bhudi\Agent" Name="ServerUrl" Type="string" Value="[SERVERURL]" />
+        <RegistryValue Root="HKLM" Key="Software\Bhudi\Agent" Name="EnrollmentToken" Type="string" Value="[ENROLLMENTTOKEN]" />
       </Component>
 
       <Component Id="SupportClientBinary" Guid="B7E2C41A-9D5F-4A2B-8C31-0E6F9A12D4B8">
