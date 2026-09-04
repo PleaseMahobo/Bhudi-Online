@@ -18,8 +18,8 @@ func runInstallerGUI() {
 	defer mw.Dispose()
 
 	mw.SetTitle("Bhudi Agent Setup")
-	mw.SetSize(walk.Size{Width: 620, Height: 400})
-	mw.SetMinMaxSize(walk.Size{Width: 620, Height: 400}, walk.Size{Width: 620, Height: 400})
+	mw.SetSize(walk.Size{Width: 640, Height: 460})
+	mw.SetMinMaxSize(walk.Size{Width: 640, Height: 460}, walk.Size{Width: 640, Height: 460})
 	_ = mw.SetLayout(walk.NewVBoxLayout())
 
 	title, _ := walk.NewLabel(mw)
@@ -30,13 +30,21 @@ func runInstallerGUI() {
 	}
 	title.SetTextAlignment(walk.AlignNear)
 
+	slogan, _ := walk.NewLabel(mw)
+	sloganFont, err := walk.NewFont("Segoe UI", 10, walk.FontItalic)
+	if err == nil {
+		slogan.SetFont(sloganFont)
+	}
+	slogan.SetText("A Big Brother's Approach to Remote Monitoring and Management")
+	slogan.SetTextAlignment(walk.AlignNear)
+
 	body, _ := walk.NewLabel(mw)
 	bodyFont, err := walk.NewFont("Segoe UI", 10, 0)
 	if err == nil {
 		body.SetFont(bodyFont)
 	}
-	body.SetText("Welcome to the Bhudi Agent Setup Wizard.\r\n\r\nThis wizard installs and enrolls the Bhudi endpoint agent and registers the Windows service.\r\n\r\nClick Next to continue.")
-	body.SetMinMaxSize(walk.Size{Width: 540, Height: 180}, walk.Size{Width: 540, Height: 180})
+	body.SetText("Welcome to the Bhudi Agent Setup Wizard.\r\n\r\nThis wizard installs and enrolls the Bhudi endpoint agent and the Support Client, then registers the Windows service.\r\n\r\nClick Next to continue.")
+	body.SetMinMaxSize(walk.Size{Width: 560, Height: 160}, walk.Size{Width: 560, Height: 160})
 
 	status, _ := walk.NewLabel(mw)
 	status.SetText("")
@@ -58,9 +66,11 @@ func runInstallerGUI() {
 	var running bool
 
 	back.Clicked().Attach(func() {
-		if running || page != 1 { return }
+		if running || page != 1 {
+			return
+		}
 		page = 0
-		body.SetText("Welcome to the Bhudi Agent Setup Wizard.\r\n\r\nThis wizard installs and enrolls the Bhudi endpoint agent and registers the Windows service.\r\n\r\nClick Next to continue.")
+		body.SetText("Welcome to the Bhudi Agent Setup Wizard.\r\n\r\nThis wizard installs and enrolls the Bhudi endpoint agent and the Support Client, then registers the Windows service.\r\n\r\nClick Next to continue.")
 		back.SetEnabled(false)
 		next.SetText("Next >")
 	})
@@ -68,22 +78,27 @@ func runInstallerGUI() {
 	cancel.Clicked().Attach(func() { mw.Close() })
 
 	next.Clicked().Attach(func() {
-		if next.Text() == "Finish" || next.Text() == "Close" { mw.Close(); return }
+		if next.Text() == "Finish" || next.Text() == "Close" {
+			mw.Close()
+			return
+		}
 		if page == 0 {
 			page = 1
-			body.SetText("The installer is ready to install the Bhudi Agent on this computer.\r\n\r\nThe customer enrollment payload embedded in this installer will be used. No credentials will be displayed.")
+			body.SetText("The installer is ready to install Bhudi Agent on this computer.\r\n\r\nBoth the monitoring agent and the Support Client will be installed together.\r\n\r\nThe customer enrollment payload embedded in this installer will be used. No credentials will be displayed.")
 			back.SetEnabled(true)
 			next.SetText("Install")
 			return
 		}
-		if page != 1 || running { return }
+		if page != 1 || running {
+			return
+		}
 
 		running = true
 		back.SetEnabled(false)
 		cancel.SetEnabled(false)
 		next.SetEnabled(false)
 		next.SetText("Installing...")
-		body.SetText("Installing Bhudi Agent...\r\n\r\nPlease wait while the endpoint is enrolled and the Windows service is registered.")
+		body.SetText("Installing Bhudi Agent...\r\n\r\nPlease wait while the endpoint is enrolled, the Windows service is registered, and the Support Client is installed.")
 		status.SetText("Starting installation worker...")
 		progress.SetVisible(true)
 		progress.SetMarqueeMode(true)
@@ -106,7 +121,7 @@ func runInstallerGUI() {
 					return
 				}
 				status.SetText("Installation completed successfully.")
-				body.SetText("Bhudi Agent Setup completed successfully.\r\n\r\nThe Bhudi Agent is enrolled and the Windows service has been installed.")
+				body.SetText("Bhudi Agent Setup completed successfully.\r\n\r\nThe Bhudi Agent is enrolled, the Windows service is running, and the Support Client has been installed.")
 				next.SetText("Finish")
 			})
 		}()
