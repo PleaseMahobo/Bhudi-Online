@@ -3,187 +3,105 @@
 package main
 
 import (
-	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
+
+	"github.com/lxn/walk"
 )
 
-// runInstallerGUI launches a native Windows Forms wizard through the Windows
-// PowerShell runtime. The setup executable itself is built with -H=windowsgui,
-// so no console window is shown to the customer.
 func runInstallerGUI() {
-	script := `param([string]$SetupExe)
-$ErrorActionPreference='Stop'
-Add-Type -AssemblyName System.Windows.Forms
-Add-Type -AssemblyName System.Drawing
+	mw, err := walk.NewMainWindow()
+	if err != nil { return }
+	defer mw.Dispose()
 
-$form = New-Object Windows.Forms.Form
-$form.Text = 'Bhudi Agent Setup'
-$form.StartPosition = 'CenterScreen'
-$form.Size = New-Object Drawing.Size(620,400)
-$form.FormBorderStyle = 'FixedDialog'
-$form.MaximizeBox = $false
-$form.MinimizeBox = $false
+	mw.SetTitle("Bhudi Agent Setup")
+	mw.SetSize(walk.Size{Width: 620, Height: 400})
+	mw.SetMinMaxSize(walk.Size{Width: 620, Height: 400}, walk.Size{Width: 620, Height: 400})
+	_ = mw.SetLayout(walk.NewVBoxLayout())
 
-$title = New-Object Windows.Forms.Label
-$title.Text = 'Bhudi Agent Setup'
-$title.Font = New-Object Drawing.Font('Segoe UI',18,[Drawing.FontStyle]::Bold)
-$title.Location = New-Object Drawing.Point(30,25)
-$title.AutoSize = $true
-$form.Controls.Add($title)
+	title, _ := walk.NewLabel(mw)
+	title.SetText("Bhudi Agent Setup")
+	title.SetFont(walk.Font{Family: "Segoe UI", PointSize: 18, Bold: true})
+	title.SetTextAlignment(walk.AlignNear)
 
-$body = New-Object Windows.Forms.Label
-$body.Text = 'Welcome to the Bhudi Agent Setup Wizard.' + [Environment]::NewLine + '' + [Environment]::NewLine + 'This wizard installs and enrolls the Bhudi endpoint agent, registers the Windows service, and installs the Bhudi Support Client.' + [Environment]::NewLine + '' + [Environment]::NewLine + 'Click Next to continue.'
-$body.Font = New-Object Drawing.Font('Segoe UI',10)
-$body.Location = New-Object Drawing.Point(30,80)
-$body.Size = New-Object Drawing.Size(540,170)
-$form.Controls.Add($body)
+	body, _ := walk.NewLabel(mw)
+	body.SetFont(walk.Font{Family: "Segoe UI", PointSize: 10})
+	body.SetText("Welcome to the Bhudi Agent Setup Wizard.\r\n\r\nThis wizard installs and enrolls the Bhudi endpoint agent and registers the Windows service.\r\n\r\nClick Next to continue.")
+	body.SetMinMaxSize(walk.Size{Width: 540, Height: 180}, walk.Size{Width: 540, Height: 180})
 
-$status = New-Object Windows.Forms.Label
-$status.Text = ''
-$status.Font = New-Object Drawing.Font('Segoe UI',9)
-$status.Location = New-Object Drawing.Point(30,255)
-$status.Size = New-Object Drawing.Size(540,30)
-$form.Controls.Add($status)
+	status, _ := walk.NewLabel(mw)
+	status.SetText("")
 
-$progress = New-Object Windows.Forms.ProgressBar
-$progress.Location = New-Object Drawing.Point(30,290)
-$progress.Size = New-Object Drawing.Size(540,20)
-$progress.Style = 'Continuous'
-$progress.Minimum = 0
-$progress.Maximum = 100
-$progress.Value = 0
-$form.Controls.Add($progress)
+	progress, _ := walk.NewProgressBar(mw)
+	progress.SetVisible(false)
 
-$back = New-Object Windows.Forms.Button
-$back.Text = '< Back'
-$back.Location = New-Object Drawing.Point(300,325)
-$back.Size = New-Object Drawing.Size(85,28)
-$back.Enabled = $false
-$form.Controls.Add($back)
+	buttons, _ := walk.NewComposite(mw)
+	_ = buttons.SetLayout(walk.NewHBoxLayout())
+	back, _ := walk.NewPushButton(buttons)
+	back.SetText("< Back")
+	back.SetEnabled(false)
+	next, _ := walk.NewPushButton(buttons)
+	next.SetText("Next >")
+	cancel, _ := walk.NewPushButton(buttons)
+	cancel.SetText("Cancel")
 
-$next = New-Object Windows.Forms.Button
-$next.Text = 'Next >'
-$next.Location = New-Object Drawing.Point(395,325)
-$next.Size = New-Object Drawing.Size(85,28)
-$form.Controls.Add($next)
+	page := 0
+	var running bool
 
-$cancel = New-Object Windows.Forms.Button
-$cancel.Text = 'Cancel'
-$cancel.Location = New-Object Drawing.Point(490,325)
-$cancel.Size = New-Object Drawing.Size(80,28)
-$form.Controls.Add($cancel)
+	back.Clicked().Attach(func() {
+		if running || page != 1 { return }
+		page = 0
+		body.SetText("Welcome to the Bhudi Agent Setup Wizard.\r\n\r\nThis wizard installs and enrolls the Bhudi endpoint agent and registers the Windows service.\r\n\r\nClick Next to continue.")
+		back.SetEnabled(false)
+		next.SetText("Next >")
+	})
 
-$state = [pscustomobject]@{ Page = 0; Worker = $null; Timer = $null }
+	cancel.Clicked().Attach(func() { mw.Close() })
 
-$cancel.Add_Click({ $form.Close() })
-$back.Add_Click({
-    if ($state.Page -eq 1) {
-        $state.Page = 0
-        $body.Text = 'Welcome to the Bhudi Agent Setup Wizard.' + [Environment]::NewLine + '' + [Environment]::NewLine + 'This wizard installs and enrolls the Bhudi endpoint agent, registers the Windows service, and installs the Bhudi Support Client.' + [Environment]::NewLine + '' + [Environment]::NewLine + 'Click Next to continue.'
-        $back.Enabled = $false
-        $next.Text = 'Next >'
-        $status.Text = ''
-        $progress.Value = 0
-    }
-})
+	next.Clicked().Attach(func() {
+		if next.Text() == "Finish" || next.Text() == "Close" { mw.Close(); return }
+		if page == 0 {
+			page = 1
+			body.SetText("The installer is ready to install the Bhudi Agent on this computer.\r\n\r\nThe customer enrollment payload embedded in this installer will be used. No credentials will be displayed.")
+			back.SetEnabled(true)
+			next.SetText("Install")
+			return
+		}
+		if page != 1 || running { return }
 
-$next.Add_Click({
-    if ($state.Page -eq 0) {
-        $state.Page = 1
-        $body.Text = 'The installer is ready to install the Bhudi Agent on this computer.' + [Environment]::NewLine + '' + [Environment]::NewLine + 'The customer enrollment payload embedded in this installer will be used. No credentials will be displayed.'
-        $back.Enabled = $true
-        $next.Text = 'Install'
-        return
-    }
+		running = true
+		back.SetEnabled(false)
+		cancel.SetEnabled(false)
+		next.SetEnabled(false)
+		next.SetText("Installing...")
+		body.SetText("Installing Bhudi Agent...\r\n\r\nPlease wait while the endpoint is enrolled and the Windows service is registered.")
+		status.SetText("Starting installation worker...")
+		progress.SetVisible(true)
+		progress.SetMarqueeMode(true)
 
-    if ($state.Page -eq 1) {
-        $state.Page = 2
-        $back.Enabled = $false
-        $cancel.Enabled = $false
-        $next.Enabled = $false
-        $next.Text = 'Installing...'
-        $body.Text = 'Installing Bhudi Agent...' + [Environment]::NewLine + '' + [Environment]::NewLine + 'Please wait while the endpoint is enrolled and the Windows service is registered.'
-        $status.Text = 'Starting installation worker...'
-        $progress.Style = 'Marquee'
-        $progress.MarqueeAnimationSpeed = 25
+		go func() {
+			exe, e := os.Executable()
+			if e == nil {
+				cmd := exec.Command(exe, "install-worker")
+				e = cmd.Run()
+			}
+			mw.Synchronize(func() {
+				running = false
+				progress.SetMarqueeMode(false)
+				progress.SetVisible(false)
+				next.SetEnabled(true)
+				if e != nil {
+					status.SetText("Installation failed.")
+					body.SetText("Bhudi Agent Setup could not complete the installation.\r\n\r\n" + e.Error())
+					next.SetText("Close")
+					return
+				}
+				status.SetText("Installation completed successfully.")
+				body.SetText("Bhudi Agent Setup completed successfully.\r\n\r\nThe Bhudi Agent is enrolled and the Windows service has been installed.")
+				next.SetText("Finish")
+			})
+		}()
+	})
 
-        $log = Join-Path $env:TEMP ('bhudi-setup-' + [guid]::NewGuid().ToString() + '.log')
-        $psi = New-Object Diagnostics.ProcessStartInfo
-        $psi.FileName = $SetupExe
-        $psi.Arguments = 'install-worker'
-        $psi.UseShellExecute = $false
-        $psi.CreateNoWindow = $true
-        $psi.RedirectStandardOutput = $true
-        $psi.RedirectStandardError = $true
-        $psi.RedirectStandardInput = $false
-        $state.Worker = New-Object Diagnostics.Process
-        $state.Worker.StartInfo = $psi
-        try {
-            [void]$state.Worker.Start()
-        } catch {
-            $progress.Style = 'Continuous'
-            $progress.MarqueeAnimationSpeed = 0
-            $status.Text = 'Installation worker could not be started.'
-            $body.Text = 'Bhudi Agent Setup could not start the installation worker.' + [Environment]::NewLine + '' + [Environment]::NewLine + $_.Exception.Message
-            $next.Text = 'Close'
-            $next.Enabled = $true
-            $cancel.Enabled = $false
-            $next.Tag = 'fail'
-            return
-        }
-
-        $state.Timer = New-Object Windows.Forms.Timer
-        $state.Timer.Interval = 400
-        $state.Timer.Add_Tick({
-            if ($state.Worker.HasExited) {
-                $state.Timer.Stop()
-                $progress.Style = 'Continuous'
-                $progress.MarqueeAnimationSpeed = 0
-                $out = $state.Worker.StandardOutput.ReadToEnd()
-                $err = $state.Worker.StandardError.ReadToEnd()
-                if ($state.Worker.ExitCode -eq 0) {
-                    $progress.Value = 100
-                    $status.Text = 'Installation completed successfully.'
-                    $body.Text = 'Bhudi Agent Setup completed successfully.' + [Environment]::NewLine + '' + [Environment]::NewLine + 'The Bhudi Agent is enrolled and the Windows service has been installed. The agent will start automatically with Windows.'
-                    $next.Text = 'Finish'
-                    $next.Enabled = $true
-                    $cancel.Enabled = $false
-                    $next.Tag = 'finish'
-                } else {
-                    $status.Text = 'Installation failed.'
-                    $body.Text = 'Bhudi Agent Setup could not complete the installation.' + [Environment]::NewLine + '' + [Environment]::NewLine + 'Please contact your administrator and provide the installer log if requested.'
-                    $next.Text = 'Close'
-                    $next.Enabled = $true
-                    $cancel.Enabled = $false
-                    $next.Tag = 'fail'
-                    [IO.File]::WriteAllText($log, $out + "' + [Environment]::NewLine + '" + $err)
-                }
-            }
-        })
-        $state.Timer.Start()
-    }
-})
-
-$form.Add_Shown({ $form.Activate() })
-$next.Add_Click({
-    if ($next.Tag -eq 'finish' -or $next.Tag -eq 'fail') { $form.Close() }
-})
-
-[void]$form.ShowDialog()
-`
-
-	tmp := filepath.Join(os.TempDir(), fmt.Sprintf("bhudi-installer-%d.ps1", os.Getpid()))
-	if err := os.WriteFile(tmp, []byte(script), 0600); err != nil {
-		return
-	}
-	defer os.Remove(tmp)
-
-	exe, err := os.Executable()
-	if err != nil {
-		return
-	}
-	cmd := exec.Command("powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", tmp, exe)
-	_ = cmd.Run()
+	mw.Run()
 }
