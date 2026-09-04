@@ -6,123 +6,59 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 	"syscall"
 	"unsafe"
 
-	"github.com/lxn/walk"
 	"golang.org/x/sys/windows"
 )
 
-// runInstallerGUI shows a simple wizard. If walk fails (e.g. TTM_ADDTOOL on
-// some Windows builds), falls back to MessageBox + silent install-worker.
+// runInstallerGUI uses native MessageBox only.
+// Avoids github.com/lxn/walk (TTM_ADDTOOL failures on some Windows hosts).
 func runInstallerGUI() {
-	defer func() {
-		if r := recover(); r != nil {
-			runMessageBoxInstaller(fmt.Sprintf("%v", r))
-		}
-	}()
+	welcome := "Bhudi Agent Setup\r\n\r\n" +
+		"A Big Brother's Approach to Remote Monitoring and Management\r\n\r\n" +
+		"This customer installer will:\r\n" +
+		"  • Enroll this PC to your Bhudi tenant\r\n" +
+		"  • Install the monitoring agent (Windows service)\r\n" +
+		"  • Install the Support Client (tray + tickets)\r\n\r\n" +
+		"Click Yes to install now.\r\n" +
+		"Click No to cancel."
 
-	if err := tryWalkWizard(); err != nil {
-		runMessageBoxInstaller(err.Error())
+	if messageBox(welcome, "Bhudi Agent Setup", mbYesNo|mbIconQuestion) != idYes {
+		return
 	}
-}
 
-func tryWalkWizard() error {
-	mw, err := walk.NewMainWindow()
+	// Inform user work is starting (worker is silent / no console window).
+	_ = messageBox(
+		"Installing Bhudi Agent…\r\n\r\nPlease wait. This may take a minute.\r\n"+
+			"(Windows may ask for administrator permission.)",
+		"Bhudi Agent Setup",
+		mbOK|mbIconInformation,
+	)
+
+	err := runInstallWorkerProcess()
 	if err != nil {
-		return err
-	}
-	defer mw.Dispose()
-
-	mw.SetTitle("Bhudi Agent Setup")
-	mw.SetSize(walk.Size{Width: 640, Height: 420})
-	_ = mw.SetLayout(walk.NewVBoxLayout())
-
-	title, err := walk.NewTextLabel(mw)
-	if err != nil {
-		return err
-	}
-	title.SetText("Bhudi Agent Setup")
-	if f, e := walk.NewFont("Segoe UI", 16, walk.FontBold); e == nil {
-		title.SetFont(f)
+		_ = messageBox(
+			"Installation failed.\r\n\r\n"+err.Error()+"\r\n\r\n"+
+				"Tips:\r\n"+
+				"  • Run as Administrator\r\n"+
+				"  • Download a fresh installer from the Bhudi portal\r\n"+
+				"  • Check that the PC can reach the Bhudi API",
+			"Bhudi Agent Setup",
+			mbOK|mbIconError,
+		)
+		return
 	}
 
-	slogan, err := walk.NewTextLabel(mw)
-	if err != nil {
-		return err
-	}
-	slogan.SetText("A Big Brother's Approach to Remote Monitoring and Management")
-
-	body, err := walk.NewTextLabel(mw)
-	if err != nil {
-		return err
-	}
-	body.SetText(welcomeText)
-
-	status, err := walk.NewTextLabel(mw)
-	if err != nil {
-		return err
-	}
-	status.SetText("")
-
-	// Avoid ProgressBar + ToolTip paths that trigger TTM_ADDTOOL on some hosts.
-	buttons, err := walk.NewComposite(mw)
-	if err != nil {
-		return err
-	}
-	_ = buttons.SetLayout(walk.NewHBoxLayout())
-
-	next, err := walk.NewPushButton(buttons)
-	if err != nil {
-		return err
-	}
-	next.SetText("Install")
-	next.SetToolTipText("") // explicit empty — reduces tooltip init failures
-
-	cancel, err := walk.NewPushButton(buttons)
-	if err != nil {
-		return err
-	}
-	cancel.SetText("Cancel")
-	cancel.SetToolTipText("")
-
-	var running bool
-	cancel.Clicked().Attach(func() { mw.Close() })
-	next.Clicked().Attach(func() {
-		if next.Text() == "Finish" || next.Text() == "Close" {
-			mw.Close()
-			return
-		}
-		if running {
-			return
-		}
-		running = true
-		next.SetEnabled(false)
-		cancel.SetEnabled(false)
-		next.SetText("Installing...")
-		body.SetText(installingText)
-		status.SetText("Please wait…")
-
-		go func() {
-			errInstall := runInstallWorkerProcess()
-			mw.Synchronize(func() {
-				running = false
-				next.SetEnabled(true)
-				if errInstall != nil {
-					status.SetText("Installation failed.")
-					body.SetText("Could not complete installation.\r\n\r\n" + errInstall.Error())
-					next.SetText("Close")
-					return
-				}
-				status.SetText("Done.")
-				body.SetText(successText)
-				next.SetText("Finish")
-			})
-		}()
-	})
-
-	mw.Run()
-	return nil
+	_ = messageBox(
+		"Installation completed successfully.\r\n\r\n"+
+			"This device is enrolled and monitored.\r\n"+
+			"The BhudiAgent service and Support Client are installed.\r\n\r\n"+
+			"Open the Bhudi portal to manage this device.",
+		"Bhudi Agent Setup",
+		mbOK|mbIconInformation,
+	)
 }
 
 func runInstallWorkerProcess() error {
@@ -134,87 +70,39 @@ func runInstallWorkerProcess() error {
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		msg := stringsTrim(string(out))
+		msg := strings.TrimSpace(string(out))
 		if msg == "" {
 			msg = err.Error()
+		}
+		// Prefer the ERROR: line from the worker if present.
+		for _, line := range strings.Split(msg, "\n") {
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(line, "ERROR:") {
+				return fmt.Errorf("%s", strings.TrimSpace(strings.TrimPrefix(line, "ERROR:")))
+			}
 		}
 		return fmt.Errorf("%s", msg)
 	}
 	return nil
 }
 
-func stringsTrim(s string) string {
-	for len(s) > 0 && (s[0] == ' ' || s[0] == '\n' || s[0] == '\r' || s[0] == '\t') {
-		s = s[1:]
-	}
-	n := len(s)
-	for n > 0 && (s[n-1] == ' ' || s[n-1] == '\n' || s[n-1] == '\r' || s[n-1] == '\t') {
-		n--
-	}
-	return s[:n]
-}
+const (
+	mbOK              = 0x00000000
+	mbYesNo           = 0x00000004
+	mbIconError       = 0x00000010
+	mbIconQuestion    = 0x00000020
+	mbIconInformation = 0x00000040
+	idYes             = 6
+)
 
-// runMessageBoxInstaller — reliable path when walk GUI cannot start.
-func runMessageBoxInstaller(reason string) {
-	msg := "Bhudi Agent Setup\r\n\r\n" +
-		"The graphical wizard could not start on this PC\r\n" +
-		"(" + truncate(reason, 120) + ").\r\n\r\n" +
-		"Click Yes to install using the silent installer.\r\n" +
-		"Click No to cancel."
-	if messageBoxYesNo("Bhudi Agent Setup", msg) != 6 { // IDYES = 6
-		return
-	}
-	err := runInstallWorkerProcess()
-	if err != nil {
-		messageBoxOK("Bhudi Agent Setup", "Installation failed:\r\n\r\n"+err.Error())
-		return
-	}
-	messageBoxOK("Bhudi Agent Setup", "Installation completed successfully.\r\n\r\n"+
-		"The Bhudi Agent service and Support Client are installed.\r\n"+
-		"Check the Bhudi portal for this device.")
-}
-
-func truncate(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[:n] + "…"
-}
-
-func messageBoxOK(title, text string) {
-	user32 := windows.NewLazySystemDLL("user32.dll")
-	proc := user32.NewProc("MessageBoxW")
-	_, _, _ = proc.Call(
-		0,
-		uintptr(unsafe.Pointer(windows.StringToUTF16Ptr(text))),
-		uintptr(unsafe.Pointer(windows.StringToUTF16Ptr(title))),
-		0x10|0x0, // MB_ICONERROR | MB_OK for errors; use 0x40 for info below
-	)
-}
-
-func messageBoxYesNo(title, text string) int {
+func messageBox(text, title string, flags uint) int {
 	user32 := windows.NewLazySystemDLL("user32.dll")
 	proc := user32.NewProc("MessageBoxW")
 	r, _, _ := proc.Call(
 		0,
 		uintptr(unsafe.Pointer(windows.StringToUTF16Ptr(text))),
 		uintptr(unsafe.Pointer(windows.StringToUTF16Ptr(title))),
-		0x24, // MB_YESNO | MB_ICONQUESTION
+		uintptr(flags),
 	)
 	return int(r)
 }
-
-const welcomeText = `Welcome to Bhudi Agent Setup.
-
-This installer will enroll this PC, install the monitoring service,
-and install the Support Client (tray + tickets).
-
-Click Install to continue.`
-
-const installingText = `Installing Bhudi Agent…
-Please wait (service + support client).`
-
-const successText = `Installation completed successfully.
-
-This device is enrolled and monitored.
-Open the Bhudi portal to manage it.`
