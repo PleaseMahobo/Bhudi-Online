@@ -6,6 +6,8 @@ import (
 	"os"
 	"syscall"
 	"unsafe"
+
+	"golang.org/x/sys/windows"
 )
 
 var (
@@ -32,7 +34,10 @@ func ensureElevated() {
 		return
 	}
 
-	args := syscall.UTF16PtrFromString(joinWindowsArgs(os.Args[1:]))
+	args, err := syscall.UTF16PtrFromString(joinWindowsArgs(os.Args[1:]))
+	if err != nil {
+		return
+	}
 	ret, _, _ := shellExecute.Call(
 		0,
 		uintptr(unsafe.Pointer(verb)),
@@ -47,22 +52,9 @@ func ensureElevated() {
 }
 
 func isElevated() bool {
-	var sid *syscall.SID
-	if err := syscall.AllocateAndInitializeSid(
-		&syscall.SECURITY_NT_AUTHORITY,
-		2,
-		syscall.SECURITY_BUILTIN_DOMAIN_RID,
-		syscall.DOMAIN_ALIAS_RID_ADMINS,
-		0, 0, 0, 0, 0, 0,
-		&sid,
-	); err != nil {
-		return false
-	}
-	defer syscall.FreeSid(sid)
-
-	token := syscall.Token(0)
-	member, err := token.IsMember(sid)
-	return err == nil && member
+	token := windows.Token(0)
+	elevated, err := token.IsElevated()
+	return err == nil && elevated
 }
 
 func joinWindowsArgs(args []string) string {
