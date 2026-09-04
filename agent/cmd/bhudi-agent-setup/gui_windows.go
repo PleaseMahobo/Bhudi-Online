@@ -3,11 +3,20 @@
 package main
 
 import (
+	"bytes"
+	"encoding/base64"
+	"image"
+	_ "image/png"
 	"os"
 	"os/exec"
+	"path/filepath"
 
 	"github.com/lxn/walk"
+	. "github.com/lxn/walk/declarative"
 )
+
+// logoPNGBase64 is set in logo_embed.go when present; otherwise empty.
+var logoPNGBase64 string
 
 func runInstallerGUI() {
 	mw, err := walk.NewMainWindow()
@@ -18,33 +27,41 @@ func runInstallerGUI() {
 	defer mw.Dispose()
 
 	mw.SetTitle("Bhudi Agent Setup")
-	mw.SetSize(walk.Size{Width: 640, Height: 460})
-	mw.SetMinMaxSize(walk.Size{Width: 640, Height: 460}, walk.Size{Width: 640, Height: 460})
+	mw.SetSize(walk.Size{Width: 680, Height: 520})
+	mw.SetMinMaxSize(walk.Size{Width: 680, Height: 520}, walk.Size{Width: 720, Height: 560})
 	_ = mw.SetLayout(walk.NewVBoxLayout())
+
+	// Optional logo
+	if logoPNGBase64 != "" {
+		if img, e := loadEmbeddedLogo(); e == nil && img != nil {
+			if iv, e2 := walk.NewImageView(mw); e2 == nil {
+				_ = iv.SetImage(img)
+				iv.SetMode(walk.ImageViewModeShrink)
+				iv.SetMinMaxSize(walk.Size{Width: 120, Height: 120}, walk.Size{Width: 140, Height: 140})
+			}
+		}
+	}
 
 	title, _ := walk.NewLabel(mw)
 	title.SetText("Bhudi Agent Setup")
-	titleFont, err := walk.NewFont("Segoe UI", 18, walk.FontBold)
-	if err == nil {
-		title.SetFont(titleFont)
+	if f, e := walk.NewFont("Segoe UI", 18, walk.FontBold); e == nil {
+		title.SetFont(f)
 	}
 	title.SetTextAlignment(walk.AlignNear)
 
 	slogan, _ := walk.NewLabel(mw)
-	sloganFont, err := walk.NewFont("Segoe UI", 10, walk.FontItalic)
-	if err == nil {
-		slogan.SetFont(sloganFont)
+	if f, e := walk.NewFont("Segoe UI", 10, walk.FontItalic); e == nil {
+		slogan.SetFont(f)
 	}
 	slogan.SetText("A Big Brother's Approach to Remote Monitoring and Management")
 	slogan.SetTextAlignment(walk.AlignNear)
 
 	body, _ := walk.NewLabel(mw)
-	bodyFont, err := walk.NewFont("Segoe UI", 10, 0)
-	if err == nil {
-		body.SetFont(bodyFont)
+	if f, e := walk.NewFont("Segoe UI", 10, 0); e == nil {
+		body.SetFont(f)
 	}
-	body.SetText("Welcome to the Bhudi Agent Setup Wizard.\r\n\r\nThis wizard installs and enrolls the Bhudi endpoint agent and the Support Client, then registers the Windows service.\r\n\r\nClick Next to continue.")
-	body.SetMinMaxSize(walk.Size{Width: 560, Height: 160}, walk.Size{Width: 560, Height: 160})
+	body.SetText(welcomeText)
+	body.SetMinMaxSize(walk.Size{Width: 600, Height: 200}, walk.Size{Width: 620, Height: 220})
 
 	status, _ := walk.NewLabel(mw)
 	status.SetText("")
@@ -70,7 +87,7 @@ func runInstallerGUI() {
 			return
 		}
 		page = 0
-		body.SetText("Welcome to the Bhudi Agent Setup Wizard.\r\n\r\nThis wizard installs and enrolls the Bhudi endpoint agent and the Support Client, then registers the Windows service.\r\n\r\nClick Next to continue.")
+		body.SetText(welcomeText)
 		back.SetEnabled(false)
 		next.SetText("Next >")
 	})
@@ -84,7 +101,7 @@ func runInstallerGUI() {
 		}
 		if page == 0 {
 			page = 1
-			body.SetText("The installer is ready to install Bhudi Agent on this computer.\r\n\r\nBoth the monitoring agent and the Support Client will be installed together.\r\n\r\nThe customer enrollment payload embedded in this installer will be used. No credentials will be displayed.")
+			body.SetText(readyText)
 			back.SetEnabled(true)
 			next.SetText("Install")
 			return
@@ -98,7 +115,7 @@ func runInstallerGUI() {
 		cancel.SetEnabled(false)
 		next.SetEnabled(false)
 		next.SetText("Installing...")
-		body.SetText("Installing Bhudi Agent...\r\n\r\nPlease wait while the endpoint is enrolled, the Windows service is registered, and the Support Client is installed.")
+		body.SetText(installingText)
 		status.SetText("Starting installation worker...")
 		progress.SetVisible(true)
 		progress.SetMarqueeMode(true)
@@ -121,7 +138,7 @@ func runInstallerGUI() {
 					return
 				}
 				status.SetText("Installation completed successfully.")
-				body.SetText("Bhudi Agent Setup completed successfully.\r\n\r\nThe Bhudi Agent is enrolled, the Windows service is running, and the Support Client has been installed.")
+				body.SetText(successText)
 				next.SetText("Finish")
 			})
 		}()
@@ -129,3 +146,63 @@ func runInstallerGUI() {
 
 	mw.Run()
 }
+
+const welcomeText = `Welcome to the Bhudi Agent Setup Wizard.
+
+This customer-specific installer will:
+  • Enroll this device to your Bhudi tenant
+  • Install the always-on monitoring agent (service)
+  • Install the Support Client (tray + ticketing)
+  • Enable remote monitoring, inventory, scripts, and ITSM tickets
+
+Click Next to continue.`
+
+const readyText = `Ready to install Bhudi Agent on this computer.
+
+What you get:
+  • Full device monitoring & heartbeat
+  • Remote commands and inventory
+  • End-user ticketing (system tray)
+  • Patch & policy readiness via the Bhudi platform
+
+Enrollment is automatic using the secure token embedded in this installer.
+No credentials are shown on screen.`
+
+const installingText = `Installing Bhudi Agent…
+
+Please wait while:
+  1. The endpoint is enrolled to your tenant
+  2. The Windows service is registered
+  3. The Support Client (ticketing tray) is installed`
+
+const successText = `Bhudi Agent Setup completed successfully.
+
+This device is now:
+  • Enrolled and monitored
+  • Running the BhudiAgent Windows service
+  • Equipped with the Support Client for ticketing
+
+Technicians can manage monitoring, remote access, scripts and tickets from the Bhudi portal.`
+
+func loadEmbeddedLogo() (walk.Image, error) {
+	if logoPNGBase64 == "" {
+		return nil, os.ErrNotExist
+	}
+	raw, err := base64.StdEncoding.DecodeString(logoPNGBase64)
+	if err != nil {
+		return nil, err
+	}
+	img, _, err := image.Decode(bytes.NewReader(raw))
+	if err != nil {
+		return nil, err
+	}
+	// Write to temp so walk can load a file-based bitmap reliably
+	tmp := filepath.Join(os.TempDir(), "bhudi-setup-logo.png")
+	if err := os.WriteFile(tmp, raw, 0644); err != nil {
+		return nil, err
+	}
+	return walk.NewImageFromFile(tmp)
+}
+
+// Keep declarative import referenced so go mod stays consistent when building with tags.
+var _ = MainWindow{}
