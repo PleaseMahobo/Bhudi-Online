@@ -288,102 +288,58 @@ func (c *client) ticketAPI(w http.ResponseWriter, r *http.Request) {
 }
 
 // pageHTML must not contain nested backticks (Go raw string delimiter).
-const pageHTML = `<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>Bhudi Support</title>
-<style>
-:root{--bg:#0b1220;--card:#121a2b;--line:#1e2a44;--text:#e8eef9;--muted:#9db0d0;--accent:#1e6adf;--ok:#22c55e;--bad:#ef4444}
-*{box-sizing:border-box}body{margin:0;font-family:Segoe UI,system-ui,sans-serif;background:linear-gradient(160deg,#0b1220,#0f1b33);color:var(--text);min-height:100vh}
-.wrap{max-width:720px;margin:0 auto;padding:28px 18px 48px}
-.brand{display:flex;align-items:center;gap:12px;margin-bottom:18px}
-.logo{width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,#1e6adf,#36d6c3);display:grid;place-items:center;font-weight:700}
-h1{margin:0;font-size:1.35rem}p.sub{margin:4px 0 0;color:var(--muted);font-size:.9rem}
-.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px;margin-bottom:16px}
-label{display:block;font-size:.8rem;color:var(--muted);margin:10px 0 6px}
-input,textarea,select{width:100%;background:#0a1324;border:1px solid var(--line);border-radius:10px;color:var(--text);padding:10px 12px;font:inherit}
-textarea{min-height:110px;resize:vertical}
-.row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-button{margin-top:14px;background:var(--accent);color:#fff;border:0;border-radius:10px;padding:11px 16px;font-weight:600;cursor:pointer}
-button:disabled{opacity:.6;cursor:wait}
-.msg{margin-top:10px;font-size:.9rem}.ok{color:var(--ok)}.bad{color:var(--bad)}
-.ticket{border-top:1px solid var(--line);padding:12px 0}.ticket:first-child{border-top:0}
-.meta{color:var(--muted);font-size:.8rem}
-.pill{display:inline-block;padding:2px 8px;border-radius:999px;background:#1a2740;font-size:.75rem;margin-left:6px}
-#status{font-size:.85rem;color:var(--muted);margin-bottom:12px}
-</style>
-</head>
-<body>
-<div class="wrap">
-  <div class="brand"><div class="logo">B</div><div><h1>Bhudi Support</h1><p class="sub">Log a ticket from this PC · Cyber Bastion</p></div></div>
-  <div id="status">Checking connection…</div>
-  <div class="card">
-    <form id="f">
-      <label for="t">Title</label>
-      <input id="t" required maxlength="200" placeholder="e.g. Printer offline / PC slow"/>
-      <label for="d">Description</label>
-      <textarea id="d" placeholder="What happened? Any error messages?"></textarea>
-      <div class="row">
-        <div>
-          <label for="p">Priority</label>
-          <select id="p"><option value="low">Low</option><option value="medium" selected>Medium</option><option value="high">High</option><option value="critical">Critical</option></select>
-        </div>
-        <div>
-          <label for="c">Category</label>
-          <select id="c"><option value="general">General</option><option value="hardware">Hardware</option><option value="software">Software</option><option value="network">Network</option><option value="security">Security</option></select>
-        </div>
-      </div>
-      <button id="btn" type="submit">Submit ticket</button>
-      <div id="msg" class="msg"></div>
-    </form>
-  </div>
-  <div class="card" id="tickets">
-    <h2 style="margin:0 0 8px;font-size:1.05rem">My tickets</h2>
-    <div id="list" class="meta">Loading…</div>
-  </div>
-</div>
-<script>
-const session=new URLSearchParams(location.search).get('session');
-const h={'X-Bhudi-Session':session,'Content-Type':'application/json'};
-async function status(){
-  try{
-    const r=await fetch('/api/status',{headers:h});
-    const j=await r.json();
-    document.getElementById('status').textContent=j.online
-      ?('Connected · agent '+String(j.agent_id||'').slice(0,8)+'…')
-      :'Portal unreachable — ticket may fail until network is back';
-  }catch(e){document.getElementById('status').textContent='Local UI only — cannot reach portal';}
-}
-async function load(){
-  const el=document.getElementById('list');
-  try{
-    const r=await fetch('/api/tickets',{headers:h});
-    const t=await r.text();
-    let data; try{data=JSON.parse(t)}catch(_){el.textContent=t;return}
-    const items=data.tickets||data||[];
-    if(!items.length){el.textContent='No tickets yet from this device.';return}
-    el.innerHTML=items.map(function(x){
-      return '<div class="ticket"><strong>'+esc(x.title||'Ticket')+'</strong><span class="pill">'+esc(x.status||'')+'</span><span class="pill">'+esc(x.priority||'')+'</span><div class="meta">'+esc(x.created_at||x.id||'')+'</div></div>';
-    }).join('');
-  }catch(e){el.textContent='Could not load tickets.';}
-}
-function esc(s){return String(s).replace(/[&<>"']/g,function(m){return {'&':'&','<':'<','>':'>','"':'"',"'":'&#39;'}[m];});}
-document.getElementById('f').onsubmit=async function(e){
-  e.preventDefault();
-  const btn=document.getElementById('btn'), msg=document.getElementById('msg');
-  btn.disabled=true; msg.textContent=''; msg.className='msg';
-  try{
-    const r=await fetch('/api/tickets',{method:'POST',headers:h,body:JSON.stringify({
-      title:t.value, description:d.value, priority:p.value, category:c.value
-    })});
-    if(r.ok){msg.textContent='Ticket created.'; msg.className='msg ok'; t.value=''; d.value=''; load()}
-    else{msg.textContent='Failed ('+r.status+'): '+await r.text(); msg.className='msg bad'}
-  }catch(err){msg.textContent=String(err); msg.className='msg bad'}
-  btn.disabled=false;
-};
-status(); load();
-if(location.hash==='#tickets') document.getElementById('tickets').scrollIntoView();
-</script>
-</body></html>
+var pageHTML = "<!doctype html>" +
+	"<html lang=\"en\">" +
+	"<head>" +
+	"<meta charset=\"utf-8\"/>" +
+	"<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"/>" +
+	"<title>Bhudi Support</title>" +
+	"<style>" +
+	":root{--bg:#0b1220;--card:#121a2b;--line:#1e2a44;--text:#e8eef9;--muted:#9db0d0;--accent:#1e6adf;--ok:#22c55e;--bad:#ef4444}" +
+	"*{box-sizing:border-box}body{margin:0;font-family:Segoe UI,system-ui,sans-serif;background:linear-gradient(160deg,#0b1220,#0f1b33);color:var(--text);min-height:100vh}" +
+	".wrap{max-width:720px;margin:0 auto;padding:28px 18px 48px}" +
+	".brand{display:flex;align-items:center;gap:12px;margin-bottom:18px}" +
+	".logo{width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,#1e6adf,#36d6c3);display:grid;place-items:center;font-weight:700}" +
+	"h1{margin:0;font-size:1.35rem}p.sub{margin:4px 0 0;color:var(--muted);font-size:.9rem}" +
+	".card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px;margin-bottom:16px}" +
+	"label{display:block;font-size:.8rem;color:var(--muted);margin:10px 0 6px}" +
+	"input,textarea,select{width:100%;background:#0a1324;border:1px solid var(--line);border-radius:10px;color:var(--text);padding:10px 12px;font:inherit}" +
+	"textarea{min-height:110px;resize:vertical}" +
+	".row{display:grid;grid-template-columns:1fr 1fr;gap:12px}" +
+	"button{margin-top:14px;background:var(--accent);color:#fff;border:0;border-radius:10px;padding:11px 16px;font-weight:600;cursor:pointer}" +
+	"button:disabled{opacity:.6;cursor:wait}" +
+	".msg{margin-top:10px;font-size:.9rem}.ok{color:var(--ok)}.bad{color:var(--bad)}" +
+	".ticket{border-top:1px solid var(--line);padding:12px 0}.ticket:first-child{border-top:0}" +
+	".meta{color:var(--muted);font-size:.8rem}" +
+	".pill{display:inline-block;padding:2px 8px;border-radius:999px;background:#1a2740;font-size:.75rem;margin-left:6px}" +
+	"#status{font-size:.85rem;color:var(--muted);margin-bottom:12px}" +
+	"</style></head><body><div class=\"wrap\">" +
+	"<div class=\"brand\"><div class=\"logo\">B</div><div><h1>Bhudi Support</h1><p class=\"sub\">Log a ticket from this PC · Cyber Bastion</p></div></div>" +
+	"<div id=\"status\">Checking connection…</div>" +
+	"<div class=\"card\"><form id=\"f\">" +
+	"<label for=\"t\">Title</label><input id=\"t\" required maxlength=\"200\" placeholder=\"e.g. Printer offline / PC slow\"/>" +
+	"<label for=\"d\">Description</label><textarea id=\"d\" placeholder=\"What happened? Any error messages?\"></textarea>" +
+	"<div class=\"row\"><div><label for=\"p\">Priority</label>" +
+	"<select id=\"p\"><option value=\"low\">Low</option><option value=\"medium\" selected>Medium</option><option value=\"high\">High</option><option value=\"critical\">Critical</option></select></div>" +
+	"<div><label for=\"c\">Category</label>" +
+	"<select id=\"c\"><option value=\"general\">General</option><option value=\"hardware\">Hardware</option><option value=\"software\">Software</option><option value=\"network\">Network</option><option value=\"security\">Security</option></select></div></div>" +
+	"<button id=\"btn\" type=\"submit\">Submit ticket</button><div id=\"msg\" class=\"msg\"></div></form></div>" +
+	"<div class=\"card\" id=\"tickets\"><h2 style=\"margin:0 0 8px;font-size:1.05rem\">My tickets</h2><div id=\"list\" class=\"meta\">Loading…</div></div></div>" +
+	"<script>" +
+	"const session=new URLSearchParams(location.search).get('session');" +
+	"const h={'X-Bhudi-Session':session,'Content-Type':'application/json'};" +
+	"async function status(){try{const r=await fetch('/api/status',{headers:h});const j=await r.json();" +
+	"document.getElementById('status').textContent=j.online?('Connected · agent '+String(j.agent_id||'').slice(0,8)+'…'):'Portal unreachable — ticket may fail until network is back';" +
+	"}catch(e){document.getElementById('status').textContent='Local UI only — cannot reach portal';}}" +
+	"async function load(){const el=document.getElementById('list');try{const r=await fetch('/api/tickets',{headers:h});const t=await r.text();" +
+	"let data;try{data=JSON.parse(t)}catch(_){el.textContent=t;return}const items=data.tickets||data||[];" +
+	"if(!items.length){el.textContent='No tickets yet from this device.';return}" +
+	"el.innerHTML=items.map(function(x){return '<div class=\"ticket\"><strong>'+esc(x.title||'Ticket')+'</strong><span class=\"pill\">'+esc(x.status||'')+'</span><span class=\"pill\">'+esc(x.priority||'')+'</span><div class=\"meta\">'+esc(x.created_at||x.id||'')+'</div></div>';}).join('');" +
+	"}catch(e){el.textContent='Could not load tickets.';}}" +
+	"function esc(s){return String(s).replace(/[&<>\"']/g,function(m){return {'&':'&','<':'<','>':'>','\"':'"',\"'\":'&#39;'}[m];});}" +
+	"document.getElementById('f').onsubmit=async function(e){e.preventDefault();const btn=document.getElementById('btn'),msg=document.getElementById('msg');" +
+	"btn.disabled=true;msg.textContent='';msg.className='msg';try{const r=await fetch('/api/tickets',{method:'POST',headers:h,body:JSON.stringify({title:t.value,description:d.value,priority:p.value,category:c.value})});" +
+	"if(r.ok){msg.textContent='Ticket created.';msg.className='msg ok';t.value='';d.value='';load()}else{msg.textContent='Failed ('+r.status+'): '+await r.text();msg.className='msg bad'}" +
+	"}catch(err){msg.textContent=String(err);msg.className='msg bad'}btn.disabled=false;};" +
+	"status();load();if(location.hash==='#tickets')document.getElementById('tickets').scrollIntoView();" +
+	"</script></body></html>"
