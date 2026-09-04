@@ -1,4 +1,5 @@
 # Enterprise agent release: native binaries (Win/Linux/macOS) + Windows MSI + setup EXE
+# MSI toolchain: WiX 5 only (matches agent/msi/Product.wxs)
 name: Release Native Agent
 
 on:
@@ -17,7 +18,7 @@ permissions:
   contents: write
 
 env:
-  AGENT_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || '2.1.0' }}
+  AGENT_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || '2.2.0' }}
 
 jobs:
   build-windows:
@@ -34,7 +35,7 @@ jobs:
         shell: pwsh
         run: |
           $ver = "${{ env.AGENT_VERSION }}".TrimStart('agent-v')
-          if (-not $ver) { $ver = "2.1.0" }
+          if (-not $ver) { $ver = "2.2.0" }
           New-Item -ItemType Directory -Force dist | Out-Null
           $ld = "-s -w -X main.agentVersion=$ver"
           $env:CGO_ENABLED = "0"
@@ -49,35 +50,36 @@ jobs:
           Push-Location agent/cmd/bhudi-agent-setup
           $env:CGO_ENABLED = "0"
           $env:GOOS = "windows"; $env:GOARCH = "amd64"
-          go build -tags release -trimpath -ldflags "-s -w" -o ../../native/dist/BhudiAgent-Setup.exe .
+          go build -tags release -trimpath -ldflags "-s -w -H=windowsgui" -o ../../native/dist/BhudiAgent-Setup.exe .
           Pop-Location
 
       - name: Build support client
         working-directory: agent/support-client
         shell: pwsh
         run: |
-          if (Test-Path go.mod) {
-            $env:CGO_ENABLED = "0"
-            $env:GOOS = "windows"; $env:GOARCH = "amd64"
-            go build -trimpath -ldflags "-s -w" -o ../native/dist/bhudi-support.exe .
-          }
+          $env:CGO_ENABLED = "0"
+          $env:GOOS = "windows"; $env:GOARCH = "amd64"
+          go build -trimpath -ldflags "-s -w -H=windowsgui" -o ../native/dist/bhudi-support.exe .
+          if (-not (Test-Path ../native/dist/bhudi-support.exe)) { throw "bhudi-support.exe build failed" }
 
-      - name: Install WiX Toolset
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Install WiX 5
         shell: pwsh
         run: |
-          choco install wixtoolset -y --no-progress
-          echo "C:\Program Files (x86)\WiX Toolset v3.14\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-          echo "C:\Program Files (x86)\WiX Toolset v3.11\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          dotnet tool install --global wix --version 5.0.2
+          wix extension add -g WixToolset.UI.wixext/5.0.2
 
-      - name: Build MSI
+      - name: Build MSI (WiX 5)
         working-directory: agent/msi
         shell: pwsh
         run: |
-          $agentDir = Resolve-Path ..\native\dist
-          candle.exe -dAgentDir="$agentDir" Product.wxs
-          if ($LASTEXITCODE -ne 0) { throw "candle failed" }
-          light.exe -ext WixUIExtension -out ..\native\dist\bhudi-agent-setup.msi Product.wixobj
-          if ($LASTEXITCODE -ne 0) { throw "light failed" }
+          Copy-Item ..\native\dist\bhudi-agent.exe . -Force
+          Copy-Item ..\native\dist\bhudi-support.exe . -Force
+          wix build Product.wxs -ext WixToolset.UI.wixext -d AgentDir=. -o ..\native\dist\bhudi-agent-setup.msi
+          if ($LASTEXITCODE -ne 0) { throw "wix build failed" }
           Get-Item ..\native\dist\bhudi-agent-setup.msi
 
       - name: Optional Authenticode sign (if cert secrets present)
@@ -95,7 +97,8 @@ jobs:
           $files = @(
             "agent\native\dist\bhudi-agent.exe",
             "agent\native\dist\BhudiAgent-Setup.exe",
-            "agent\native\dist\bhudi-agent-setup.msi"
+            "agent\native\dist\bhudi-agent-setup.msi",
+            "agent\native\dist\bhudi-support.exe"
           )
           foreach ($f in $files) {
             if (Test-Path $f) {
@@ -141,7 +144,7 @@ jobs:
         run: |
           VER="${{ env.AGENT_VERSION }}"
           VER="${VER#agent-v}"
-          [ -n "$VER" ] || VER=2.1.0
+          [ -n "$VER" ] || VER=2.2.0
           mkdir -p dist
           CGO_ENABLED=0 GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} \
             go build -trimpath -ldflags="-s -w -X main.agentVersion=$VER" \
@@ -174,20 +177,19 @@ jobs:
             | File | Platform |
             |------|----------|
             | `BhudiAgent-Setup.exe` | Windows customer installer (portal injects enrollment) |
-            | `bhudi-agent-setup.msi` | Windows MSI — Intune/GPO (`SERVERURL=` property) |
+            | `bhudi-agent-setup.msi` | Windows MSI — Intune/GPO (`SERVERURL=` + optional `ENROLLMENTTOKEN=`) |
             | `bhudi-agent.exe` | Windows x64 binary |
+            | `bhudi-support.exe` | Windows tray / tickets |
             | `bhudi-agent-linux-*` | Linux |
             | `bhudi-agent-darwin-*` | macOS |
 
             ### Silent MSI
             ```bat
-            msiexec /i bhudi-agent-setup.msi /qn SERVERURL=https://your-api.example.com
+            msiexec /i bhudi-agent-setup.msi /qn SERVERURL=https://bhudi-online-production.up.railway.app ENROLLMENTTOKEN=...
             ```
 
-            ### Upgrade in place
-            ```bat
-            bhudi-agent.exe upgrade -server https://your-api.example.com
-            ```
+            ### Customer EXE
+            Download from the Bhudi portal — token is injected automatically.
           files: release/*
           make_latest: true
         env:
