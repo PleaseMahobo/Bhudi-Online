@@ -16,13 +16,15 @@ import (
 )
 
 const (
-	windowsServiceName  = "BhudiAgent"
-	windowsTaskName     = "BhudiAgent"
-	windowsWatchdogName = "BhudiAgentWatchdog"
-	uninstallRegPath    = `SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\BhudiAgent`
-	displayName         = "Bhudi Agent"
-	publisherName       = "Bhudi"
-	runKeyPath          = `Software\Microsoft\Windows\CurrentVersion\Run`
+	windowsServiceName   = "BhudiAgent"
+	windowsTaskName      = "BhudiAgent"
+	windowsWatchdogName  = "BhudiAgentWatchdog"
+	windowsSupportTask   = "BhudiSupport"
+	supportExeName       = "bhudi-support.exe"
+	uninstallRegPath     = `SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\BhudiAgent`
+	displayName          = "Bhudi Agent"
+	publisherName        = "Bhudi"
+	runKeyPath           = `Software\Microsoft\Windows\CurrentVersion\Run`
 )
 
 func installService(server string) error {
@@ -48,6 +50,11 @@ func installService(server string) error {
 
 	if err := writeConfig(server); err != nil {
 		fmt.Println("Warning: could not write config:", err)
+	}
+
+	// Production tray client (Tactical-style user-session companion).
+	if err := installSupportClient(destDir); err != nil {
+		fmt.Println("Warning: support client:", err)
 	}
 
 	if err := installWindowsService(dest, server); err != nil {
@@ -99,7 +106,68 @@ func installService(server string) error {
 	fmt.Println("  Server:   ", server)
 	fmt.Println("  Identity: ", identityPath())
 	fmt.Println("  Service:  ", windowsServiceName, "(Automatic)")
+	fmt.Println("  Support:  ", filepath.Join(destDir, supportExeName), "(tray / tickets)")
 	time.Sleep(1 * time.Second)
+	return nil
+}
+
+// installSupportClient copies bhudi-support.exe from beside the installer
+// (or already in destDir) and registers logon autostart for the tray UI.
+func installSupportClient(destDir string) error {
+	srcCandidates := []string{}
+	if exe, err := os.Executable(); err == nil {
+		srcCandidates = append(srcCandidates, filepath.Join(filepath.Dir(exe), supportExeName))
+	}
+	if wd, err := os.Getwd(); err == nil {
+		srcCandidates = append(srcCandidates, filepath.Join(wd, supportExeName))
+	}
+	srcCandidates = append(srcCandidates, filepath.Join(destDir, supportExeName))
+
+	var src string
+	for _, c := range srcCandidates {
+		if st, err := os.Stat(c); err == nil && !st.IsDir() {
+			src = c
+			break
+		}
+	}
+	if src == "" {
+		return fmt.Errorf("%s not found next to installer — tray tickets skipped", supportExeName)
+	}
+	dest := filepath.Join(destDir, supportExeName)
+	if src != dest {
+		if err := copyFile(src, dest); err != nil {
+			return fmt.Errorf("copy support client: %w", err)
+		}
+	}
+	logInstall("support client installed: %s", dest)
+
+	// ONLOGON task so tray starts for interactive users (not only the elevating admin).
+	_ = exec.Command("schtasks", "/Delete", "/TN", windowsSupportTask, "/F").Run()
+	tr := fmt.Sprintf("\"%s\"", dest)
+	create := exec.Command("schtasks", "/Create", "/TN", windowsSupportTask,
+		"/TR", tr, "/SC", "ONLOGON", "/RL", "LIMITED", "/F")
+	if out, err := create.CombinedOutput(); err != nil {
+		fmt.Printf("Warning: support logon task failed: %v (%s)\n", err, strings.TrimSpace(string(out)))
+	} else {
+		fmt.Println("Support tray logon task:", windowsSupportTask)
+	}
+
+	if key, _, err := registry.CreateKey(registry.CURRENT_USER, runKeyPath, registry.SET_VALUE); err == nil {
+		_ = key.SetStringValue("BhudiSupport", fmt.Sprintf("\"%s\"", dest))
+		key.Close()
+		fmt.Println("Support Run key registered (current user).")
+	}
+
+	// Best-effort start for current session.
+	cmd := exec.Command(dest)
+	cmd.Stdout = nil
+	cmd.Stderr = nil
+	cmd.Stdin = nil
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		CreationFlags: 0x00000008 | 0x00000200,
+		HideWindow:    true,
+	}
+	_ = cmd.Start()
 	return nil
 }
 
@@ -205,7 +273,7 @@ func writeUninstallRegistry(installDir, uninstallExe string) error {
 	_ = key.SetStringValue("DisplayIcon", uninstallExe)
 	_ = key.SetDWordValue("NoModify", 1)
 	_ = key.SetDWordValue("NoRepair", 1)
-	_ = key.SetDWordValue("EstimatedSize", 10240)
+	_ = key.SetDWordValue("EstimatedSize", 12288)
 	return nil
 }
 
@@ -217,10 +285,12 @@ func uninstallService() error {
 
 	_ = exec.Command("schtasks", "/Delete", "/TN", windowsTaskName, "/F").Run()
 	_ = exec.Command("schtasks", "/Delete", "/TN", windowsWatchdogName, "/F").Run()
-	fmt.Println("Scheduled tasks removed.")
+	_ = exec.Command("schtasks", "/Delete", "/TN", windowsSupportTask, "/F").Run()
+	fmt.Println("Scheduled tasks removed (agent + support).")
 
 	if key, err := registry.OpenKey(registry.CURRENT_USER, runKeyPath, registry.SET_VALUE); err == nil {
 		_ = key.DeleteValue("BhudiAgent")
+		_ = key.DeleteValue("BhudiSupport")
 		key.Close()
 	}
 	_ = registry.DeleteKey(registry.LOCAL_MACHINE, uninstallRegPath)
