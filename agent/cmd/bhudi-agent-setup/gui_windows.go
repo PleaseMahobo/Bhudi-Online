@@ -13,9 +13,18 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-// runInstallerGUI uses native MessageBox only.
-// Avoids github.com/lxn/walk (TTM_ADDTOOL failures on some Windows hosts).
 func runInstallerGUI() {
+	if !isElevated() {
+		if err := relaunchElevated(); err != nil {
+			_ = messageBox(
+				"Administrator permission is required to install the Bhudi Agent.\r\n\r\n"+err.Error(),
+				"Bhudi Agent Setup",
+				mbOK|mbIconError,
+			)
+		}
+		return
+	}
+
 	welcome := "Bhudi Agent Setup\r\n\r\n" +
 		"A Big Brother's Approach to Remote Monitoring and Management\r\n\r\n" +
 		"This customer installer will:\r\n" +
@@ -29,22 +38,16 @@ func runInstallerGUI() {
 		return
 	}
 
-	// Inform user work is starting (worker is silent / no console window).
 	_ = messageBox(
-		"Installing Bhudi Agent…\r\n\r\nPlease wait. This may take a minute.\r\n"+
-			"(Windows may ask for administrator permission.)",
+		"Installing Bhudi Agent…\r\n\r\nPlease wait. This may take a minute.",
 		"Bhudi Agent Setup",
 		mbOK|mbIconInformation,
 	)
 
-	err := runInstallWorkerProcess()
-	if err != nil {
+	if err := runInstallWorkerProcess(); err != nil {
 		_ = messageBox(
 			"Installation failed.\r\n\r\n"+err.Error()+"\r\n\r\n"+
-				"Tips:\r\n"+
-				"  • Run as Administrator\r\n"+
-				"  • Download a fresh installer from the Bhudi portal\r\n"+
-				"  • Check that the PC can reach the Bhudi API",
+				"Please use the exact error above when reporting this issue.",
 			"Bhudi Agent Setup",
 			mbOK|mbIconError,
 		)
@@ -61,6 +64,37 @@ func runInstallerGUI() {
 	)
 }
 
+func isElevated() bool {
+	shell32 := windows.NewLazySystemDLL("shell32.dll")
+	proc := shell32.NewProc("IsUserAnAdmin")
+	r, _, _ := proc.Call()
+	return r != 0
+}
+
+func relaunchElevated() error {
+	exe, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	shell32 := windows.NewLazySystemDLL("shell32.dll")
+	proc := shell32.NewProc("ShellExecuteW")
+	r, _, callErr := proc.Call(
+		0,
+		uintptr(unsafe.Pointer(windows.StringToUTF16Ptr("runas"))),
+		uintptr(unsafe.Pointer(windows.StringToUTF16Ptr(exe))),
+		uintptr(unsafe.Pointer(windows.StringToUTF16Ptr("elevated-ui"))),
+		0,
+		1,
+	)
+	if r <= 32 {
+		if callErr != nil && callErr != syscall.Errno(0) {
+			return fmt.Errorf("elevation was cancelled or failed: %v", callErr)
+		}
+		return fmt.Errorf("elevation was cancelled or failed (ShellExecute code %d)", r)
+	}
+	return nil
+}
+
 func runInstallWorkerProcess() error {
 	exe, err := os.Executable()
 	if err != nil {
@@ -71,17 +105,16 @@ func runInstallWorkerProcess() error {
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		msg := strings.TrimSpace(string(out))
-		if msg == "" {
-			msg = err.Error()
-		}
-		// Prefer the ERROR: line from the worker if present.
 		for _, line := range strings.Split(msg, "\n") {
 			line = strings.TrimSpace(line)
 			if strings.HasPrefix(line, "ERROR:") {
 				return fmt.Errorf("%s", strings.TrimSpace(strings.TrimPrefix(line, "ERROR:")))
 			}
 		}
-		return fmt.Errorf("%s", msg)
+		if msg != "" {
+			return fmt.Errorf("%s", msg)
+		}
+		return fmt.Errorf("installer worker failed: %w", err)
 	}
 	return nil
 }
