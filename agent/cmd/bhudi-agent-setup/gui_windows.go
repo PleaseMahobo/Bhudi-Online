@@ -12,10 +12,9 @@ import (
 	"path/filepath"
 
 	"github.com/lxn/walk"
-	. "github.com/lxn/walk/declarative"
 )
 
-// logoPNGBase64 is set in logo_embed.go when present; otherwise empty.
+// logoPNGBase64 is populated from logo_embed.go (or left empty for text-only UI).
 var logoPNGBase64 string
 
 func runInstallerGUI() {
@@ -31,7 +30,6 @@ func runInstallerGUI() {
 	mw.SetMinMaxSize(walk.Size{Width: 680, Height: 520}, walk.Size{Width: 720, Height: 560})
 	_ = mw.SetLayout(walk.NewVBoxLayout())
 
-	// Optional logo
 	if logoPNGBase64 != "" {
 		if img, e := loadEmbeddedLogo(); e == nil && img != nil {
 			if iv, e2 := walk.NewImageView(mw); e2 == nil {
@@ -192,17 +190,12 @@ func loadEmbeddedLogo() (walk.Image, error) {
 	if err != nil {
 		return nil, err
 	}
-	img, _, err := image.Decode(bytes.NewReader(raw))
-	if err != nil {
+	if _, _, err := image.Decode(bytes.NewReader(raw)); err != nil {
 		return nil, err
 	}
-	// Write to temp so walk can load a file-based bitmap reliably
 	tmp := filepath.Join(os.TempDir(), "bhudi-setup-logo.png")
 	if err := os.WriteFile(tmp, raw, 0644); err != nil {
 		return nil, err
 	}
 	return walk.NewImageFromFile(tmp)
 }
-
-// Keep declarative import referenced so go mod stays consistent when building with tags.
-var _ = MainWindow{}
