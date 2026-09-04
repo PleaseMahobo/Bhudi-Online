@@ -3,30 +3,45 @@
 package main
 
 import (
-    "fmt"
-    "os"
-    "os/exec"
+	"os"
+	"os/exec"
+	"syscall"
+	"unsafe"
+)
+
+var (
+	shell32      = syscall.NewLazyDLL("shell32.dll")
+	shellExecute = shell32.NewProc("ShellExecuteW")
 )
 
 func ensureElevated() {
-    if os.Getenv("BHUDI_SETUP_ELEVATED") == "1" {
-        return
-    }
-    if err := exec.Command("net", "session").Run(); err == nil {
-        return
-    }
-    exe, err := os.Executable()
-    if err != nil {
-        fmt.Fprintln(os.Stderr, fmt.Errorf("unable to determine installer path: %w", err))
-        os.Exit(1)
-    }
-    script := "$p=Start-Process -FilePath $env:BHUDI_SETUP_EXE -Verb RunAs -PassThru -Wait; exit $p.ExitCode"
-    cmd := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script)
-    cmd.Env = append(os.Environ(), "BHUDI_SETUP_ELEVATED=1", "BHUDI_SETUP_EXE="+exe)
-    cmd.Stdout, cmd.Stderr, cmd.Stdin = os.Stdout, os.Stderr, os.Stdin
-    if err := cmd.Run(); err != nil {
-        fmt.Fprintln(os.Stderr, fmt.Errorf("administrator elevation failed: %w", err))
-        os.Exit(1)
-    }
-    os.Exit(0)
+	if os.Getenv("BHUDI_SETUP_ELEVATED") == "1" {
+		return
+	}
+	if err := exec.Command("net", "session").Run(); err == nil {
+		return
+	}
+
+	exe, err := os.Executable()
+	if err != nil {
+		os.Exit(1)
+	}
+
+	verb, _ := syscall.UTF16PtrFromString("runas")
+	file, _ := syscall.UTF16PtrFromString(exe)
+	params, _ := syscall.UTF16PtrFromString("")
+	dir, _ := syscall.UTF16PtrFromString("")
+
+	ret, _, _ := shellExecute.Call(
+		0,
+		uintptr(unsafe.Pointer(verb)),
+		uintptr(unsafe.Pointer(file)),
+		uintptr(unsafe.Pointer(params)),
+		uintptr(unsafe.Pointer(dir)),
+		uintptr(1),
+	)
+	if ret <= 32 {
+		os.Exit(1)
+	}
+	os.Exit(0)
 }
