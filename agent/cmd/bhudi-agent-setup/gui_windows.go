@@ -11,7 +11,10 @@ import (
 
 func runInstallerGUI() {
 	mw, err := walk.NewMainWindow()
-	if err != nil { return }
+	if err != nil {
+		walk.MsgBox(nil, "Bhudi Agent Setup", "Unable to start the installer:\r\n"+err.Error(), walk.MsgBoxIconError)
+		return
+	}
 	defer mw.Dispose()
 
 	mw.SetTitle("Bhudi Agent Setup")
