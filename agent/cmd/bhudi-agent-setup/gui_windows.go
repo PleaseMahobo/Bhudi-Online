@@ -21,11 +21,17 @@ func runInstallerGUI() {
 
 	title, _ := walk.NewLabel(mw)
 	title.SetText("Bhudi Agent Setup")
-	title.SetFont(walk.Font{Family: "Segoe UI", PointSize: 18, Bold: true})
+	titleFont, err := walk.NewFont("Segoe UI", 18, walk.FontBold)
+	if err == nil {
+		title.SetFont(titleFont)
+	}
 	title.SetTextAlignment(walk.AlignNear)
 
 	body, _ := walk.NewLabel(mw)
-	body.SetFont(walk.NewFont("Segoe UI", 10, walk.FontNormal))
+	bodyFont, err := walk.NewFont("Segoe UI", 10, 0)
+	if err == nil {
+		body.SetFont(bodyFont)
+	}
 	body.SetText("Welcome to the Bhudi Agent Setup Wizard.\r\n\r\nThis wizard installs and enrolls the Bhudi endpoint agent and registers the Windows service.\r\n\r\nClick Next to continue.")
 	body.SetMinMaxSize(walk.Size{Width: 540, Height: 180}, walk.Size{Width: 540, Height: 180})
 
