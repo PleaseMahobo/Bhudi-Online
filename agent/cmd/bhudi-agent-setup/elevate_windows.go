@@ -53,8 +53,7 @@ func ensureElevated() {
 
 func isElevated() bool {
 	token := windows.Token(0)
-	elevated, err := token.IsElevated()
-	return err == nil && elevated
+	return token.IsElevated()
 }
 
 func joinWindowsArgs(args []string) string {
