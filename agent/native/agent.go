@@ -116,7 +116,9 @@ func cycle(client *http.Client, server string, ident *identity) error {
 	}
 	for _, c := range cmds {
 		fmt.Printf("[command] %s type=%s cmd=%s\n", c.CommandID, c.CommandType, c.Command)
-		if c.CommandType == "remote.desktop.start" || c.CommandType == "remote.desktop.webrtc" || c.CommandType == "remote.terminal.start" {
+		switch c.CommandType {
+		case "remote.desktop.start", "remote.desktop.webrtc", "remote.terminal.start",
+			"patch_scan", "patch_install", "PATCH_SCAN", "PATCH_INSTALL":
 			cmdMap := map[string]any{
 				"command_id":   c.CommandID,
 				"command_type": c.CommandType,
@@ -132,7 +134,7 @@ func cycle(client *http.Client, server string, ident *identity) error {
 			stdout, _ := result["stdout"].(string)
 			stderr, _ := result["stderr"].(string)
 			_ = postResult(client, server, *ident, c.CommandID, exitCode, stdout, stderr)
-			fmt.Printf("[result] remote session exit=%d\n", exitCode)
+			fmt.Printf("[result] enterprise type=%s exit=%d\n", c.CommandType, exitCode)
 			continue
 		}
 		exitCode, stdout, stderr := runCommand(c.Command, c.Shell)
@@ -152,7 +154,7 @@ func executeEnterpriseCommand(server string, ident identity, cmd map[string]any)
 		payload = map[string]any{}
 	}
 
-	switch cmdType {
+	switch strings.ToLower(cmdType) {
 	case "remote.desktop.start":
 		return startRemoteDesktop(server, ident.AgentID, cmd)
 
@@ -184,13 +186,19 @@ func executeEnterpriseCommand(server string, ident identity, cmd map[string]any)
 		code, out, errOut := runCommand(shellCmd, true)
 		return map[string]any{"exit_code": code, "stdout": out, "stderr": errOut}
 
-	case "remote.reboot":
+	case "remote.reboot", "reboot":
 		if runtime.GOOS == "windows" {
 			code, out, errOut := runCommand("shutdown /r /t 5", true)
 			return map[string]any{"exit_code": code, "stdout": out, "stderr": errOut}
 		}
 		code, out, errOut := runCommand("sudo reboot", true)
 		return map[string]any{"exit_code": code, "stdout": out, "stderr": errOut}
+
+	case "patch_scan":
+		return runPatchScan(payload)
+
+	case "patch_install":
+		return runPatchInstall(payload)
 
 	default:
 		if shellCmd := firstString(payload, "command", "script"); shellCmd != "" {
@@ -451,10 +459,6 @@ func localIP() string {
 		}
 	}
 	return ""
-}
-
-func sampleMetrics() (cpu, mem, disk *float64) {
-	return nil, nil, nil
 }
 
 func dataDir() string {
