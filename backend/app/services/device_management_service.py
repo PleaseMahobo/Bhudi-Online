@@ -6,6 +6,7 @@ from uuid import UUID
 from sqlalchemy import MetaData, inspect, text
 from sqlalchemy.orm import Session
 
+from app.models.agent import Agent
 from app.models.device_management import (
     ConfigurationProfile,
     DeviceGroup,
@@ -17,6 +18,7 @@ from app.models.device_management import (
     PatchRing,
     PatchRollout,
 )
+from app.services.agent_dispatcher import AgentDispatcher
 
 
 class DeviceManagementService:
@@ -187,14 +189,142 @@ class DeviceManagementService:
         self.db.refresh(rollout)
         return rollout
 
-    def execute_rollout(self, rollout_id: UUID) -> PatchRollout | None:
+    def _resolve_agent(self, device_ref: str) -> Agent | None:
+        """Resolve rollout device_ids entry to a live Agent (id, agent_uuid, or hostname)."""
+        ref = (device_ref or "").strip()
+        if not ref:
+            return None
+
+        try:
+            uid = UUID(ref)
+        except ValueError:
+            uid = None
+
+        if uid is not None:
+            agent = self.db.get(Agent, uid)
+            if agent is not None:
+                return agent
+            agent = self.db.query(Agent).filter(Agent.agent_uuid == uid).first()
+            if agent is not None:
+                return agent
+            # ManagedDevice id → match agent by hostname if possible
+            md = self.db.get(ManagedDevice, uid)
+            if md is not None and md.hostname:
+                agent = (
+                    self.db.query(Agent)
+                    .filter(Agent.hostname.ilike(md.hostname))
+                    .order_by(Agent.last_seen.desc())
+                    .first()
+                )
+                if agent is not None:
+                    return agent
+
+        return (
+            self.db.query(Agent)
+            .filter(Agent.hostname.ilike(ref))
+            .order_by(Agent.last_seen.desc())
+            .first()
+        )
+
+    def execute_rollout(
+        self,
+        rollout_id: UUID,
+        *,
+        action: str = "install",
+        payload: dict[str, Any] | None = None,
+        requested_by: UUID | None = None,
+    ) -> tuple[PatchRollout | None, dict[str, Any]]:
+        """
+        Dispatch patch commands to rollout targets.
+
+        action:
+          - scan            → queue patch_scan only
+          - install         → queue patch_install only (default)
+          - scan_and_install → queue patch_scan then patch_install per agent
+        """
         rollout = self.db.get(PatchRollout, rollout_id)
         if rollout is None:
-            return None
-        rollout.status = "completed"
+            return None, {}
+
+        action_norm = (action or "install").strip().lower()
+        if action_norm not in {"scan", "install", "scan_and_install"}:
+            action_norm = "install"
+
+        base_payload = dict(payload or {})
+        base_payload.setdefault("rollout_id", str(rollout.id))
+        base_payload.setdefault("rollout_name", rollout.name)
+
+        dispatcher = AgentDispatcher(self.db)
+        queued: list[dict[str, Any]] = []
+        skipped: list[dict[str, Any]] = []
+
+        command_types: list[str]
+        if action_norm == "scan":
+            command_types = ["patch_scan"]
+        elif action_norm == "scan_and_install":
+            command_types = ["patch_scan", "patch_install"]
+        else:
+            command_types = ["patch_install"]
+
+        for device_ref in rollout.device_ids or []:
+            agent = self._resolve_agent(str(device_ref))
+            if agent is None:
+                skipped.append({"device_id": str(device_ref), "reason": "agent_not_found"})
+                continue
+            if not getattr(agent, "enabled", True):
+                skipped.append({"device_id": str(device_ref), "agent_id": str(agent.id), "reason": "agent_disabled"})
+                continue
+
+            for cmd_type in command_types:
+                timeout = 3600 if cmd_type == "patch_install" else 300
+                try:
+                    cmd = dispatcher.queue_command(
+                        agent_id=agent.id,
+                        command_type=cmd_type,
+                        payload=base_payload,
+                        requested_by=requested_by,
+                        priority=8,
+                        timeout_seconds=timeout,
+                        requires_reboot=cmd_type == "patch_install",
+                    )
+                    queued.append(
+                        {
+                            "device_id": str(device_ref),
+                            "agent_id": str(agent.id),
+                            "hostname": agent.hostname,
+                            "command_id": str(cmd.id),
+                            "command_type": cmd_type,
+                            "status": cmd.status,
+                        }
+                    )
+                except ValueError as exc:
+                    skipped.append(
+                        {
+                            "device_id": str(device_ref),
+                            "agent_id": str(agent.id),
+                            "command_type": cmd_type,
+                            "reason": str(exc),
+                        }
+                    )
+
+        if queued:
+            rollout.status = "in_progress"
+        elif skipped and not queued:
+            rollout.status = "failed"
+        else:
+            rollout.status = "completed"
+
         self.db.commit()
         self.db.refresh(rollout)
-        return rollout
+
+        summary = {
+            "action": action_norm,
+            "queued_count": len(queued),
+            "skipped_count": len(skipped),
+            "queued": queued,
+            "skipped": skipped,
+        }
+        return rollout, summary
 
     def rollback_rollout(self, rollout_id: UUID) -> PatchRollout | None:
         rollout = self.db.get(PatchRollout, rollout_id)
@@ -219,7 +349,7 @@ class DeviceManagementService:
                     "device_ids": rollout.device_ids,
                     "evidence": {
                         "device_count": len(rollout.device_ids),
-                        "policy_applied": rollout.status in {"completed", "rolled_back"},
+                        "policy_applied": rollout.status in {"completed", "rolled_back", "in_progress"},
                     },
                 }
             )
@@ -227,8 +357,10 @@ class DeviceManagementService:
             "summary": {
                 "total_rollouts": len(rollouts),
                 "planned": sum(1 for rollout in rollouts if rollout.status == "planned"),
+                "in_progress": sum(1 for rollout in rollouts if rollout.status == "in_progress"),
                 "completed": sum(1 for rollout in rollouts if rollout.status == "completed"),
                 "rolled_back": sum(1 for rollout in rollouts if rollout.status == "rolled_back"),
+                "failed": sum(1 for rollout in rollouts if rollout.status == "failed"),
             },
             "rollouts": [
                 {
