@@ -1,4 +1,5 @@
 # Native agent builds (Windows / Linux / macOS) + MSI + GitHub Release
+# Single WiX toolchain: v5 (matches agent/msi/Product.wxs schema)
 name: Build Native Agents (Windows / Linux / macOS)
 
 on:
@@ -8,6 +9,7 @@ on:
     paths:
       - "agent/native/**"
       - "agent/cmd/bhudi-agent-setup/**"
+      - "agent/support-client/**"
       - "agent/msi/**"
       - ".github/workflows/build-agent-setup.yml"
   workflow_dispatch:
@@ -27,7 +29,9 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.25'
-          cache-dependency-path: agent/native/go.sum
+          cache-dependency-path: |
+            agent/native/go.sum
+            agent/support-client/go.sum
 
       - name: Download modules
         working-directory: agent/native
@@ -46,6 +50,13 @@ jobs:
           GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o dist/bhudi-agent-darwin-amd64 .
           GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build -ldflags="-s -w" -o dist/bhudi-agent-darwin-arm64 .
           cp dist/bhudi-agent-windows-amd64.exe dist/bhudi-agent.exe
+
+      - name: Build Support Client (Windows tray / tickets)
+        working-directory: agent/support-client
+        run: |
+          go mod download
+          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w -H=windowsgui" -o ../native/dist/bhudi-support.exe .
+          test -s ../native/dist/bhudi-support.exe
 
       - name: Stage native agent for customer installer embedding
         run: |
@@ -77,6 +88,7 @@ jobs:
         run: |
           test -s agent/native/dist/BhudiAgent-Setup.exe
           test -s agent/cmd/bhudi-agent-setup/bhudi-agent.exe
+          test -s agent/native/dist/bhudi-support.exe
           strings agent/native/dist/BhudiAgent-Setup.exe | grep -q 'BHUDI_BOOTSTRAP_V1'
 
       - uses: actions/upload-artifact@v4
@@ -95,19 +107,20 @@ jobs:
 
             | File | Platform |
             |------|----------|
-            | `BhudiAgent-Setup.exe` | Windows customer-specific graphical installer base |
+            | `BhudiAgent-Setup.exe` | Windows customer-specific graphical installer base (portal injects enrollment token) |
+            | `bhudi-agent-setup.msi` | Windows MSI for Intune/GPO — properties SERVERURL + ENROLLMENTTOKEN |
             | `bhudi-agent.exe` | Windows x64 native agent |
-            | `bhudi-agent-windows-amd64.exe` | Windows x64 native agent |
-            | `bhudi-agent-linux-amd64` | Linux x64 |
-            | `bhudi-agent-linux-arm64` | Linux ARM64 |
-            | `bhudi-agent-darwin-amd64` | macOS Intel |
-            | `bhudi-agent-darwin-arm64` | macOS Apple Silicon |
+            | `bhudi-support.exe` | Windows Support Client (tray + tickets) |
+            | `bhudi-agent-linux-*` | Linux |
+            | `bhudi-agent-darwin-*` | macOS |
 
-            The portal creates the customer-specific `BhudiAgent-Setup.exe` by appending a short-lived, single-use tenant enrollment bootstrap to this base executable.
+            **Customer EXE:** portal appends enrollment bootstrap automatically.
+            **MSI (silent):** `msiexec /i bhudi-agent-setup.msi /qn SERVERURL=https://bhudi-online-production.up.railway.app ENROLLMENTTOKEN=...`
           files: |
             agent/native/dist/BhudiAgent-Setup.exe
             agent/native/dist/bhudi-agent.exe
             agent/native/dist/bhudi-agent-windows-amd64.exe
+            agent/native/dist/bhudi-support.exe
             agent/native/dist/bhudi-agent-linux-amd64
             agent/native/dist/bhudi-agent-linux-arm64
             agent/native/dist/bhudi-agent-darwin-amd64
@@ -127,19 +140,24 @@ jobs:
         with:
           name: bhudi-agent-native
           path: agent/native/dist
-      - name: Stage agent for WiX
+      - name: Stage agent + support client for WiX
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force agent\msi | Out-Null
           Copy-Item agent\native\dist\bhudi-agent.exe agent\msi\bhudi-agent.exe -Force
+          if (-not (Test-Path agent\native\dist\bhudi-support.exe)) {
+            throw "bhudi-support.exe missing from build artifact — MSI requires Support Client"
+          }
+          Copy-Item agent\native\dist\bhudi-support.exe agent\msi\bhudi-support.exe -Force
+          Get-Item agent\msi\bhudi-agent.exe, agent\msi\bhudi-support.exe | Format-Table Name, Length
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: "8.0.x"
-      - name: Install WiX
+      - name: Install WiX 5
         run: |
           dotnet tool install --global wix --version 5.0.2
           wix extension add -g WixToolset.UI.wixext/5.0.2
-      - name: Build MSI
+      - name: Build MSI (WiX 5)
         working-directory: agent/msi
         run: wix build Product.wxs -ext WixToolset.UI.wixext -d AgentDir=. -o bhudi-agent-setup.msi
       - uses: actions/upload-artifact@v4
