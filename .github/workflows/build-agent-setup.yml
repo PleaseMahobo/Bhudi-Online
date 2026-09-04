@@ -11,6 +11,8 @@ on:
       - "agent/msi/**"
       - ".github/workflows/build-agent-setup.yml"
   workflow_dispatch:
+  repository_dispatch:
+    types: [native-installer-rebuild]
 
 permissions:
   contents: read
