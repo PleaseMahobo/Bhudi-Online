@@ -13,7 +13,8 @@ import (
 // PowerShell runtime. The setup executable itself is built with -H=windowsgui,
 // so no console window is shown to the customer.
 func runInstallerGUI() {
-	script := `$ErrorActionPreference='Stop'
+	script := `param([string]$SetupExe)
+$ErrorActionPreference='Stop'
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
@@ -110,7 +111,7 @@ $next.Add_Click({
 
         $log = Join-Path $env:TEMP ('bhudi-setup-' + [guid]::NewGuid().ToString() + '.log')
         $psi = New-Object Diagnostics.ProcessStartInfo
-        $psi.FileName = $env:BHUDI_SETUP_EXE
+        $psi.FileName = $SetupExe
         $psi.Arguments = 'install-worker'
         $psi.UseShellExecute = $false
         $psi.CreateNoWindow = $true
@@ -119,7 +120,19 @@ $next.Add_Click({
         $psi.RedirectStandardInput = $false
         $state.Worker = New-Object Diagnostics.Process
         $state.Worker.StartInfo = $psi
-        [void]$state.Worker.Start()
+        try {
+            [void]$state.Worker.Start()
+        } catch {
+            $progress.Style = 'Continuous'
+            $progress.MarqueeAnimationSpeed = 0
+            $status.Text = 'Installation worker could not be started.'
+            $body.Text = 'Bhudi Agent Setup could not start the installation worker.' + [Environment]::NewLine + '' + [Environment]::NewLine + $_.Exception.Message
+            $next.Text = 'Close'
+            $next.Enabled = $true
+            $cancel.Enabled = $false
+            $next.Tag = 'fail'
+            return
+        }
 
         $state.Timer = New-Object Windows.Forms.Timer
         $state.Timer.Interval = 400
@@ -171,7 +184,6 @@ $next.Add_Click({
 	if err != nil {
 		return
 	}
-	cmd := exec.Command("powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", tmp)
-	cmd.Env = append(os.Environ(), "BHUDI_SETUP_EXE="+exe)
+	cmd := exec.Command("powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", tmp, exe)
 	_ = cmd.Run()
 }
