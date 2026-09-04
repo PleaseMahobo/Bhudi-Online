@@ -55,10 +55,12 @@ jobs:
           cp agent/native/dist/bhudi-agent.exe agent/cmd/bhudi-agent-setup/bhudi-agent.exe
           test -s agent/cmd/bhudi-agent-setup/bhudi-agent.exe
 
-      - name: Resolve installer GUI modules and checksums
+      - name: Resolve native installer GUI module metadata
         working-directory: agent/cmd/bhudi-agent-setup
         run: |
+          go get github.com/lxn/walk@v0.0.0-20210112085537-c389da54e794
           go mod tidy
+          test -s go.sum
           go mod download
 
       - name: Prove embedded agent byte integrity
