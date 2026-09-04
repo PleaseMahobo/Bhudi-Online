@@ -27,7 +27,8 @@
     <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
 
     <Property Id="SERVERURL" Secure="yes" Value="https://bhudi-online-production.up.railway.app" />
-    <Property Id="ENROLLMENTTOKEN" Secure="yes" Value="" />
+    <!-- Set at install time: msiexec ... ENROLLMENTTOKEN=... (no default Value — WiX forbids empty string) -->
+    <Property Id="ENROLLMENTTOKEN" Secure="yes" />
 
     <Feature Id="ProductFeature" Title="Bhudi Agent" Level="1">
       <ComponentGroupRef Id="ProductComponents" />
