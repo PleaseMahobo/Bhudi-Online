@@ -33,12 +33,13 @@ jobs:
             agent/native/go.sum
             agent/support-client/go.sum
 
-      - name: Download modules
+      - name: Resolve native modules (incl. gopsutil)
         working-directory: agent/native
-        run: go mod download
-      - name: Verify modules
-        working-directory: agent/native
-        run: go mod verify
+        run: |
+          go get github.com/shirou/gopsutil/v3@v3.24.5
+          go mod tidy
+          go mod download
+          go mod verify
 
       - name: Build native binaries
         working-directory: agent/native
@@ -107,15 +108,14 @@ jobs:
 
             | File | Platform |
             |------|----------|
-            | `BhudiAgent-Setup.exe` | Windows customer-specific graphical installer base (portal injects enrollment token) |
-            | `bhudi-agent-setup.msi` | Windows MSI for Intune/GPO — properties SERVERURL + ENROLLMENTTOKEN |
-            | `bhudi-agent.exe` | Windows x64 native agent |
-            | `bhudi-support.exe` | Windows Support Client (tray + tickets) |
-            | `bhudi-agent-linux-*` | Linux |
-            | `bhudi-agent-darwin-*` | macOS |
+            | `BhudiAgent-Setup.exe` | Windows customer installer base |
+            | `bhudi-agent-setup.msi` | MSI (SERVERURL + ENROLLMENTTOKEN) |
+            | `bhudi-agent.exe` | Windows agent (patch_scan / patch_install + live metrics) |
+            | `bhudi-support.exe` | Tray + tickets |
+            | `bhudi-agent-linux-*` / `darwin-*` | Other OS |
 
-            **Customer EXE:** portal appends enrollment bootstrap automatically.
-            **MSI (silent):** `msiexec /i bhudi-agent-setup.msi /qn SERVERURL=https://bhudi-online-production.up.railway.app ENROLLMENTTOKEN=...`
+            **Patch:** queue `patch_scan` / `patch_install` commands against enrolled agents.
+            **MSI:** `msiexec /i bhudi-agent-setup.msi /qn SERVERURL=https://bhudi-online-production.up.railway.app ENROLLMENTTOKEN=...`
           files: |
             agent/native/dist/BhudiAgent-Setup.exe
             agent/native/dist/bhudi-agent.exe
