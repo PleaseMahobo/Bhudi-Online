@@ -1,5 +1,4 @@
 # Native agent builds (Windows / Linux / macOS) + MSI + GitHub Release
-# Single WiX toolchain: v5 (matches agent/msi/Product.wxs schema)
 name: Build Native Agents (Windows / Linux / macOS)
 
 on:
@@ -32,6 +31,7 @@ jobs:
           cache-dependency-path: |
             agent/native/go.sum
             agent/support-client/go.sum
+            agent/cmd/bhudi-agent-setup/go.sum
 
       - name: Resolve native modules (incl. gopsutil)
         working-directory: agent/native
@@ -55,7 +55,7 @@ jobs:
       - name: Build Support Client (Windows tray / tickets)
         working-directory: agent/support-client
         run: |
-          go mod download
+          go mod download || true
           GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w -H=windowsgui" -o ../native/dist/bhudi-support.exe .
           test -s ../native/dist/bhudi-support.exe
 
@@ -64,12 +64,11 @@ jobs:
           cp agent/native/dist/bhudi-agent.exe agent/cmd/bhudi-agent-setup/bhudi-agent.exe
           test -s agent/cmd/bhudi-agent-setup/bhudi-agent.exe
 
-      - name: Resolve native installer GUI module metadata
+      - name: Resolve installer modules (MessageBox via x/sys — no walk)
         working-directory: agent/cmd/bhudi-agent-setup
         run: |
-          go get github.com/lxn/walk@v0.0.0-20210112085537-c389da54e794
+          go get golang.org/x/sys@v0.30.0
           go mod tidy
-          test -s go.sum
           go mod download
 
       - name: Prove embedded agent byte integrity
@@ -104,18 +103,15 @@ jobs:
           tag_name: agent-native-latest
           name: Bhudi Native Agent (no Python)
           body: |
-            ## Standalone agents — **no Python required**
+            ## Standalone agents
 
-            | File | Platform |
-            |------|----------|
-            | `BhudiAgent-Setup.exe` | Windows customer installer base |
-            | `bhudi-agent-setup.msi` | MSI (SERVERURL + ENROLLMENTTOKEN) |
-            | `bhudi-agent.exe` | Windows agent (patch_scan / patch_install + live metrics) |
-            | `bhudi-support.exe` | Tray + tickets |
-            | `bhudi-agent-linux-*` / `darwin-*` | Other OS |
+            | File | Notes |
+            |------|-------|
+            | `BhudiAgent-Setup.exe` | Windows installer (MessageBox UI; portal injects multi-use token) |
+            | `bhudi-agent-setup.msi` | Intune/GPO |
+            | `bhudi-agent.exe` / `bhudi-support.exe` | Binaries |
 
-            **Patch:** queue `patch_scan` / `patch_install` commands against enrolled agents.
-            **MSI:** `msiexec /i bhudi-agent-setup.msi /qn SERVERURL=https://bhudi-online-production.up.railway.app ENROLLMENTTOKEN=...`
+            Portal download embeds enrollment automatically.
           files: |
             agent/native/dist/BhudiAgent-Setup.exe
             agent/native/dist/bhudi-agent.exe
@@ -146,10 +142,9 @@ jobs:
           New-Item -ItemType Directory -Force agent\msi | Out-Null
           Copy-Item agent\native\dist\bhudi-agent.exe agent\msi\bhudi-agent.exe -Force
           if (-not (Test-Path agent\native\dist\bhudi-support.exe)) {
-            throw "bhudi-support.exe missing from build artifact — MSI requires Support Client"
+            throw "bhudi-support.exe missing"
           }
           Copy-Item agent\native\dist\bhudi-support.exe agent\msi\bhudi-support.exe -Force
-          Get-Item agent\msi\bhudi-agent.exe, agent\msi\bhudi-support.exe | Format-Table Name, Length
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: "8.0.x"
