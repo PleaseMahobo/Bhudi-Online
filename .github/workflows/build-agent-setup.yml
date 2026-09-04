@@ -4,11 +4,6 @@ name: Build Native Agents (Windows / Linux / macOS)
 on:
   push:
     branches: [main]
-    paths:
-      - "agent/native/**"
-      - "agent/cmd/bhudi-agent-setup/**"
-      - "agent/msi/**"
-      - ".github/workflows/build-agent-setup.yml"
   pull_request:
     paths:
       - "agent/native/**"
