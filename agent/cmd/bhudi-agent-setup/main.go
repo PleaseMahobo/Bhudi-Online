@@ -29,15 +29,11 @@ func main() {
 	// runs in a hidden child invocation so stdout/stderr can be captured by the
 	// wizard instead of exposing a command window.
 	if runtime.GOOS == "windows" && len(os.Args) < 2 {
-		ensureElevated()
 		runInstallerGUI()
 		return
 	}
 
 	if len(os.Args) >= 2 && strings.EqualFold(os.Args[1], "install-worker") {
-		if runtime.GOOS == "windows" {
-			ensureElevated()
-		}
 		runInstallWorker()
 		return
 	}
