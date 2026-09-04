@@ -25,7 +25,7 @@ func runInstallerGUI() {
 	title.SetTextAlignment(walk.AlignNear)
 
 	body, _ := walk.NewLabel(mw)
-	body.SetFont(walk.Font{Family: "Segoe UI", PointSize: 10})
+	body.SetFont(walk.NewFont("Segoe UI", 10, walk.FontNormal))
 	body.SetText("Welcome to the Bhudi Agent Setup Wizard.\r\n\r\nThis wizard installs and enrolls the Bhudi endpoint agent and registers the Windows service.\r\n\r\nClick Next to continue.")
 	body.SetMinMaxSize(walk.Size{Width: 540, Height: 180}, walk.Size{Width: 540, Height: 180})
 
