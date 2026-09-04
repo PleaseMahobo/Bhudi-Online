@@ -55,6 +55,10 @@ jobs:
           cp agent/native/dist/bhudi-agent.exe agent/cmd/bhudi-agent-setup/bhudi-agent.exe
           test -s agent/cmd/bhudi-agent-setup/bhudi-agent.exe
 
+      - name: Download installer GUI modules
+        working-directory: agent/cmd/bhudi-agent-setup
+        run: go mod download
+
       - name: Prove embedded agent byte integrity
         working-directory: agent/cmd/bhudi-agent-setup
         run: |
