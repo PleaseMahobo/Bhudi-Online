@@ -76,11 +76,9 @@ func alreadyRunning() bool {
 	if runtime.GOOS != "windows" {
 		return false
 	}
-	// Best-effort: named mutex via temporary lock file in data dir.
 	lock := filepath.Join(dataDir(), "support-client.lock")
 	f, err := os.OpenFile(lock, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
 	if err != nil {
-		// If stale (>24h), replace.
 		if st, e := os.Stat(lock); e == nil && time.Since(st.ModTime()) > 24*time.Hour {
 			_ = os.Remove(lock)
 			f, err = os.OpenFile(lock, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
@@ -289,6 +287,7 @@ func (c *client) ticketAPI(w http.ResponseWriter, r *http.Request) {
 	_, _ = io.Copy(w, res.Body)
 }
 
+// pageHTML must not contain nested backticks (Go raw string delimiter).
 const pageHTML = `<!doctype html>
 <html lang="en">
 <head>
@@ -365,11 +364,13 @@ async function load(){
     let data; try{data=JSON.parse(t)}catch(_){el.textContent=t;return}
     const items=data.tickets||data||[];
     if(!items.length){el.textContent='No tickets yet from this device.';return}
-    el.innerHTML=items.map(x=>`<div class="ticket"><strong>${esc(x.title||'Ticket')}</strong><span class="pill">${esc(x.status||'')}</span><span class="pill">${esc(x.priority||'')}</span><div class="meta">${esc(x.created_at||x.id||'')}</div></div>`).join('');
+    el.innerHTML=items.map(function(x){
+      return '<div class="ticket"><strong>'+esc(x.title||'Ticket')+'</strong><span class="pill">'+esc(x.status||'')+'</span><span class="pill">'+esc(x.priority||'')+'</span><div class="meta">'+esc(x.created_at||x.id||'')+'</div></div>';
+    }).join('');
   }catch(e){el.textContent='Could not load tickets.';}
 }
-function esc(s){return String(s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
-document.getElementById('f').onsubmit=async e=>{
+function esc(s){return String(s).replace(/[&<>"']/g,function(m){return {'&':'&','<':'<','>':'>','"':'"',"'":'&#39;'}[m];});}
+document.getElementById('f').onsubmit=async function(e){
   e.preventDefault();
   const btn=document.getElementById('btn'), msg=document.getElementById('msg');
   btn.disabled=true; msg.textContent=''; msg.className='msg';
