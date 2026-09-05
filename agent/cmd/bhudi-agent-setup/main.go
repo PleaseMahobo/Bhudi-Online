@@ -95,7 +95,7 @@ func runInstallWorker() {
 	fmt.Println("[3/4] Installing Windows service and starting agent...")
 	logInstaller("[3/4] Installing Windows service")
 	cmd := exec.Command(agentPath, "install", "-server", server)
-	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	cmd.Stdout, cmd.Stderr = io.MultiWriter(os.Stdout, installerLogWriter()), io.MultiWriter(os.Stderr, installerLogWriter())
 	if err := cmd.Run(); err != nil { fail("agent installation failed: " + err.Error()) }
 
 	fmt.Println("[4/4] Installing Bhudi Support Client...")
