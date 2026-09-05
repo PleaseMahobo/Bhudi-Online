@@ -99,7 +99,11 @@ def test_patch_management_workflow_and_compliance_reporting() -> None:
 
     execute = client.post(f"/patch-management/rollouts/{rollout.json()['id']}/execute")
     assert execute.status_code == 200
-    assert execute.json()["status"] == "completed"
+    # A rollout must not report completion when no live agent can receive it.
+    assert execute.json()["status"] == "failed"
+    assert execute.json()["dispatch"]["queued_count"] == 0
+    assert execute.json()["dispatch"]["skipped_count"] == 1
+    assert execute.json()["dispatch"]["skipped"][0]["reason"] == "agent_not_found"
 
     rollback = client.post(f"/patch-management/rollouts/{rollout.json()['id']}/rollback")
     assert rollback.status_code == 200
