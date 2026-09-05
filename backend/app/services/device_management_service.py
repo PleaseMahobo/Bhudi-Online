@@ -7,6 +7,7 @@ from sqlalchemy import MetaData, inspect, text
 from sqlalchemy.orm import Session
 
 from app.models.agent import Agent
+from app.models.agent_command import AgentCommand
 from app.models.device_management import (
     ConfigurationProfile,
     DeviceGroup,
@@ -33,6 +34,8 @@ class DeviceManagementService:
 
         metadata = MetaData()
         for model in [
+            Agent,
+            AgentCommand,
             ManagedDevice,
             DeviceGroup,
             DynamicDeviceGroup,
