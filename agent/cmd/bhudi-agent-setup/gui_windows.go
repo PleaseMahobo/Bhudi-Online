@@ -47,7 +47,8 @@ func runInstallerGUI() {
 	if err := runInstallWorkerProcess(); err != nil {
 		_ = messageBox(
 			"Installation failed.\r\n\r\n"+err.Error()+"\r\n\r\n"+
-				"Please use the exact error above when reporting this issue.",
+				"Installer log: C:\\ProgramData\\Bhudi\\Logs\\installer.log\r\n\r\n"+
+				"Please use the exact error and log when reporting this issue.",
 			"Bhudi Agent Setup",
 			mbOK|mbIconError,
 		)
