@@ -114,14 +114,12 @@ def execute_rollout(
         raise HTTPException(status_code=404, detail="rollout_not_found")
 
     return {
-        "rollout": {
-            "id": str(rollout.id),
-            "name": rollout.name,
-            "ring_id": str(rollout.ring_id),
-            "ring_name": rollout.ring.name if rollout.ring is not None else None,
-            "device_ids": rollout.device_ids,
-            "status": rollout.status,
-        },
+        "id": str(rollout.id),
+        "name": rollout.name,
+        "ring_id": str(rollout.ring_id),
+        "ring_name": rollout.ring.name if rollout.ring is not None else None,
+        "device_ids": rollout.device_ids,
+        "status": rollout.status,
         "dispatch": dispatch,
     }
 
