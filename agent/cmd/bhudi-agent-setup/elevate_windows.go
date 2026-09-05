@@ -7,7 +7,6 @@ import (
 	"syscall"
 	"unsafe"
 
-	"golang.org/x/sys/windows"
 )
 
 var (
@@ -51,10 +50,6 @@ func ensureElevated() {
 	}
 }
 
-func isElevated() bool {
-	token := windows.Token(0)
-	return token.IsElevated()
-}
 
 func joinWindowsArgs(args []string) string {
 	if len(args) == 0 {
