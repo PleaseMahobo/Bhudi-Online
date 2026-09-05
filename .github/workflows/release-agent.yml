@@ -18,7 +18,7 @@ permissions:
   contents: write
 
 env:
-  AGENT_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || '2.2.0' }}
+  AGENT_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || '2.2.1' }}
 
 jobs:
   build-windows:
@@ -144,7 +144,7 @@ jobs:
         run: |
           VER="${{ env.AGENT_VERSION }}"
           VER="${VER#agent-v}"
-          [ -n "$VER" ] || VER=2.2.0
+          [ -n "$VER" ] || VER=2.2.1
           mkdir -p dist
           CGO_ENABLED=0 GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} \
             go build -trimpath -ldflags="-s -w -X main.agentVersion=$VER" \
