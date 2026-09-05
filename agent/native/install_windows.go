@@ -44,6 +44,10 @@ func installService(server string) error {
 	}
 	dest := filepath.Join(destDir, "bhudi-agent.exe")
 	logInstall("install: dest=%s", dest)
+	// Upgrade/reinstall safety: stop the existing agent and wait for the binary to unlock.
+	if err := stopBhudiForUpgrade(dest); err != nil {
+		return fmt.Errorf("prepare upgrade: %w", err)
+	}
 	if err := copyFile(exe, dest); err != nil {
 		return fmt.Errorf("copy agent: %w", err)
 	}
@@ -180,6 +184,37 @@ func upgradeService(server string) error {
 	_ = exec.Command("sc", "stop", windowsServiceName).Run()
 	time.Sleep(800 * time.Millisecond)
 	return installService(server)
+}
+
+func stopBhudiForUpgrade(dest string) error {
+	_ = exec.Command("schtasks", "/Delete", "/TN", windowsWatchdogName, "/F").Run()
+	_ = exec.Command("schtasks", "/Delete", "/TN", windowsTaskName, "/F").Run()
+	_ = exec.Command("sc", "stop", windowsServiceName).Run()
+
+	deadline := time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) {
+		out, _ := exec.Command("sc", "query", windowsServiceName).CombinedOutput()
+		if strings.Contains(string(out), "STOPPED") || len(out) == 0 {
+			break
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+
+	// A previous fallback launch can still own the executable after the service stops.
+	_ = exec.Command("taskkill", "/F", "/IM", "bhudi-agent.exe").Run()
+
+	for i := 0; i < 30; i++ {
+		if _, err := os.Stat(dest); os.IsNotExist(err) {
+			return nil
+		}
+		fh, err := os.OpenFile(dest, os.O_WRONLY|os.O_APPEND, 0)
+		if err == nil {
+			_ = fh.Close()
+			return nil
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	return fmt.Errorf("existing agent binary remained locked: %s", dest)
 }
 
 func installWindowsService(dest, server string) error {
