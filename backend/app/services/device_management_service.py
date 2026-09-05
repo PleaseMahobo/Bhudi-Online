@@ -3,11 +3,15 @@ from __future__ import annotations
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import MetaData, inspect, text
+from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session
 
 from app.models.agent import Agent
 from app.models.agent_command import AgentCommand
+from app.models.base import Base
+from app.models.device import Device
+from app.models.tenant import Tenant
+from app.models.user import User  # noqa: F401  (registers the FK target for AgentCommand.issued_by)
 from app.models.device_management import (
     ConfigurationProfile,
     DeviceGroup,
@@ -32,23 +36,26 @@ class DeviceManagementService:
         if bind is None:
             return
 
-        metadata = MetaData()
-        for model in [
-            Agent,
-            AgentCommand,
-            ManagedDevice,
-            DeviceGroup,
-            DynamicDeviceGroup,
-            DeviceTag,
-            DevicePolicy,
-            ConfigurationProfile,
-            MaintenanceWindow,
-            PatchRing,
-            PatchRollout,
-        ]:
-            model.__table__.to_metadata(metadata)
-
-        metadata.create_all(bind=bind)
+        # Create the tables directly from Base.metadata (rather than copying
+        # them into a fresh MetaData instance) so that foreign keys pointing
+        # at tables outside this explicit list (e.g. AgentCommand.issued_by
+        # -> users.id) can still be resolved.
+        tables = [
+            Tenant.__table__,
+            Device.__table__,
+            Agent.__table__,
+            AgentCommand.__table__,
+            ManagedDevice.__table__,
+            DeviceGroup.__table__,
+            DynamicDeviceGroup.__table__,
+            DeviceTag.__table__,
+            DevicePolicy.__table__,
+            ConfigurationProfile.__table__,
+            MaintenanceWindow.__table__,
+            PatchRing.__table__,
+            PatchRollout.__table__,
+        ]
+        Base.metadata.create_all(bind=bind, tables=tables)
 
         if bind.dialect.name == "sqlite":
             self._ensure_sqlite_column(bind, "managed_devices", "group_id", "TEXT")
