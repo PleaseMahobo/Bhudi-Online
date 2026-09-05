@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.models.agent import Agent
 from app.models.agent_command import AgentCommand
 from app.models.device import Device
+from app.models.tenant import Tenant
 from app.models.device_management import (
     ConfigurationProfile,
     DeviceGroup,
@@ -35,6 +36,7 @@ class DeviceManagementService:
 
         metadata = MetaData()
         for model in [
+            Tenant,
             Device,
             Agent,
             AgentCommand,
