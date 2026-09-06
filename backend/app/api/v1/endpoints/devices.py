@@ -1,4 +1,4 @@
-"""Tenant-scoped device listing + status for dashboard (DB + runtime agents)."""
+"""Tenant-scoped device listing + status for dashboard (DB agents + runtime)."""
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.core.dependencies import get_current_user
 from app.database.session import get_db
+from app.models.agent import Agent
 from app.models.user import User
 from app.state import device_state
 from app.services import device_service
@@ -72,11 +73,28 @@ def _normalize_row(raw: dict[str, Any]) -> dict[str, Any]:
         "disk_percent": raw.get("disk_percent"),
         "last_seen": last_seen_s,
         "source": raw.get("source") or "unknown",
+        "enabled": raw.get("enabled"),
         "organization_id": str(raw["organization_id"]) if raw.get("organization_id") else None,
         "organization_name": raw.get("organization_name"),
         "site_id": str(raw["site_id"]) if raw.get("site_id") else None,
         "site_name": raw.get("site_name"),
     }
+
+
+def _merge_row(by_id: dict[str, dict[str, Any]], row: dict[str, Any]) -> None:
+    rid = row.get("id") or ""
+    if not rid:
+        return
+    if rid not in by_id:
+        by_id[rid] = row
+        return
+    for k, v in row.items():
+        if by_id[rid].get(k) in (None, "", "unknown") and v not in (None, ""):
+            by_id[rid][k] = v
+    by_id[rid]["status"] = _status_from_last_seen(
+        by_id[rid].get("last_seen"), by_id[rid].get("status")
+    )
+    by_id[rid]["online"] = by_id[rid]["status"] == "online"
 
 
 def _runtime_agents(tenant_id: UUID) -> list[dict[str, Any]]:
@@ -98,6 +116,40 @@ def _runtime_agents(tenant_id: UUID) -> list[dict[str, Any]]:
     except Exception as exc:
         print(f"[devices] runtime agents unavailable: {exc}")
         return []
+
+
+def _sql_agents(db: Session, tenant_id: UUID) -> list[dict[str, Any]]:
+    """Persistent enterprise Agent rows (survive worker restarts)."""
+    try:
+        rows = (
+            db.query(Agent)
+            .filter(Agent.tenant_id == tenant_id)
+            .filter(Agent.revoked.is_(False))
+            .order_by(Agent.last_seen.desc().nullslast())
+            .all()
+        )
+    except Exception as exp:
+        print(f"[devices] SQL Agent list failed: {exp}")
+        return []
+
+    out: list[dict[str, Any]] = []
+    for a in rows:
+        out.append(
+            _normalize_row(
+                {
+                    "id": str(a.id),
+                    "agent_id": str(a.id),
+                    "hostname": a.hostname,
+                    "status": a.status,
+                    "platform": a.platform,
+                    "agent_version": a.agent_version,
+                    "last_seen": a.last_seen or a.last_heartbeat,
+                    "enabled": a.enabled,
+                    "source": "agent_db",
+                }
+            )
+        )
+    return out
 
 
 @router.get("/status")
@@ -127,31 +179,27 @@ def list_devices_unified(
 
     by_id: dict[str, dict[str, Any]] = {}
 
-    for row in _runtime_agents(tenant_id):
-        if row["id"]:
-            by_id[row["id"]] = row
+    # 1) Durable SQL agents (source of truth after enroll)
+    if db is not None:
+        for row in _sql_agents(db, tenant_id):
+            _merge_row(by_id, row)
 
+    # 2) In-process runtime registry (live metrics when available)
+    for row in _runtime_agents(tenant_id):
+        _merge_row(by_id, row)
+
+    # 3) device_state memory
     try:
         for d in device_state.get_devices():
             raw_tenant = d.get("tenant_id")
             if not raw_tenant or str(raw_tenant) != str(tenant_id):
                 continue
             row = _normalize_row({**d, "source": d.get("source") or "memory"})
-            if not row["id"]:
-                continue
-            if row["id"] in by_id:
-                for k, v in row.items():
-                    if by_id[row["id"]].get(k) in (None, "", "unknown") and v not in (None, ""):
-                        by_id[row["id"]][k] = v
-                by_id[row["id"]]["status"] = _status_from_last_seen(
-                    by_id[row["id"]].get("last_seen"), by_id[row["id"]].get("status")
-                )
-                by_id[row["id"]]["online"] = by_id[row["id"]]["status"] == "online"
-            else:
-                by_id[row["id"]] = row
+            _merge_row(by_id, row)
     except Exception as exc:
         print(f"[devices] memory list failed: {exc}")
 
+    # 4) Legacy Device table
     if db is not None:
         try:
             rows = device_service.get_devices(db, tenant_id=tenant_id)
@@ -170,12 +218,9 @@ def list_devices_unified(
                         "site_id": getattr(d, "site_id", None),
                     }
                 )
-                if not row["id"]:
-                    continue
-                if row["id"] not in by_id:
-                    by_id[row["id"]] = row
+                _merge_row(by_id, row)
         except Exception as exp:
-            print(f"[devices] DB list failed: {exp}")
+            print(f"[devices] DB Device list failed: {exp}")
 
     devices = sorted(
         by_id.values(),
