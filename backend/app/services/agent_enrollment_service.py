@@ -83,7 +83,8 @@ class AgentEnrollmentService:
                 approved=True,
                 trusted=False,
                 status="online",
-                enabled=False,
+                # Visible in portal immediately; heartbeat keeps enabled=True.
+                enabled=True,
                 registered_at=now,
                 last_seen=now,
                 last_heartbeat=now,
@@ -95,6 +96,7 @@ class AgentEnrollmentService:
             existing.platform = platform
             existing.machine_guid = normalized_guid
             existing.status = "online"
+            existing.enabled = True
             existing.last_seen = now
             existing.last_heartbeat = now
             existing.revoked = False
