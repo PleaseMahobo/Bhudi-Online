@@ -18,7 +18,7 @@ permissions:
   contents: write
 
 env:
-  AGENT_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || '2.2.3' }}
+  AGENT_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || '2.2.8' }}
 
 jobs:
   build-windows:
@@ -35,7 +35,7 @@ jobs:
         shell: pwsh
         run: |
           $ver = "${{ env.AGENT_VERSION }}".TrimStart('agent-v')
-          if (-not $ver) { $ver = "2.2.3" }
+          if (-not $ver) { $ver = "2.2.8" }
           New-Item -ItemType Directory -Force dist | Out-Null
           $ld = "-s -w -X main.agentVersion=$ver"
           $env:CGO_ENABLED = "0"
@@ -145,7 +145,7 @@ jobs:
         run: |
           VER="${{ env.AGENT_VERSION }}"
           VER="${VER#agent-v}"
-          [ -n "$VER" ] || VER=2.2.3
+          [ -n "$VER" ] || VER=2.2.8
           mkdir -p dist
           CGO_ENABLED=0 GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} \
             go build -trimpath -ldflags="-s -w -X main.agentVersion=$VER" \
