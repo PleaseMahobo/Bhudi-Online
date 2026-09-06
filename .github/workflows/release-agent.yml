@@ -43,16 +43,6 @@ jobs:
           go build -trimpath -ldflags $ld -o dist/bhudi-agent.exe .
           Copy-Item dist/bhudi-agent.exe dist/bhudi-agent-windows-amd64.exe
 
-      - name: Build customer installer base (BhudiAgent-Setup.exe)
-        shell: pwsh
-        run: |
-          Copy-Item agent/native/dist/bhudi-agent.exe agent/cmd/bhudi-agent-setup/bhudi-agent.exe -Force
-          Push-Location agent/cmd/bhudi-agent-setup
-          $env:CGO_ENABLED = "0"
-          $env:GOOS = "windows"; $env:GOARCH = "amd64"
-          go build -tags release -trimpath -ldflags "-s -w -H=windowsgui" -o ../../native/dist/BhudiAgent-Setup.exe .
-          Pop-Location
-
       - name: Build support client
         working-directory: agent/support-client
         shell: pwsh
@@ -61,6 +51,17 @@ jobs:
           $env:GOOS = "windows"; $env:GOARCH = "amd64"
           go build -trimpath -ldflags "-s -w -H=windowsgui" -o ../native/dist/bhudi-support.exe .
           if (-not (Test-Path ../native/dist/bhudi-support.exe)) { throw "bhudi-support.exe build failed" }
+
+      - name: Build customer installer base with bundled agent and support client
+        shell: pwsh
+        run: |
+          Copy-Item agent/native/dist/bhudi-agent.exe agent/cmd/bhudi-agent-setup/bhudi-agent.exe -Force
+          Copy-Item agent/native/dist/bhudi-support.exe agent/cmd/bhudi-agent-setup/bhudi-support.exe -Force
+          Push-Location agent/cmd/bhudi-agent-setup
+          $env:CGO_ENABLED = "0"
+          $env:GOOS = "windows"; $env:GOARCH = "amd64"
+          go build -tags release -trimpath -ldflags "-s -w -H=windowsgui" -o ../../native/dist/BhudiAgent-Setup.exe .
+          Pop-Location
 
       - uses: actions/setup-dotnet@v4
         with:
