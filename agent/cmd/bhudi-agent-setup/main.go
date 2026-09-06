@@ -21,8 +21,8 @@ const (
 )
 
 type bootstrap struct {
-	ServerURL        string `json:"server_url"`
-	EnrollmentToken  string `json:"enrollment_token"`
+	ServerURL       string `json:"server_url"`
+	EnrollmentToken string `json:"enrollment_token"`
 }
 
 type installedIdentity struct {
@@ -109,10 +109,13 @@ func runInstallWorker() {
 	}
 
 	identity := filepath.Join(os.Getenv("ProgramData"), "Bhudi", "Agent", "agent_identity.json")
+	identityBackup := identity + ".setup-backup"
+	enrollEnv := append(os.Environ(), "BHUDI_ENROLLMENT_TOKEN="+boot.EnrollmentToken)
+
 	if !hasValidIdentity(identity) {
 		fmt.Println("[2/4] Enrolling endpoint before installing Windows service...")
 		logInstaller("[2/4] Enrolling endpoint against %s", server)
-		out, err := runAgentCmd(agentPath, []string{"enroll", "-server", server}, append(os.Environ(), "BHUDI_ENROLLMENT_TOKEN="+boot.EnrollmentToken))
+		out, err := runAgentCmd(agentPath, []string{"enroll", "-server", server}, enrollEnv)
 		logInstaller("enroll output:\n%s", out)
 		if err != nil {
 			fail("agent enrollment failed: " + err.Error() + "\n" + tailLines(out, 15))
@@ -125,17 +128,37 @@ func runInstallWorker() {
 		logInstaller("[2/4] Reusing existing identity at %s", identity)
 	}
 
+	// Preserve identity across service start (older agents could wipe it on 401).
+	if data, err := os.ReadFile(identity); err == nil {
+		_ = os.WriteFile(identityBackup, data, 0600)
+		logInstaller("[2/4] identity backed up (%d bytes)", len(data))
+	}
+
 	fmt.Println("[3/4] Installing Windows service and starting agent...")
 	logInstaller("[3/4] Installing Windows service")
-	out, err := runAgentCmd(agentPath, []string{"install", "-server", server}, os.Environ())
+	out, err := runAgentCmd(agentPath, []string{"install", "-server", server}, enrollEnv)
 	logInstaller("install output:\n%s", out)
 	if err != nil {
-		// Prefer last meaningful line (often "install FAILED: ...").
 		detail := tailLines(out, 20)
 		if detail == "" {
 			detail = err.Error()
 		}
 		fail("agent installation failed: " + detail + "\nAlso check: C:\\ProgramData\\Bhudi\\Agent\\install.log")
+	}
+
+	if !hasValidIdentity(identity) {
+		logInstaller("WARN: identity missing after install — restoring backup")
+		if data, err := os.ReadFile(identityBackup); err == nil {
+			_ = os.MkdirAll(filepath.Dir(identity), 0755)
+			_ = os.WriteFile(identity, data, 0600)
+		}
+	}
+	if !hasValidIdentity(identity) {
+		// Soft-fail: service may still be installed; user can re-enroll.
+		logInstaller("WARN: agent identity still missing after restore")
+		fmt.Println("Warning: agent identity file missing after service install; heartbeats may fail until re-enroll.")
+	} else {
+		logInstaller("[3/4] identity OK after install")
 	}
 
 	fmt.Println("[4/4] Installing Bhudi Support Client...")
@@ -150,9 +173,6 @@ func runInstallWorker() {
 	supportPath := filepath.Join(supportDir, "bhudi-support.exe")
 	if err := download(supportURL, supportPath); err != nil {
 		fail("support-client download: " + err.Error())
-	}
-	if !hasValidIdentity(identity) {
-		fail("agent identity disappeared after service installation")
 	}
 	if err := startSupportClient(supportPath); err != nil {
 		fail("support-client start: " + err.Error())
@@ -275,13 +295,6 @@ func download(url, dest string) error {
 	defer f.Close()
 	_, err = io.Copy(f, resp.Body)
 	return err
-}
-
-func installerLogWriter() io.Writer {
-	if installerLog != nil {
-		return installerLog
-	}
-	return io.Discard
 }
 
 func fail(msg string) {
