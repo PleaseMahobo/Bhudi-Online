@@ -108,11 +108,9 @@ func cycle(client *http.Client, server string, ident *identity) error {
 	if err := sendHeartbeat(client, server, *ident); err != nil {
 		return err
 	}
-	for _, cmd := range pollEnterpriseCommands(client, server, *ident) {
-		_ = markEnterpriseSent(client, server, *ident, str(cmd["command_id"]))
-		result := executeEnterpriseCommand(server, *ident, cmd)
-		_ = postEnterpriseResult(client, server, *ident, str(cmd["command_id"]), result)
-	}
+	// Commands are polled only through the agent-authenticated runtime endpoint.
+	// Do not call the legacy /api/v1/agents/... enterprise routes; they are not
+	// agent polling endpoints and produced repeated HTTP 405 noise.
 	cmds, err := pollCommands(client, server, *ident)
 	if err != nil {
 		return err
@@ -159,48 +157,6 @@ func executeEnterpriseCommand(server string, ident identity, cmd map[string]any)
 		code, out, errOut := runShell(command, shell)
 		return map[string]any{"exit_code": code, "stdout": out, "stderr": errOut}
 	}
-}
-
-func pollEnterpriseCommands(client *http.Client, server string, ident identity) []map[string]any {
-	url := fmt.Sprintf("%s/api/v1/agents/%s/commands?agent_token=%s", server, ident.AgentID, ident.AgentToken)
-	res, err := client.Get(url)
-	if err != nil {
-		return nil
-	}
-	defer res.Body.Close()
-	body, _ := io.ReadAll(res.Body)
-	if res.StatusCode >= 300 {
-		return nil
-	}
-	var wrap struct {
-		Commands []map[string]any `json:"commands"`
-	}
-	if json.Unmarshal(body, &wrap) != nil {
-		return nil
-	}
-	return wrap.Commands
-}
-
-func markEnterpriseSent(client *http.Client, server string, ident identity, commandID string) error {
-	url := fmt.Sprintf("%s/api/v1/agents/%s/commands/%s/sent?agent_token=%s", server, ident.AgentID, commandID, ident.AgentToken)
-	req, _ := http.NewRequest(http.MethodPost, url, nil)
-	res, err := client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer res.Body.Close()
-	return nil
-}
-
-func postEnterpriseResult(client *http.Client, server string, ident identity, commandID string, result map[string]any) error {
-	url := fmt.Sprintf("%s/api/v1/agents/%s/commands/%s/completed?agent_token=%s", server, ident.AgentID, commandID, ident.AgentToken)
-	b, _ := json.Marshal(result)
-	res, err := client.Post(url, "application/json", bytes.NewReader(b))
-	if err != nil {
-		return err
-	}
-	defer res.Body.Close()
-	return nil
 }
 
 func loadOrEnroll(server string) (identity, error) {

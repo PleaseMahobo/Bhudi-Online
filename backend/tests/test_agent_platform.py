@@ -16,7 +16,9 @@ def _build_client() -> TestClient:
 
 def test_agent_platform_exposes_agent_details_and_command_history() -> None:
     client = _build_client()
-    enroll_response = client.post("/runtime/enroll", json={"hostname": "agent-01", "agent_version": "1.2.3", "platform": "linux", "enrollment_secret": "phase-3-test"})
+    # This is the runtime-platform compatibility path. Tenant-bound enrollment is
+    # exercised through the enrollment service with a provisioned credential.
+    enroll_response = client.post("/runtime/enroll", json={"hostname": "agent-01", "agent_version": "1.2.3", "platform": "linux"})
     assert enroll_response.status_code == 200
     body = enroll_response.json()
     agent_id = body["agent_id"]

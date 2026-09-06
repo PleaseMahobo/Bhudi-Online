@@ -19,6 +19,7 @@ from app.models.agent import Agent
 from app.models.user import User
 from app.state import device_state
 from app.services.remote_session_manager import remote_session_manager
+from app.services.agent_enrollment_service import AgentEnrollmentService
 
 router = APIRouter(prefix="/runtime")
 _agents: dict[str, dict[str, Any]] = {}
@@ -192,19 +193,51 @@ def _sync_enterprise_agent(agent: dict[str, Any], db: Session) -> None:
 
 @router.post("/enroll", response_model=EnrollResponse)
 def enroll(req: EnrollRequest, db: Session = Depends(get_db)):
-    agent_id = str(uuid.uuid4())
-    token = str(uuid.uuid4())
+    # A tenant enrollment credential is authoritative. Persist the tenant-bound
+    # Agent first, then mirror that exact identity into the runtime registry.
+    # Previously this endpoint merely stored enrollment_secret in memory and
+    # created an unscoped runtime Agent, so healthy heartbeats could never appear
+    # in the tenant-safe Devices portal.
+    tenant_id = None
+    if req.enrollment_secret:
+        persistent, token, tenant_id = AgentEnrollmentService(db).enroll_agent(
+            enrollment_secret=req.enrollment_secret,
+            hostname=req.hostname,
+            agent_version=req.agent_version,
+            platform=req.platform,
+            machine_guid=req.machine_guid,
+        )
+        agent_id = str(persistent.id)
+    else:
+        agent_id = str(uuid.uuid4())
+        token = str(uuid.uuid4())
+
     _agents[agent_id] = {
-        "agent_id": agent_id, "agent_token": token, "hostname": req.hostname, "agent_version": req.agent_version,
-        "platform": req.platform, "platform_metadata": _platform_metadata(req.platform), "status": "online",
-        "registered_at": datetime.now(timezone.utc).isoformat(), "last_seen": datetime.now(timezone.utc).isoformat(),
-        "cpu_percent": None, "memory_percent": None, "disk_percent": None, "ip_address": None,
-        "enrollment_secret": req.enrollment_secret, "commands_completed": 0, "commands_failed": 0,
+        "agent_id": agent_id,
+        "agent_token": token,
+        "hostname": req.hostname,
+        "agent_version": req.agent_version,
+        "platform": req.platform,
+        "platform_metadata": _platform_metadata(req.platform),
+        "tenant_id": str(tenant_id) if tenant_id else None,
+        "status": "online",
+        "registered_at": datetime.now(timezone.utc).isoformat(),
+        "last_seen": datetime.now(timezone.utc).isoformat(),
+        "cpu_percent": None,
+        "memory_percent": None,
+        "disk_percent": None,
+        "ip_address": None,
+        "commands_completed": 0,
+        "commands_failed": 0,
     }
     _commands[agent_id] = []
     device_state.register_device(agent_id)
     device_state.devices[agent_id]["hostname"] = req.hostname
-    _sync_enterprise_agent(_agents[agent_id], db)
+    device_state.devices[agent_id]["tenant_id"] = str(tenant_id) if tenant_id else None
+    # The credential path already created the durable row; legacy enrollment
+    # still receives the existing compatibility sync behavior.
+    if not req.enrollment_secret:
+        _sync_enterprise_agent(_agents[agent_id], db)
     _persist_agents()
     return EnrollResponse(agent_id=agent_id, agent_token=token)
 
