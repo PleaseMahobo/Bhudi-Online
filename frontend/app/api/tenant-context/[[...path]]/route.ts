@@ -16,23 +16,28 @@ function getAuth(request: NextRequest): string {
   return token ? `Bearer ${token}` : '';
 }
 
-async function resolveAuth(request: NextRequest): Promise<string> {
-  const current = getAuth(request);
-  if (current) return current;
-
-  // Recover an expired/missing access token from the portal's HttpOnly refresh
-  // cookie before proxying tenant-scoped API requests.
+async function refreshAuth(request: NextRequest): Promise<string> {
   const refreshToken = request.cookies.get('refresh_token')?.value;
   if (!refreshToken) return '';
 
   const refresh = await fetch(`${BACKEND}/api/v1/auth/refresh`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Cookie: `refresh_token=${refreshToken}` },
+    headers: {
+      'Content-Type': 'application/json',
+      Cookie: `refresh_token=${refreshToken}`,
+    },
     cache: 'no-store',
   });
   if (!refresh.ok) return '';
   const data = await refresh.json().catch(() => null);
   return data?.access_token ? `Bearer ${data.access_token}` : '';
+}
+
+async function resolveAuth(request: NextRequest): Promise<string> {
+  // Prefer the current credential. If Railway rejects it, proxy() refreshes and
+  // retries once so a stale HttpOnly access token cannot permanently trap the
+  // Devices portal in a 401 loop.
+  return getAuth(request);
 }
 
 async function proxy(request: NextRequest, path: string[] = []) {
@@ -46,23 +51,33 @@ async function proxy(request: NextRequest, path: string[] = []) {
   // operations. Browser requests must not call Railway directly because the
   // HttpOnly Bhudi session cookie is scoped to the portal origin.
   const upstream = path[0] === 'devices'
-    ? `${BACKEND}/api/v1/devices${path.slice(1).length ? `/${path.slice(1).join('/')}` : ''}`
+    // Canonical backend route avoids /devices -> /devices/ redirect.
+    ? `${BACKEND}/api/v1/devices/${path.slice(1).length ? `${path.slice(1).join('/')}` : ''}`
     : `${BACKEND}/api/v1/auth/tenant-context${suffix}`;
   const body = request.method === 'GET' || request.method === 'HEAD'
     ? undefined
     : await request.text();
 
   try {
-    const response = await fetch(upstream, {
+    const send = (authorization: string) => fetch(upstream, {
       method: request.method,
       headers: {
-        Authorization: auth,
+        Authorization: authorization,
         ...(body ? { 'Content-Type': request.headers.get('content-type') || 'application/json' } : {}),
         Accept: 'application/json',
       },
       body,
       cache: 'no-store',
     });
+
+    let response = await send(auth);
+
+    // Railway rejected the current credential. Refresh from the HttpOnly portal
+    // cookie and retry exactly once with the newly issued access token.
+    if (response.status === 401) {
+      const refreshedAuth = await refreshAuth(request);
+      if (refreshedAuth) response = await send(refreshedAuth);
+    }
 
     const data = await response.text();
     return new NextResponse(data, {
