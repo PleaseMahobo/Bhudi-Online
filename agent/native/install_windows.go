@@ -27,48 +27,101 @@ const (
 	runKeyPath          = `Software\Microsoft\Windows\CurrentVersion\Run`
 )
 
-func installService(server string) error {
+func installService(server string) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("install panic: %v", r)
+			logInstall("install FAILED (panic): %v", r)
+		}
+	}()
+
 	server = strings.TrimRight(server, "/")
+	logInstall("install: resolving executable")
 	exe, err := os.Executable()
 	if err != nil {
-		return err
+		return fmt.Errorf("executable path: %w", err)
 	}
-	exe, _ = filepath.Abs(exe)
+	exe, err = filepath.Abs(exe)
+	if err != nil {
+		return fmt.Errorf("abs path: %w", err)
+	}
+	logInstall("install: source=%s", exe)
 
-	destDir := filepath.Join(os.Getenv("ProgramFiles"), "Bhudi", "Agent")
-	if err := os.MkdirAll(destDir, 0755); err != nil {
-		destDir = filepath.Join(os.Getenv("LOCALAPPDATA"), "Bhudi", "Agent")
-		if err := os.MkdirAll(destDir, 0755); err != nil {
-			return fmt.Errorf("create install dir: %w", err)
+	// Prefer ProgramData — writable by elevated installers, less AV friction than Program Files.
+	candidates := []string{}
+	if pd := os.Getenv("ProgramData"); pd != "" {
+		candidates = append(candidates, filepath.Join(pd, "Bhudi", "Agent"))
+	}
+	if pf := os.Getenv("ProgramFiles"); pf != "" {
+		candidates = append(candidates, filepath.Join(pf, "Bhudi", "Agent"))
+	}
+	if la := os.Getenv("LOCALAPPDATA"); la != "" {
+		candidates = append(candidates, filepath.Join(la, "Bhudi", "Agent"))
+	}
+	if len(candidates) == 0 {
+		return fmt.Errorf("no install directory candidates (ProgramData/ProgramFiles unset)")
+	}
+
+	var destDir, dest string
+	var lastMkErr error
+	for _, dir := range candidates {
+		logInstall("install: try dir %s", dir)
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			lastMkErr = err
+			logInstall("install: mkdir failed: %v", err)
+			continue
+		}
+		destDir = dir
+		dest = filepath.Join(dir, "bhudi-agent.exe")
+		break
+	}
+	if destDir == "" {
+		return fmt.Errorf("create install dir: %w", lastMkErr)
+	}
+	logInstall("install: dest=%s", dest)
+
+	logInstall("install: stop existing agent if present")
+	if err := stopBhudiForUpgrade(dest); err != nil {
+		// Also try clearing Program Files path from older installs.
+		if pf := os.Getenv("ProgramFiles"); pf != "" {
+			_ = stopBhudiForUpgrade(filepath.Join(pf, "Bhudi", "Agent", "bhudi-agent.exe"))
+		}
+		logInstall("install: prepare upgrade warning: %v (continuing)", err)
+	}
+
+	logInstall("install: copying binary")
+	if err := copyFile(exe, dest); err != nil {
+		// Retry once after force-kill.
+		_ = exec.Command("taskkill", "/F", "/IM", "bhudi-agent.exe").Run()
+		time.Sleep(time.Second)
+		if err2 := copyFile(exe, dest); err2 != nil {
+			return fmt.Errorf("copy agent to %s: %w", dest, err2)
 		}
 	}
-	dest := filepath.Join(destDir, "bhudi-agent.exe")
-	logInstall("install: dest=%s", dest)
-	// Upgrade/reinstall safety: stop the existing agent and wait for the binary to unlock.
-	if err := stopBhudiForUpgrade(dest); err != nil {
-		return fmt.Errorf("prepare upgrade: %w", err)
-	}
-	if err := copyFile(exe, dest); err != nil {
-		return fmt.Errorf("copy agent: %w", err)
-	}
+	logInstall("install: binary copied OK")
 
 	if err := writeConfig(server); err != nil {
 		fmt.Println("Warning: could not write config:", err)
+		logInstall("install: config warning: %v", err)
 	}
 
-	// Production tray client (Tactical-style user-session companion).
 	if err := installSupportClient(destDir); err != nil {
 		fmt.Println("Warning: support client:", err)
+		logInstall("install: support client warning: %v", err)
 	}
 
+	logInstall("install: registering Windows service")
 	if err := installWindowsService(dest, server); err != nil {
 		fmt.Printf("Warning: Windows Service install failed: %v\n", err)
+		logInstall("install: service warning: %v", err)
 		fmt.Println("Falling back to ONSTART scheduled task...")
 		if err2 := installOnStartTask(dest, server); err2 != nil {
 			fmt.Printf("Warning: ONSTART task failed: %v\n", err2)
+			logInstall("install: onstart warning: %v", err2)
 		}
 	} else {
 		fmt.Println("Windows Service installed:", windowsServiceName, "(Start=Automatic)")
+		logInstall("install: service OK")
 	}
 
 	cmdLine := fmt.Sprintf("\"%s\" run -server %s", dest, server)
@@ -95,13 +148,16 @@ func installService(server string) error {
 
 	if err := startWindowsService(); err != nil {
 		fmt.Println("Service start deferred; starting process directly:", err)
+		logInstall("install: service start deferred: %v", err)
 		if err := startDetached(dest, server); err != nil {
 			fmt.Println("Warning: could not start agent now:", err)
+			logInstall("install: detached start failed: %v", err)
 		} else {
 			fmt.Println("Agent started in the background.")
 		}
 	} else {
 		fmt.Println("Service started.")
+		logInstall("install: service started")
 	}
 
 	fmt.Println()
@@ -111,6 +167,7 @@ func installService(server string) error {
 	fmt.Println("  Identity: ", identityPath())
 	fmt.Println("  Service:  ", windowsServiceName, "(Automatic)")
 	fmt.Println("  Support:  ", filepath.Join(destDir, supportExeName), "(tray / tickets)")
+	logInstall("install OK dest=%s", dest)
 	time.Sleep(1 * time.Second)
 	return nil
 }
@@ -187,20 +244,23 @@ func stopBhudiForUpgrade(dest string) error {
 	_ = exec.Command("schtasks", "/Delete", "/TN", windowsTaskName, "/F").Run()
 	_ = exec.Command("sc", "stop", windowsServiceName).Run()
 
-	deadline := time.Now().Add(15 * time.Second)
+	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
 		out, _ := exec.Command("sc", "query", windowsServiceName).CombinedOutput()
-		if strings.Contains(string(out), "STOPPED") || len(out) == 0 {
+		if strings.Contains(string(out), "STOPPED") || !strings.Contains(string(out), "RUNNING") {
 			break
 		}
-		time.Sleep(500 * time.Millisecond)
+		time.Sleep(400 * time.Millisecond)
 	}
 
 	_ = exec.Command("taskkill", "/F", "/IM", "bhudi-agent.exe").Run()
 	_ = exec.Command("taskkill", "/F", "/IM", "bhudi-support.exe").Run()
-	time.Sleep(500 * time.Millisecond)
+	time.Sleep(400 * time.Millisecond)
 
-	for i := 0; i < 20; i++ {
+	if dest == "" {
+		return nil
+	}
+	for i := 0; i < 15; i++ {
 		if _, err := os.Stat(dest); os.IsNotExist(err) {
 			return nil
 		}
@@ -209,14 +269,17 @@ func stopBhudiForUpgrade(dest string) error {
 			_ = fh.Close()
 			return nil
 		}
-		time.Sleep(500 * time.Millisecond)
+		time.Sleep(400 * time.Millisecond)
 	}
 
-	// Last resort: rename the locked binary so a fresh copy can be written.
 	backup := dest + ".old." + time.Now().Format("20060102-150405")
 	if err := os.Rename(dest, backup); err != nil {
 		logInstall("prepare upgrade: rename locked binary failed: %v", err)
-		return fmt.Errorf("existing agent binary remained locked: %s (%v)", dest, err)
+		_ = os.Remove(dest)
+		if _, err2 := os.Stat(dest); err2 == nil {
+			return fmt.Errorf("existing agent binary remained locked: %s (%v)", dest, err)
+		}
+		return nil
 	}
 	logInstall("prepare upgrade: renamed locked binary to %s", backup)
 	return nil
