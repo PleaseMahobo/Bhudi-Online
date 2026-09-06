@@ -189,3 +189,16 @@ func firstNonEmpty(a, b string) string {
 	}
 	return b
 }
+
+
+// firstString returns the first non-empty string value for the supplied keys.
+func firstString(payload map[string]any, keys ...string) string {
+	for _, key := range keys {
+		if value, ok := payload[key]; ok {
+			if s, ok := value.(string); ok && strings.TrimSpace(s) != "" {
+				return strings.TrimSpace(s)
+			}
+		}
+	}
+	return ""
+}
