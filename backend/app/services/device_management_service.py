@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Any
 from uuid import UUID
 
@@ -7,7 +8,7 @@ from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session
 
 from app.models.agent import Agent
-from app.models.agent_command import AgentCommand
+from app.models.agent_command import AgentCommand, CommandStatus
 from app.models.base import Base
 from app.models.device import Device
 from app.models.tenant import Tenant
@@ -36,10 +37,6 @@ class DeviceManagementService:
         if bind is None:
             return
 
-        # Create the tables directly from Base.metadata (rather than copying
-        # them into a fresh MetaData instance) so that foreign keys pointing
-        # at tables outside this explicit list (e.g. AgentCommand.issued_by
-        # -> users.id) can still be resolved.
         tables = [
             Tenant.__table__,
             Device.__table__,
@@ -200,7 +197,6 @@ class DeviceManagementService:
         return rollout
 
     def _resolve_agent(self, device_ref: str) -> Agent | None:
-        """Resolve rollout device_ids entry to a live Agent (id, agent_uuid, or hostname)."""
         ref = (device_ref or "").strip()
         if not ref:
             return None
@@ -217,7 +213,6 @@ class DeviceManagementService:
             agent = self.db.query(Agent).filter(Agent.agent_uuid == uid).first()
             if agent is not None:
                 return agent
-            # ManagedDevice id → match agent by hostname if possible
             md = self.db.get(ManagedDevice, uid)
             if md is not None and md.hostname:
                 agent = (
@@ -244,14 +239,6 @@ class DeviceManagementService:
         payload: dict[str, Any] | None = None,
         requested_by: UUID | None = None,
     ) -> tuple[PatchRollout | None, dict[str, Any]]:
-        """
-        Dispatch patch commands to rollout targets.
-
-        action:
-          - scan            → queue patch_scan only
-          - install         → queue patch_install only (default)
-          - scan_and_install → queue patch_scan then patch_install per agent
-        """
         rollout = self.db.get(PatchRollout, rollout_id)
         if rollout is None:
             return None, {}
@@ -268,7 +255,6 @@ class DeviceManagementService:
         queued: list[dict[str, Any]] = []
         skipped: list[dict[str, Any]] = []
 
-        command_types: list[str]
         if action_norm == "scan":
             command_types = ["patch_scan"]
         elif action_norm == "scan_and_install":
@@ -345,6 +331,109 @@ class DeviceManagementService:
         self.db.refresh(rollout)
         return rollout
 
+    @staticmethod
+    def _parse_patch_scan_stdout(stdout: str | None, result: dict | None) -> dict[str, Any]:
+        """Extract update list from agent patch_scan stdout / result."""
+        data: Any = None
+        if isinstance(result, dict):
+            data = result.get("result") if "result" in result else result
+        if data is None and stdout:
+            try:
+                data = json.loads(stdout)
+            except Exception:
+                data = None
+        if not isinstance(data, dict):
+            return {"count": 0, "updates": [], "raw": False}
+
+        updates = data.get("updates") or data.get("packages") or []
+        if not isinstance(updates, list):
+            updates = []
+        count = data.get("count")
+        if count is None:
+            count = len(updates)
+        return {
+            "count": int(count) if count is not None else len(updates),
+            "updates": updates,
+            "platform": data.get("platform"),
+            "scanned_at": data.get("scanned_at"),
+            "raw": True,
+        }
+
+    def _live_agent_patch_compliance(self) -> dict[str, Any]:
+        """
+        Latest successful patch_scan per agent (from agent_commands).
+        Devices with 0 missing updates are compliant.
+        """
+        scans = (
+            self.db.query(AgentCommand)
+            .filter(
+                AgentCommand.command_type.in_(["patch_scan", "PATCH_SCAN"]),
+                AgentCommand.status == CommandStatus.COMPLETED.value,
+                AgentCommand.exit_code == 0,
+            )
+            .order_by(AgentCommand.completed_at.desc())
+            .all()
+        )
+
+        latest_by_agent: dict[str, AgentCommand] = {}
+        for cmd in scans:
+            key = str(cmd.agent_id)
+            if key not in latest_by_agent:
+                latest_by_agent[key] = cmd
+
+        devices: list[dict[str, Any]] = []
+        compliant = 0
+        noncompliant = 0
+        total_missing = 0
+        critical_missing = 0
+
+        for agent_id, cmd in latest_by_agent.items():
+            parsed = self._parse_patch_scan_stdout(cmd.stdout, cmd.result if isinstance(cmd.result, dict) else None)
+            missing = int(parsed.get("count") or 0)
+            updates = parsed.get("updates") or []
+            crit = 0
+            for u in updates:
+                if isinstance(u, dict):
+                    sev = str(u.get("severity") or "").lower()
+                    if sev in {"critical", "important"}:
+                        crit += 1
+            agent = self.db.get(Agent, cmd.agent_id)
+            hostname = agent.hostname if agent else agent_id
+            is_compliant = missing == 0
+            if is_compliant:
+                compliant += 1
+            else:
+                noncompliant += 1
+            total_missing += missing
+            critical_missing += crit
+            devices.append(
+                {
+                    "agent_id": agent_id,
+                    "hostname": hostname,
+                    "missing_updates": missing,
+                    "critical_or_important": crit,
+                    "compliant": is_compliant,
+                    "scanned_at": parsed.get("scanned_at")
+                    or (cmd.completed_at.isoformat() if cmd.completed_at else None),
+                    "command_id": str(cmd.id),
+                    "platform": parsed.get("platform"),
+                }
+            )
+
+        scanned = len(devices)
+        pct = round((compliant / scanned) * 100.0, 1) if scanned else None
+
+        return {
+            "devices_scanned": scanned,
+            "compliant": compliant,
+            "noncompliant": noncompliant,
+            "compliance_pct": pct,
+            "total_missing_updates": total_missing,
+            "critical_or_important_missing": critical_missing,
+            "devices": devices,
+            "source": "agent_patch_scan",
+        }
+
     def compliance_summary(self) -> dict[str, Any]:
         rollouts = self.db.query(PatchRollout).all()
         evidence = []
@@ -363,6 +452,9 @@ class DeviceManagementService:
                     },
                 }
             )
+
+        live = self._live_agent_patch_compliance()
+
         return {
             "summary": {
                 "total_rollouts": len(rollouts),
@@ -372,6 +464,7 @@ class DeviceManagementService:
                 "rolled_back": sum(1 for rollout in rollouts if rollout.status == "rolled_back"),
                 "failed": sum(1 for rollout in rollouts if rollout.status == "failed"),
             },
+            "live_agent_compliance": live,
             "rollouts": [
                 {
                     "id": str(rollout.id),
