@@ -34,10 +34,12 @@ async function refreshAuth(request: NextRequest): Promise<string> {
 }
 
 async function resolveAuth(request: NextRequest): Promise<string> {
-  // Prefer the current credential. If Railway rejects it, proxy() refreshes and
-  // retries once so a stale HttpOnly access token cannot permanently trap the
-  // Devices portal in a 401 loop.
-  return getAuth(request);
+  // Use the current access token when present. If the browser only has the
+  // HttpOnly refresh token (for example after access-token expiry), refresh
+  // before rejecting the tenant-scoped request.
+  const current = getAuth(request);
+  if (current) return current;
+  return refreshAuth(request);
 }
 
 async function proxy(request: NextRequest, path: string[] = []) {
