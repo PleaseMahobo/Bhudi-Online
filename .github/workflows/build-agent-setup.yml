@@ -45,7 +45,7 @@ jobs:
         working-directory: agent/native
         run: |
           mkdir -p dist
-          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w -X main.agentVersion=2.2.2" -o dist/bhudi-agent-windows-amd64.exe .
+          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w -X main.agentVersion=2.2.3" -o dist/bhudi-agent-windows-amd64.exe .
           GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o dist/bhudi-agent-linux-amd64 .
           GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -ldflags="-s -w" -o dist/bhudi-agent-linux-arm64 .
           GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o dist/bhudi-agent-darwin-amd64 .
@@ -109,7 +109,7 @@ jobs:
 
             | File | Notes |
             |------|-------|
-            | `BhudiAgent-Setup.exe` | Windows installer v2.2.2 with bundled system-tray support client |
+            | `BhudiAgent-Setup.exe` | Windows installer v2.2.3 with authenticated agent polling and bundled system-tray support client |
             | `bhudi-agent-setup.msi` | Intune/GPO |
             | `bhudi-agent.exe` / `bhudi-support.exe` | Binaries |
 
