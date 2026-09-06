@@ -233,6 +233,19 @@ func enroll(server string) (identity, error) {
 		AgentVersion: agentVersion,
 		Platform:     runtime.GOOS + "/" + runtime.GOARCH + " " + runtime.Version(),
 	}
+	// The customer-specific installer supplies the bootstrap credential via
+	// BHUDI_ENROLLMENT_TOKEN. Include it in the enrollment request; previously
+	// the native agent read the variable only during re-enrollment and silently
+	// omitted it from the initial enrollment payload.
+	secret := strings.TrimSpace(os.Getenv("BHUDI_ENROLLMENT_TOKEN"))
+	if secret == "" {
+		if b, err := os.ReadFile(filepath.Join(dataDir(), enrollmentSecretPathName)); err == nil {
+			secret = strings.TrimSpace(string(b))
+		}
+	}
+	if secret != "" {
+		body.EnrollmentSecret = &secret
+	}
 	var resp enrollResp
 	if err := postJSON(server+"/api/v1/runtime/enroll", body, &resp); err != nil {
 		return identity{}, err
@@ -240,8 +253,12 @@ func enroll(server string) (identity, error) {
 	id := identity{AgentID: resp.AgentID, AgentToken: resp.AgentToken}
 	_ = os.MkdirAll(filepath.Dir(identityPath()), 0755)
 	data, _ := json.MarshalIndent(id, "", "  ")
-	_ = os.WriteFile(identityPath(), data, 0600)
-	_ = writeConfig(server)
+	if err := os.WriteFile(identityPath(), data, 0600); err != nil {
+		return identity{}, fmt.Errorf("write agent identity: %w", err)
+	}
+	if err := writeConfig(server); err != nil {
+		return identity{}, fmt.Errorf("write agent config: %w", err)
+	}
 	return id, nil
 }
 
