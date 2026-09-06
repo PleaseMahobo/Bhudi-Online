@@ -40,7 +40,7 @@ jobs:
 
   backend-test:
     needs: changes
-    if: needs.changes.outputs.backend == 'true' || github.event_name == 'push'
+    if: needs.changes.outputs.backend == 'true' || needs.changes.outputs.agent == 'true' || github.event_name == 'push'
     runs-on: ubuntu-latest
     defaults:
       run:
