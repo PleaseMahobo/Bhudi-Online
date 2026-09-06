@@ -23,7 +23,12 @@ async function proxy(request: NextRequest, path: string[] = []) {
   }
 
   const suffix = path.length ? `/${path.join('/')}` : '';
-  const upstream = `${BACKEND}/api/v1/auth/tenant-context${suffix}`;
+  // Reuse the authenticated same-origin boundary for tenant-scoped device
+  // operations. Browser requests must not call Railway directly because the
+  // HttpOnly Bhudi session cookie is scoped to the portal origin.
+  const upstream = path[0] === 'devices'
+    ? `${BACKEND}/api/v1/devices${path.slice(1).length ? `/${path.slice(1).join('/')}` : ''}`
+    : `${BACKEND}/api/v1/auth/tenant-context${suffix}`;
   const body = request.method === 'GET' || request.method === 'HEAD'
     ? undefined
     : await request.text();
