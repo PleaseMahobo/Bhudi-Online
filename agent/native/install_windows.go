@@ -127,6 +127,7 @@ func installService(server string) (err error) {
 		logInstall("install: service OK")
 	}
 
+	// Watchdog uses console 'run' mode (not SCM).
 	cmdLine := fmt.Sprintf("\"%s\" run -server %s", dest, server)
 	_ = exec.Command("schtasks", "/Delete", "/TN", windowsWatchdogName, "/F").Run()
 	watch := exec.Command("schtasks", "/Create", "/TN", windowsWatchdogName,
@@ -319,7 +320,9 @@ func installWindowsService(dest, server string) error {
 	_ = exec.Command("sc", "delete", windowsServiceName).Run()
 	time.Sleep(500 * time.Millisecond)
 
-	binPath := fmt.Sprintf("\"%s\" run -server %s", dest, server)
+	// MUST use "service" so the process registers with the Service Control Manager.
+	// "run" is console-only and causes error 1053 (did not respond in a timely fashion).
+	binPath := fmt.Sprintf("\"%s\" service -server %s", dest, server)
 	create := exec.Command("sc", "create", windowsServiceName,
 		"binPath=", binPath,
 		"start=", "auto",
