@@ -159,6 +159,7 @@ def _sync_enterprise_agent(agent: dict[str, Any], db: Session) -> None:
                 registration_state="approved",
                 approved=True,
                 trusted=True,
+                tenant_id=(uuid.UUID(str(agent["tenant_id"])) if agent.get("tenant_id") else None),
                 status="online",
                 enabled=True,
                 registered_at=now,
@@ -170,6 +171,10 @@ def _sync_enterprise_agent(agent: dict[str, Any], db: Session) -> None:
             row.hostname = str(agent.get("hostname") or row.hostname)
             row.agent_version = str(agent.get("agent_version") or row.agent_version or "1.0.0")
             row.platform = agent.get("platform") or row.platform
+            # Preserve tenant association from secure enrollment so the portal can
+            # discover the endpoint after a runtime heartbeat/restart.
+            if agent.get("tenant_id") and getattr(row, "tenant_id", None) is None:
+                row.tenant_id = uuid.UUID(str(agent["tenant_id"]))
             row.enrollment_token = agent.get("agent_token") or row.enrollment_token
             row.status = "online"
             row.last_seen = now
@@ -213,7 +218,10 @@ def heartbeat(req: HeartbeatRequest, db: Session = Depends(get_db)):
         value = getattr(req, field)
         if value is not None:
             agent[field] = value
-    device_state.heartbeat(req.agent_id)
+    # Keep the in-memory device registry tenant-scoped as well; otherwise a
+    # worker restart/first heartbeat can recreate an unscoped device that the
+    # tenant-safe Devices API correctly filters out.
+    device_state.heartbeat(req.agent_id, tenant_id=agent.get("tenant_id"))
     if req.agent_id in device_state.devices:
         if req.hostname:
             device_state.devices[req.agent_id]["hostname"] = req.hostname
