@@ -16,15 +16,15 @@ import (
 )
 
 const (
-	windowsServiceName   = "BhudiAgent"
-	windowsTaskName      = "BhudiAgent"
-	windowsWatchdogName  = "BhudiAgentWatchdog"
-	windowsSupportTask   = "BhudiSupport"
-	supportExeName       = "bhudi-support.exe"
-	uninstallRegPath     = `SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\BhudiAgent`
-	displayName          = "Bhudi Agent"
-	publisherName        = "Bhudi"
-	runKeyPath           = `Software\Microsoft\Windows\CurrentVersion\Run`
+	windowsServiceName  = "BhudiAgent"
+	windowsTaskName     = "BhudiAgent"
+	windowsWatchdogName = "BhudiAgentWatchdog"
+	windowsSupportTask  = "BhudiSupport"
+	supportExeName      = "bhudi-support.exe"
+	uninstallRegPath    = `SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\BhudiAgent`
+	displayName         = "Bhudi Agent"
+	publisherName       = "Bhudi"
+	runKeyPath          = `Software\Microsoft\Windows\CurrentVersion\Run`
 )
 
 func installService(server string) error {
@@ -115,8 +115,6 @@ func installService(server string) error {
 	return nil
 }
 
-// installSupportClient copies bhudi-support.exe from beside the installer
-// (or already in destDir) and registers logon autostart for the tray UI.
 func installSupportClient(destDir string) error {
 	srcCandidates := []string{}
 	if exe, err := os.Executable(); err == nil {
@@ -145,7 +143,6 @@ func installSupportClient(destDir string) error {
 	}
 	logInstall("support client installed: %s", dest)
 
-	// ONLOGON task so tray starts for interactive users (not only the elevating admin).
 	_ = exec.Command("schtasks", "/Delete", "/TN", windowsSupportTask, "/F").Run()
 	tr := fmt.Sprintf("\"%s\"", dest)
 	create := exec.Command("schtasks", "/Create", "/TN", windowsSupportTask,
@@ -162,7 +159,6 @@ func installSupportClient(destDir string) error {
 		fmt.Println("Support Run key registered (current user).")
 	}
 
-	// Best-effort start for current session.
 	cmd := exec.Command(dest)
 	cmd.Stdout = nil
 	cmd.Stderr = nil
@@ -200,10 +196,11 @@ func stopBhudiForUpgrade(dest string) error {
 		time.Sleep(500 * time.Millisecond)
 	}
 
-	// A previous fallback launch can still own the executable after the service stops.
 	_ = exec.Command("taskkill", "/F", "/IM", "bhudi-agent.exe").Run()
+	_ = exec.Command("taskkill", "/F", "/IM", "bhudi-support.exe").Run()
+	time.Sleep(500 * time.Millisecond)
 
-	for i := 0; i < 30; i++ {
+	for i := 0; i < 20; i++ {
 		if _, err := os.Stat(dest); os.IsNotExist(err) {
 			return nil
 		}
@@ -214,7 +211,15 @@ func stopBhudiForUpgrade(dest string) error {
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
-	return fmt.Errorf("existing agent binary remained locked: %s", dest)
+
+	// Last resort: rename the locked binary so a fresh copy can be written.
+	backup := dest + ".old." + time.Now().Format("20060102-150405")
+	if err := os.Rename(dest, backup); err != nil {
+		logInstall("prepare upgrade: rename locked binary failed: %v", err)
+		return fmt.Errorf("existing agent binary remained locked: %s (%v)", dest, err)
+	}
+	logInstall("prepare upgrade: renamed locked binary to %s", backup)
+	return nil
 }
 
 func installWindowsService(dest, server string) error {
