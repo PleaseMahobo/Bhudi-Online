@@ -79,17 +79,16 @@ func runAgent(cfg runConfig) {
 	for {
 		if err := cycle(client, cfg.Server, &ident); err != nil {
 			fmt.Println("[error]", err)
-			if isAuthError(err) {
-				secret := strings.TrimSpace(os.Getenv("BHUDI_ENROLLMENT_TOKEN"))
+			// A heartbeat can succeed while an optional command poll fails. Do not
+			// destroy a healthy enrollment or attempt bootstrap re-enrollment for a
+			// poll-only 401. Re-enrollment is reserved for failures that explicitly
+			// identify the stored agent credentials as invalid.
+			if isInvalidAgentCredential(err) {
+				secret := enrollmentSecret()
 				if secret == "" {
-					if b, rerr := os.ReadFile(filepath.Join(dataDir(), enrollmentSecretPathName)); rerr == nil {
-						secret = strings.TrimSpace(string(b))
-					}
-				}
-				if secret == "" {
-					fmt.Println("[bhudi-agent] credentials rejected — keeping identity (no enrollment secret for re-enroll)")
+					fmt.Println("[bhudi-agent] agent credentials invalid — keeping identity (no enrollment secret)")
 				} else {
-					fmt.Println("[bhudi-agent] credentials rejected — re-enrolling with bootstrap secret…")
+					fmt.Println("[bhudi-agent] agent credentials invalid — re-enrolling with bootstrap secret…")
 					clearIdentity()
 					newID, e2 := enroll(cfg.Server)
 					if e2 != nil {
@@ -219,12 +218,24 @@ func clearIdentity() {
 	_ = os.Remove(identityPath())
 }
 
-func isAuthError(err error) bool {
+func enrollmentSecret() string {
+	secret := strings.TrimSpace(os.Getenv("BHUDI_ENROLLMENT_TOKEN"))
+	if secret == "" {
+		if b, err := os.ReadFile(filepath.Join(dataDir(), enrollmentSecretPathName)); err == nil {
+			secret = strings.TrimSpace(string(b))
+		}
+	}
+	return secret
+}
+
+func isInvalidAgentCredential(err error) bool {
 	if err == nil {
 		return false
 	}
+	// Only the runtime agent-authentication failure proves the stored identity
+	// is bad. Generic HTTP 401 responses can come from optional portal routes.
 	s := err.Error()
-	return strings.Contains(s, "401") || strings.Contains(s, "Invalid agent credentials")
+	return strings.Contains(s, "Invalid agent credentials")
 }
 
 func enroll(server string) (identity, error) {
