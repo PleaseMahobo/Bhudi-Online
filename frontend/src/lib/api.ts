@@ -199,7 +199,11 @@ export async function refreshAccessToken() {
 }
 
 export async function getHealth() { return request<HealthResponse>("/api/health"); }
-export async function getDevices() { return normalizeDevicesPayload(await request<any>("/api/v1/devices/")); }
+// Devices are tenant-scoped. Use the same-origin tenant-context proxy so the
+// portal HttpOnly session is converted into an Authorization header for Railway.
+export async function getDevices() {
+  return normalizeDevicesPayload(await request<any>("/api/tenant-context/devices"));
+}
 export async function getDeviceStatus() { return getDevices(); }
 
 export async function listEscalationPolicies(enabledOnly = false) { return request<EscalationPolicy[]>(`/api/v1/alert-engine/escalation-policies${enabledOnly ? "?enabled_only=true" : ""}`); }
