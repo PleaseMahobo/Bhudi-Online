@@ -35,6 +35,14 @@ async function proxyRequest(request: NextRequest) {
       if (value) headers.set(name, value);
     }
 
+    // FastAPI authenticates protected tenant APIs with Bearer JWTs. The browser
+    // stores the application JWT in the HttpOnly access_token cookie, so the
+    // same-origin proxy must convert that cookie into Authorization upstream.
+    if (!headers.has('authorization')) {
+      const accessToken = request.cookies.get('access_token')?.value;
+      if (accessToken) headers.set('authorization', `Bearer ${accessToken}`);
+    }
+
     const init: RequestInit = { method: request.method, headers, cache: 'no-store' };
     if (request.method !== 'GET' && request.method !== 'HEAD') {
       init.body = await request.arrayBuffer();
