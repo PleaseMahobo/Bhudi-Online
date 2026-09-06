@@ -45,7 +45,7 @@ jobs:
         working-directory: agent/native
         run: |
           mkdir -p dist
-          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o dist/bhudi-agent-windows-amd64.exe .
+          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w -X main.agentVersion=2.2.2" -o dist/bhudi-agent-windows-amd64.exe .
           GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o dist/bhudi-agent-linux-amd64 .
           GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -ldflags="-s -w" -o dist/bhudi-agent-linux-arm64 .
           GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o dist/bhudi-agent-darwin-amd64 .
@@ -59,10 +59,12 @@ jobs:
           GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w -H=windowsgui" -o ../native/dist/bhudi-support.exe .
           test -s ../native/dist/bhudi-support.exe
 
-      - name: Stage native agent for customer installer embedding
+      - name: Stage native agent and support client for complete installer embedding
         run: |
           cp agent/native/dist/bhudi-agent.exe agent/cmd/bhudi-agent-setup/bhudi-agent.exe
+          cp agent/native/dist/bhudi-support.exe agent/cmd/bhudi-agent-setup/bhudi-support.exe
           test -s agent/cmd/bhudi-agent-setup/bhudi-agent.exe
+          test -s agent/cmd/bhudi-agent-setup/bhudi-support.exe
 
       - name: Resolve installer modules (MessageBox via x/sys — no walk)
         working-directory: agent/cmd/bhudi-agent-setup
@@ -107,7 +109,7 @@ jobs:
 
             | File | Notes |
             |------|-------|
-            | `BhudiAgent-Setup.exe` | Windows installer (MessageBox UI; portal injects multi-use token) |
+            | `BhudiAgent-Setup.exe` | Windows installer v2.2.2 with bundled system-tray support client |
             | `bhudi-agent-setup.msi` | Intune/GPO |
             | `bhudi-agent.exe` / `bhudi-support.exe` | Binaries |
 
