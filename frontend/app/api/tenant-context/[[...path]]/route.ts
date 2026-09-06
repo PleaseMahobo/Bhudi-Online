@@ -16,8 +16,27 @@ function getAuth(request: NextRequest): string {
   return token ? `Bearer ${token}` : '';
 }
 
+async function resolveAuth(request: NextRequest): Promise<string> {
+  const current = getAuth(request);
+  if (current) return current;
+
+  // Recover an expired/missing access token from the portal's HttpOnly refresh
+  // cookie before proxying tenant-scoped API requests.
+  const refreshToken = request.cookies.get('refresh_token')?.value;
+  if (!refreshToken) return '';
+
+  const refresh = await fetch(`${BACKEND}/api/v1/auth/refresh`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Cookie: `refresh_token=${refreshToken}` },
+    cache: 'no-store',
+  });
+  if (!refresh.ok) return '';
+  const data = await refresh.json().catch(() => null);
+  return data?.access_token ? `Bearer ${data.access_token}` : '';
+}
+
 async function proxy(request: NextRequest, path: string[] = []) {
-  const auth = getAuth(request);
+  const auth = await resolveAuth(request);
   if (!auth) {
     return NextResponse.json({ detail: 'Authentication credentials missing' }, { status: 401 });
   }
