@@ -205,10 +205,19 @@ func postEnterpriseResult(client *http.Client, server string, ident identity, co
 
 func loadOrEnroll(server string) (identity, error) {
 	path := identityPath()
+	secret := enrollmentSecret()
 	if data, err := os.ReadFile(path); err == nil {
 		var id identity
 		if json.Unmarshal(data, &id) == nil && id.AgentID != "" && id.AgentToken != "" {
-			return id, nil
+			// A tenant-bound installer credential is authoritative. Re-enroll so
+			// legacy identities created before tenant binding are migrated instead
+			// of silently continuing to heartbeat outside the tenant portal.
+			if secret == "" {
+				return id, nil
+			}
+			fmt.Println("[bhudi-agent] tenant enrollment credential detected — migrating existing agent identity")
+			clearIdentity()
+			return enroll(server)
 		}
 	}
 	return enroll(server)
