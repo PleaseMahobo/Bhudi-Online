@@ -16,6 +16,7 @@ from app.api.v1.endpoints.agent_runtime import (
     _persist_agents,
     _platform_metadata,
     _translate_command,
+    _require_agent_token,
 )
 from app.services.remote_session_manager import remote_session_manager
 
@@ -100,6 +101,20 @@ def command_history(agent_id: str, user=Depends(current_tenant_user)):
     if not _is_supportable(agent):
         raise HTTPException(status_code=404, detail="Agent not found")
     return {"commands": list(reversed(_commands.get(agent_id, [])))}
+
+
+# This exact route must be registered before the portal's generic
+# /commands/{command_id} route. Otherwise FastAPI interprets "pending" as a
+# command_id and applies tenant-user authentication, producing a misleading
+# "Authentication credentials missing" response for a healthy native agent.
+@router.get("/agents/{agent_id}/commands/pending")
+def agent_pending_commands(agent_id: str, agent_token: str | None = None):
+    _require_agent_token(agent_id, agent_token)
+    pending = [c for c in _commands.get(agent_id, []) if c.get("status") == "pending"]
+    for command in pending:
+        command["status"] = "dispatched"
+    _persist_agents()
+    return {"commands": pending}
 
 
 @router.get("/agents/{agent_id}/commands/{command_id}")
