@@ -5,6 +5,8 @@ name: Release Native Agent
 on:
   workflow_dispatch:
   push:
+    branches:
+      - main
     tags:
       - 'agent-v*'
     paths:
@@ -12,6 +14,7 @@ on:
       - 'agent/cmd/bhudi-agent-setup/**'
       - 'agent/msi/**'
       - 'agent/support-client/**'
+      - '.github/workflows/build-agent-setup.yml'
       - '.github/workflows/release-agent.yml'
 
 permissions:
