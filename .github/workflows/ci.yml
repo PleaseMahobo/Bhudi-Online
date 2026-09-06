@@ -35,6 +35,8 @@ jobs:
             agent:
               - 'agent/**'
               - '.github/workflows/ci.yml'
+              - '.github/workflows/build-agent-setup.yml'
+              - '.github/workflows/release-agent.yml'
 
   backend-test:
     needs: changes
