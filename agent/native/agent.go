@@ -286,7 +286,10 @@ func sendHeartbeat(client *http.Client, server string, ident identity) error {
 }
 
 func pollCommands(client *http.Client, server string, ident identity) ([]commandItem, error) {
-	url := fmt.Sprintf("%s/api/v1/runtime/agents/%s/commands?agent_token=%s", server, ident.AgentID, ident.AgentToken)
+	// Agent polling uses the agent-authenticated pending endpoint. The generic
+	// /commands endpoint is a portal/history endpoint and may require a user
+	// session, which caused a healthy agent to receive a misleading HTTP 401.
+	url := fmt.Sprintf("%s/api/v1/runtime/agents/%s/commands/pending?agent_token=%s", server, ident.AgentID, ident.AgentToken)
 	res, err := client.Get(url)
 	if err != nil {
 		return nil, err
