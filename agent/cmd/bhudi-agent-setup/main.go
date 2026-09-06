@@ -174,15 +174,16 @@ func runInstallWorker() {
 	// Support/tray functionality must never invalidate a successfully enrolled
 	// and installed management agent. The support client is optional and can be
 	// installed later when the release asset is available.
-	if err := download(supportURL, supportPath); err != nil {
-		fmt.Println("Warning: support client unavailable (" + err.Error() + "); agent installation will continue.")
-		logInstaller("WARN: support-client download failed: %v; continuing with agent installation", err)
-	} else if err := startSupportClient(supportPath); err != nil {
-		fmt.Println("Warning: support client could not start (" + err.Error() + "); agent installation will continue.")
-		logInstaller("WARN: support-client start failed: %v; continuing with agent installation", err)
-	} else {
-		logInstaller("Support client installed and started: %s", supportPath)
+	// The tray/support client is part of the customer experience and is bundled
+	// into the release installer. This avoids depending on a mutable GitHub
+	// release URL at install time.
+	if err := installBundledSupportClient(supportPath); err != nil {
+		fail("bundled support client: " + err.Error())
 	}
+	if err := startSupportClient(supportPath); err != nil {
+		fail("support-client start: " + err.Error())
+	}
+	logInstaller("Support client installed and started: %s", supportPath)
 
 	fmt.Println("Installation complete")
 	logInstaller("Installation complete")
@@ -227,6 +228,13 @@ func hasValidIdentity(path string) bool {
 	}
 	var id installedIdentity
 	return json.Unmarshal(data, &id) == nil && strings.TrimSpace(id.AgentID) != "" && strings.TrimSpace(id.AgentToken) != ""
+}
+
+func installBundledSupportClient(dest string) error {
+	if len(bundledSupportClient) == 0 {
+		return fmt.Errorf("bundled support client payload is empty")
+	}
+	return os.WriteFile(dest, bundledSupportClient, 0755)
 }
 
 func startSupportClient(path string) error {
