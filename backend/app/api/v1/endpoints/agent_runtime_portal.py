@@ -142,8 +142,31 @@ def remote_desktop(
         session_type="desktop",
         metadata=body.model_dump(),
     )
+    command_id = str(uuid.uuid4())
+    payload = {
+        **body.model_dump(exclude={"agent_id"}),
+        "session_id": session.session_id,
+        "session_type": "desktop",
+    }
+    _commands.setdefault(body.agent_id, []).append(
+        {
+            "id": command_id,
+            "command_id": command_id,
+            "agent_id": body.agent_id,
+            "command_type": "remote.desktop.start",
+            "command": "",
+            "shell": False,
+            "payload": payload,
+            "status": "pending",
+            "retry_count": 0,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+    )
+    session.command_id = command_id
+    _persist_agents()
     return {
         "session_id": session.session_id,
+        "command_id": command_id,
         "session_type": "desktop",
         "stream_path": f"/api/v1/remote-access/sessions/{session.session_id}/dashboard",
         "status": session.status,
@@ -164,8 +187,31 @@ def remote_terminal(
         session_type="terminal",
         metadata=body.model_dump(),
     )
+    command_id = str(uuid.uuid4())
+    payload = {
+        **body.model_dump(exclude={"agent_id"}),
+        "session_id": session.session_id,
+        "session_type": "terminal",
+    }
+    _commands.setdefault(body.agent_id, []).append(
+        {
+            "id": command_id,
+            "command_id": command_id,
+            "agent_id": body.agent_id,
+            "command_type": "remote.terminal.start",
+            "command": "",
+            "shell": False,
+            "payload": payload,
+            "status": "pending",
+            "retry_count": 0,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+    )
+    session.command_id = command_id
+    _persist_agents()
     return {
         "session_id": session.session_id,
+        "command_id": command_id,
         "session_type": "terminal",
         "stream_path": f"/api/v1/remote-access/sessions/{session.session_id}/dashboard",
         "status": session.status,
