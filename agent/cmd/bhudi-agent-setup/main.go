@@ -171,11 +171,17 @@ func runInstallWorker() {
 		fail("support directory: " + err.Error())
 	}
 	supportPath := filepath.Join(supportDir, "bhudi-support.exe")
+	// Support/tray functionality must never invalidate a successfully enrolled
+	// and installed management agent. The support client is optional and can be
+	// installed later when the release asset is available.
 	if err := download(supportURL, supportPath); err != nil {
-		fail("support-client download: " + err.Error())
-	}
-	if err := startSupportClient(supportPath); err != nil {
-		fail("support-client start: " + err.Error())
+		fmt.Println("Warning: support client unavailable (" + err.Error() + "); agent installation will continue.")
+		logInstaller("WARN: support-client download failed: %v; continuing with agent installation", err)
+	} else if err := startSupportClient(supportPath); err != nil {
+		fmt.Println("Warning: support client could not start (" + err.Error() + "); agent installation will continue.")
+		logInstaller("WARN: support-client start failed: %v; continuing with agent installation", err)
+	} else {
+		logInstaller("Support client installed and started: %s", supportPath)
 	}
 
 	fmt.Println("Installation complete")
