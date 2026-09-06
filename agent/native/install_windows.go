@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -45,7 +46,7 @@ func installService(server string) (err error) {
 	if err != nil {
 		return fmt.Errorf("abs path: %w", err)
 	}
-	logInstall("install: source=%s", exe)
+	logInstall("install: source=%s pid=%d", exe, os.Getpid())
 
 	// Prefer ProgramData — writable by elevated installers, less AV friction than Program Files.
 	candidates := []string{}
@@ -82,7 +83,6 @@ func installService(server string) (err error) {
 
 	logInstall("install: stop existing agent if present")
 	if err := stopBhudiForUpgrade(dest); err != nil {
-		// Also try clearing Program Files path from older installs.
 		if pf := os.Getenv("ProgramFiles"); pf != "" {
 			_ = stopBhudiForUpgrade(filepath.Join(pf, "Bhudi", "Agent", "bhudi-agent.exe"))
 		}
@@ -91,8 +91,7 @@ func installService(server string) (err error) {
 
 	logInstall("install: copying binary")
 	if err := copyFile(exe, dest); err != nil {
-		// Retry once after force-kill.
-		_ = exec.Command("taskkill", "/F", "/IM", "bhudi-agent.exe").Run()
+		_ = killOtherBhudiAgents()
 		time.Sleep(time.Second)
 		if err2 := copyFile(exe, dest); err2 != nil {
 			return fmt.Errorf("copy agent to %s: %w", dest, err2)
@@ -169,6 +168,36 @@ func installService(server string) (err error) {
 	fmt.Println("  Support:  ", filepath.Join(destDir, supportExeName), "(tray / tickets)")
 	logInstall("install OK dest=%s", dest)
 	time.Sleep(1 * time.Second)
+	return nil
+}
+
+// killOtherBhudiAgents terminates bhudi-agent.exe processes except this one.
+// Using taskkill /IM would kill the in-progress installer (same image name).
+func killOtherBhudiAgents() error {
+	self := os.Getpid()
+	out, err := exec.Command("tasklist", "/FI", "IMAGENAME eq bhudi-agent.exe", "/FO", "CSV", "/NH").CombinedOutput()
+	if err != nil {
+		return err
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || !strings.Contains(strings.ToLower(line), "bhudi-agent") {
+			continue
+		}
+		// CSV: "bhudi-agent.exe","1234","Session","..."
+		parts := strings.Split(line, ",")
+		if len(parts) < 2 {
+			continue
+		}
+		pidStr := strings.Trim(parts[1], "\" ")
+		pid, err := strconv.Atoi(pidStr)
+		if err != nil || pid <= 0 || pid == self {
+			continue
+		}
+		logInstall("install: killing other agent pid=%d", pid)
+		_ = exec.Command("taskkill", "/F", "/PID", strconv.Itoa(pid)).Run()
+	}
+	_ = exec.Command("taskkill", "/F", "/IM", "bhudi-support.exe").Run()
 	return nil
 }
 
@@ -253,8 +282,8 @@ func stopBhudiForUpgrade(dest string) error {
 		time.Sleep(400 * time.Millisecond)
 	}
 
-	_ = exec.Command("taskkill", "/F", "/IM", "bhudi-agent.exe").Run()
-	_ = exec.Command("taskkill", "/F", "/IM", "bhudi-support.exe").Run()
+	// Never taskkill /IM bhudi-agent.exe — that kills this installer process.
+	_ = killOtherBhudiAgents()
 	time.Sleep(400 * time.Millisecond)
 
 	if dest == "" {
