@@ -94,7 +94,7 @@ func runDesktopSession(wsURL, sessionID, sessionMode, displayProtocol string, mo
 	}
 	fmt.Println("[remote-desktop] desktop status:", desktopStatusNote())
 
-	oox, oy, fw, fh, err := monitorRect(monitorIndex)
+	ox, oy, fw, fh, err := monitorRect(monitorIndex)
 	if err != nil {
 		_ = writeJSON(conn, map[string]any{
 			"type": "error", "session_id": sessionID,
@@ -103,7 +103,6 @@ func runDesktopSession(wsURL, sessionID, sessionMode, displayProtocol string, mo
 		fmt.Println("[remote-desktop] capture unavailable:", err)
 		return
 	}
-	ox, oy := oox, oy
 	mons := listMonitors()
 
 	_ = writeJSON(conn, map[string]any{
