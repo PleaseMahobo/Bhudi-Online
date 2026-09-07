@@ -21,9 +21,10 @@ var (
 	procCloseWindowStation      = user32.NewProc("CloseWindowStation")
 	procSetProcessDPIAware      = user32.NewProc("SetProcessDPIAware")
 
-	kernel32                           = syscall.NewLazyDLL("kernel32.dll")
-	wtsapi32                           = syscall.NewLazyDLL("wtsapi32.dll")
+	kernel32                         = syscall.NewLazyDLL("kernel32.dll")
+	wtsapi32                         = syscall.NewLazyDLL("wtsapi32.dll")
 	procWTSGetActiveConsoleSessionId = kernel32.NewProc("WTSGetActiveConsoleSessionId")
+	procWTSQueryUserToken            = wtsapi32.NewProc("WTSQueryUserToken")
 
 	desktopMu      sync.Mutex
 	attachedDesk   uintptr
@@ -42,8 +43,9 @@ const (
 	desktopHookControl     = 0x0010
 	desktopJournalRecord   = 0x0020
 	desktopJournalPlayback = 0x0040
-	maximumAllowed        = 0x02000000
-	winstaAllAccess       = 0x37F
+	maximumAllowed         = 0x02000000
+	winstaAllAccess        = 0x37F
+	genericAll             = 0x10000000
 )
 
 func utf16Ptr(s string) *uint16 {
@@ -57,13 +59,34 @@ func ensureDPIAware() {
 	})
 }
 
-// ensureInteractiveDesktop switches this process/thread onto WinSta0 and the
-// active input desktop so BitBlt/GetDC see the user's interactive session.
+func consoleHasUser() bool {
+	sid := activeConsoleSessionID()
+	if sid == 0xFFFFFFFF {
+		return false
+	}
+	var token syscall.Handle
+	r, _, _ := procWTSQueryUserToken.Call(uintptr(sid), uintptr(unsafe.Pointer(&token)))
+	if r == 0 {
+		return false
+	}
+	_ = syscall.CloseHandle(token)
+	return true
+}
+
+// ensureInteractiveDesktop switches *this OS thread* onto WinSta0 and the
+// active input desktop. Callers MUST runtime.LockOSThread() for capture/input.
 func ensureInteractiveDesktop() error {
 	desktopMu.Lock()
 	defer desktopMu.Unlock()
 
 	ensureDPIAware()
+
+	sid := activeConsoleSessionID()
+	if sid == 0xFFFFFFFF {
+		desktopReady = false
+		desktopLastErr = "no active console session (WTSGetActiveConsoleSessionId=0xFFFFFFFF)"
+		return fmt.Errorf("%s", desktopLastErr)
+	}
 
 	winstaName := utf16Ptr("WinSta0")
 	hwinsta, _, errW := procOpenWindowStationW.Call(
@@ -76,6 +99,13 @@ func ensureInteractiveDesktop() error {
 			uintptr(unsafe.Pointer(winstaName)),
 			0,
 			maximumAllowed,
+		)
+	}
+	if hwinsta == 0 {
+		hwinsta, _, errW = procOpenWindowStationW.Call(
+			uintptr(unsafe.Pointer(winstaName)),
+			0,
+			genericAll,
 		)
 	}
 	if hwinsta != 0 {
@@ -105,6 +135,9 @@ func ensureInteractiveDesktop() error {
 		h, _, errOpen = procOpenInputDesktop.Call(0, 0, maximumAllowed)
 	}
 	if h == 0 {
+		h, _, errOpen = procOpenInputDesktop.Call(0, 0, genericAll)
+	}
+	if h == 0 {
 		defName := utf16Ptr("Default")
 		h, _, errOpen = procOpenDesktopW.Call(
 			uintptr(unsafe.Pointer(defName)),
@@ -124,7 +157,11 @@ func ensureInteractiveDesktop() error {
 	}
 	if h == 0 {
 		desktopReady = false
-		desktopLastErr = fmt.Sprintf("OpenInputDesktop/OpenDesktop failed: %v (is a user logged on to the console session?)", errOpen)
+		hint := "is a user logged on to the console session?"
+		if !consoleHasUser() {
+			hint = "no logged-on console user — log onto the PC locally, then reconnect remote desktop"
+		}
+		desktopLastErr = fmt.Sprintf("OpenInputDesktop/OpenDesktop failed: %v (%s, console_session=%d)", errOpen, hint, sid)
 		return fmt.Errorf("%s", desktopLastErr)
 	}
 
@@ -132,7 +169,7 @@ func ensureInteractiveDesktop() error {
 	if ok == 0 {
 		procCloseDesktop.Call(h)
 		desktopReady = false
-		desktopLastErr = fmt.Sprintf("SetThreadDesktop failed: %v (agent may be locked to Session 0)", errSet)
+		desktopLastErr = fmt.Sprintf("SetThreadDesktop failed: %v (need LockOSThread; console_session=%d)", errSet, sid)
 		return fmt.Errorf("%s", desktopLastErr)
 	}
 
@@ -148,8 +185,8 @@ func ensureInteractiveDesktop() error {
 func desktopStatusNote() string {
 	desktopMu.Lock()
 	defer desktopMu.Unlock()
-	sid, _, _ := procWTSGetActiveConsoleSessionId.Call()
-	base := fmt.Sprintf("console_session=%d", sid)
+	sid := activeConsoleSessionID()
+	base := fmt.Sprintf("console_session=%d has_user=%v", sid, consoleHasUser())
 	if desktopReady {
 		return base + " input-desktop attached"
 	}
