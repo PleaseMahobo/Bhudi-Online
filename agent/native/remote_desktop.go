@@ -82,7 +82,19 @@ func runDesktopSession(wsURL, sessionID, sessionMode, displayProtocol string, mo
 	fmt.Println("[remote-desktop] attached:", string(msg)[:min(120, len(msg))])
 	_ = conn.SetReadDeadline(time.Time{})
 
-	ox, oy, fw, fh, err := monitorRect(monitorIndex)
+	// Switch onto the interactive console desktop before enumerating monitors
+	// or capturing frames (required when the agent runs as LocalSystem / Session 0).
+	if err := ensureInteractiveDesktop(); err != nil {
+		_ = writeJSON(conn, map[string]any{
+			"type": "error", "session_id": sessionID,
+			"message": "screen capture unavailable: " + err.Error() + " (" + desktopStatusNote() + ")",
+		})
+		fmt.Println("[remote-desktop] interactive desktop:", err, desktopStatusNote())
+		return
+	}
+	fmt.Println("[remote-desktop] desktop status:", desktopStatusNote())
+
+	oox, oy, fw, fh, err := monitorRect(monitorIndex)
 	if err != nil {
 		_ = writeJSON(conn, map[string]any{
 			"type": "error", "session_id": sessionID,
@@ -91,6 +103,7 @@ func runDesktopSession(wsURL, sessionID, sessionMode, displayProtocol string, mo
 		fmt.Println("[remote-desktop] capture unavailable:", err)
 		return
 	}
+	ox, oy := oox, oy
 	mons := listMonitors()
 
 	_ = writeJSON(conn, map[string]any{
