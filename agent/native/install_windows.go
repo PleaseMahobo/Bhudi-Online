@@ -5,6 +5,7 @@ package main
 import (
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -26,6 +27,8 @@ const (
 	displayName         = "Bhudi Agent"
 	publisherName       = "Bhudi"
 	runKeyPath          = `Software\Microsoft\Windows\CurrentVersion\Run`
+	// Public release asset — used when support EXE is not beside the installer.
+	defaultSupportURL   = "https://github.com/PleaseMahobo/Bhudi-Online/releases/download/agent-native-latest/bhudi-support.exe"
 )
 
 func installService(server string) (err error) {
@@ -127,7 +130,6 @@ func installService(server string) (err error) {
 		logInstall("install: service OK")
 	}
 
-	// Watchdog uses console 'run' mode (not SCM).
 	cmdLine := fmt.Sprintf("\"%s\" run -server %s", dest, server)
 	_ = exec.Command("schtasks", "/Delete", "/TN", windowsWatchdogName, "/F").Run()
 	watch := exec.Command("schtasks", "/Create", "/TN", windowsWatchdogName,
@@ -164,6 +166,9 @@ func installService(server string) (err error) {
 		logInstall("install: service started")
 	}
 
+	// Start tray again after service is up (identity may now exist).
+	_ = startSupportIfPresent(destDir)
+
 	fmt.Println()
 	fmt.Println("Install complete — install once; agent starts at every boot.")
 	fmt.Println("  Binary:   ", dest)
@@ -199,10 +204,12 @@ func killOtherBhudiAgents() error {
 		logInstall("install: killing other agent pid=%d", pid)
 		_ = exec.Command("taskkill", "/F", "/PID", strconv.Itoa(pid)).Run()
 	}
-	_ = exec.Command("taskkill", "/F", "/IM", "bhudi-support.exe").Run()
+	// Do NOT kill support during final start; only during binary replace.
 	return nil
 }
 
+// installSupportClient always leaves bhudi-support.exe in destDir and registers
+// logon + Run key so the tray is available after every reboot.
 func installSupportClient(destDir string) error {
 	srcCandidates := []string{}
 	if exe, err := os.Executable(); err == nil {
@@ -220,11 +227,15 @@ func installSupportClient(destDir string) error {
 			break
 		}
 	}
-	if src == "" {
-		return fmt.Errorf("%s not found next to installer — tray tickets skipped", supportExeName)
-	}
+
 	dest := filepath.Join(destDir, supportExeName)
-	if src != dest {
+	if src == "" {
+		logInstall("support not beside installer — downloading from release")
+		if err := downloadFile(defaultSupportURL, dest); err != nil {
+			return fmt.Errorf("download %s: %w", supportExeName, err)
+		}
+		src = dest
+	} else if src != dest {
 		if err := copyFile(src, dest); err != nil {
 			return fmt.Errorf("copy support client: %w", err)
 		}
@@ -233,12 +244,21 @@ func installSupportClient(destDir string) error {
 
 	_ = exec.Command("schtasks", "/Delete", "/TN", windowsSupportTask, "/F").Run()
 	tr := fmt.Sprintf("\"%s\"", dest)
+	// ONLOGON + interactive so tray appears for the logged-on user.
 	create := exec.Command("schtasks", "/Create", "/TN", windowsSupportTask,
-		"/TR", tr, "/SC", "ONLOGON", "/RL", "LIMITED", "/F")
+		"/TR", tr, "/SC", "ONLOGON", "/RL", "LIMITED", "/IT", "/F")
 	if out, err := create.CombinedOutput(); err != nil {
-		fmt.Printf("Warning: support logon task failed: %v (%s)\n", err, strings.TrimSpace(string(out)))
+		// Retry without /IT on older Windows.
+		create2 := exec.Command("schtasks", "/Create", "/TN", windowsSupportTask,
+			"/TR", tr, "/SC", "ONLOGON", "/RL", "LIMITED", "/F")
+		if out2, err2 := create2.CombinedOutput(); err2 != nil {
+			fmt.Printf("Warning: support logon task failed: %v (%s)\n", err2, strings.TrimSpace(string(out2)))
+			logInstall("support logon task failed: %v %s", err2, string(out))
+		} else {
+			fmt.Println("Support tray logon task:", windowsSupportTask)
+		}
 	} else {
-		fmt.Println("Support tray logon task:", windowsSupportTask)
+		fmt.Println("Support tray logon task:", windowsSupportTask, "(ONLOGON)")
 	}
 
 	if key, _, err := registry.CreateKey(registry.CURRENT_USER, runKeyPath, registry.SET_VALUE); err == nil {
@@ -247,16 +267,53 @@ func installSupportClient(destDir string) error {
 		fmt.Println("Support Run key registered (current user).")
 	}
 
+	return startSupportIfPresent(destDir)
+}
+
+func startSupportIfPresent(destDir string) error {
+	dest := filepath.Join(destDir, supportExeName)
+	if st, err := os.Stat(dest); err != nil || st.IsDir() {
+		return fmt.Errorf("support binary missing at %s", dest)
+	}
+	// Avoid duplicate instances
+	_ = exec.Command("taskkill", "/F", "/IM", supportExeName).Run()
+	time.Sleep(300 * time.Millisecond)
 	cmd := exec.Command(dest)
 	cmd.Stdout = nil
 	cmd.Stderr = nil
 	cmd.Stdin = nil
 	cmd.SysProcAttr = &syscall.SysProcAttr{
-		CreationFlags: 0x00000008 | 0x00000200,
+		CreationFlags: 0x00000008 | 0x00000200, // DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
 		HideWindow:    true,
 	}
-	_ = cmd.Start()
+	if err := cmd.Start(); err != nil {
+		logInstall("support start failed: %v", err)
+		return err
+	}
+	logInstall("support started pid=%d", cmd.Process.Pid)
+	fmt.Println("Support tray started:", dest)
 	return nil
+}
+
+func downloadFile(url, dest string) error {
+	client := &http.Client{Timeout: 3 * time.Minute}
+	resp, err := client.Get(url)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("HTTP %d from %s", resp.StatusCode, url)
+	}
+	out, err := os.OpenFile(dest, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0755)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+	if _, err := io.Copy(out, resp.Body); err != nil {
+		return err
+	}
+	return out.Close()
 }
 
 func upgradeService(server string) error {
@@ -274,6 +331,7 @@ func stopBhudiForUpgrade(dest string) error {
 	_ = exec.Command("schtasks", "/Delete", "/TN", windowsWatchdogName, "/F").Run()
 	_ = exec.Command("schtasks", "/Delete", "/TN", windowsTaskName, "/F").Run()
 	_ = exec.Command("sc", "stop", windowsServiceName).Run()
+	_ = exec.Command("taskkill", "/F", "/IM", supportExeName).Run()
 
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
@@ -320,8 +378,6 @@ func installWindowsService(dest, server string) error {
 	_ = exec.Command("sc", "delete", windowsServiceName).Run()
 	time.Sleep(500 * time.Millisecond)
 
-	// MUST use "service" so the process registers with the Service Control Manager.
-	// "run" is console-only and causes error 1053 (did not respond in a timely fashion).
 	binPath := fmt.Sprintf("\"%s\" service -server %s", dest, server)
 	create := exec.Command("sc", "create", windowsServiceName,
 		"binPath=", binPath,
