@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -21,10 +21,6 @@ class AgentRepository(BaseRepository[Agent]):
 
     def __init__(self, session: Session):
         super().__init__(session, Agent)
-
-    # ==========================================================
-    # Identity
-    # ==========================================================
 
     def get(
         self,
@@ -70,10 +66,6 @@ class AgentRepository(BaseRepository[Agent]):
             stmt = stmt.where(Agent.tenant_id == tenant_id)
         return self.session.scalar(stmt)
 
-    # ==========================================================
-    # Registration
-    # ==========================================================
-
     def pending_agents(
         self,
         *,
@@ -95,16 +87,26 @@ class AgentRepository(BaseRepository[Agent]):
             stmt = stmt.where(Agent.tenant_id == tenant_id)
         return list(self.session.scalars(stmt))
 
-    # ==========================================================
-    # Status
-    # ==========================================================
-
     def online_agents(
         self,
         *,
         tenant_id: uuid.UUID | None = None,
+        threshold_seconds: int = 180,
     ) -> list[Agent]:
-        stmt = select(Agent).where(Agent.status == "online")
+        """Agents with a recent heartbeat/last_seen (PC on + agent service reachable)."""
+        cutoff = datetime.now(timezone.utc) - timedelta(seconds=threshold_seconds)
+        stmt = select(Agent).where(
+            Agent.revoked.is_(False),
+            Agent.quarantined.is_(False),
+            (
+                (Agent.last_heartbeat.is_not(None) & (Agent.last_heartbeat >= cutoff))
+                | (
+                    Agent.last_heartbeat.is_(None)
+                    & Agent.last_seen.is_not(None)
+                    & (Agent.last_seen >= cutoff)
+                )
+            ),
+        )
         if tenant_id is not None:
             stmt = stmt.where(Agent.tenant_id == tenant_id)
         return list(self.session.scalars(stmt))
@@ -113,11 +115,20 @@ class AgentRepository(BaseRepository[Agent]):
         self,
         *,
         tenant_id: uuid.UUID | None = None,
+        threshold_seconds: int = 180,
     ) -> list[Agent]:
-        stmt = select(Agent).where(Agent.status == "offline")
+        """Agents with no recent heartbeat (PC off, network down, or agent stopped)."""
+        online_ids = {
+            a.id
+            for a in self.online_agents(
+                tenant_id=tenant_id, threshold_seconds=threshold_seconds
+            )
+        }
+        stmt = select(Agent)
         if tenant_id is not None:
             stmt = stmt.where(Agent.tenant_id == tenant_id)
-        return list(self.session.scalars(stmt))
+        rows = list(self.session.scalars(stmt))
+        return [a for a in rows if a.id not in online_ids]
 
     def quarantined_agents(
         self,
@@ -128,10 +139,6 @@ class AgentRepository(BaseRepository[Agent]):
         if tenant_id is not None:
             stmt = stmt.where(Agent.tenant_id == tenant_id)
         return list(self.session.scalars(stmt))
-
-    # ==========================================================
-    # Heartbeat
-    # ==========================================================
 
     def heartbeat(
         self,
@@ -152,10 +159,6 @@ class AgentRepository(BaseRepository[Agent]):
         self.session.refresh(agent)
         return agent
 
-    # ==========================================================
-    # Updates
-    # ==========================================================
-
     def agents_needing_update(
         self,
         *,
@@ -165,10 +168,6 @@ class AgentRepository(BaseRepository[Agent]):
         if tenant_id is not None:
             stmt = stmt.where(Agent.tenant_id == tenant_id)
         return list(self.session.scalars(stmt))
-
-    # ==========================================================
-    # Lifecycle
-    # ==========================================================
 
     def revoke(self, agent: Agent, reason: str) -> Agent:
         agent.revoked = True
