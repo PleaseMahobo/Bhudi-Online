@@ -19,7 +19,7 @@ permissions:
   contents: read
 
 env:
-  AGENT_VERSION: "2.2.9"
+  AGENT_VERSION: "2.2.10"
 
 jobs:
   build:
@@ -56,7 +56,6 @@ jobs:
           GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="$LD" -o dist/bhudi-agent-darwin-amd64 .
           GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build -ldflags="$LD" -o dist/bhudi-agent-darwin-arm64 .
           cp dist/bhudi-agent-windows-amd64.exe dist/bhudi-agent.exe
-          # Prove the Windows binary is stamped with the expected version string
           strings dist/bhudi-agent.exe | grep -F "${VER}" | head -5
 
       - name: Build Support Client (Windows tray / tickets)
@@ -112,17 +111,17 @@ jobs:
           tag_name: agent-native-latest
           name: Bhudi Native Agent (no Python)
           body: |
-            ## Standalone agents **2.2.9**
+            ## Standalone agents **2.2.10**
 
             | File | Notes |
             |------|-------|
-            | `BhudiAgent-Setup.exe` | Windows installer v2.2.9 — Session 0 LockOSThread remote desktop + tray support client |
+            | `BhudiAgent-Setup.exe` | Windows installer v2.2.10 — LockOSThread + Winlogon login-screen attach + tray |
             | `bhudi-agent-setup.msi` | Intune/GPO |
             | `bhudi-agent.exe` / `bhudi-support.exe` | Binaries |
 
             Portal download embeds enrollment automatically.
 
-            After install: `bhudi-agent.exe version` must print **2.2.9**.
+            After install: `bhudi-agent.exe version` must print **2.2.10**.
           files: |
             agent/native/dist/BhudiAgent-Setup.exe
             agent/native/dist/bhudi-agent.exe
