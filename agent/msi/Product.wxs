@@ -1,19 +1,17 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  Bhudi Agent — enterprise per-machine MSI (WiX Toolset 5)
+  Bhudi Agent — enterprise per-machine MSI (WiX Toolset 3.14+)
   Includes service agent + Support Client (tray / tickets).
-  Build (CI):
-    wix build Product.wxs -ext WixToolset.UI.wixext -d AgentDir=. -o bhudi-agent-setup.msi
-  Silent:
-    msiexec /i bhudi-agent-setup.msi /qn SERVERURL=https://api.example.com ENROLLMENTTOKEN=...
-  Customer-specific tokens for end users: use portal BhudiAgent-Setup.exe (not MSI).
+  Build:
+    candle -dAgentDir=..\native\dist Product.wxs
+    light -ext WixUIExtension Product.wixobj -out bhudi-agent-setup.msi
 -->
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
      xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
   <Package
       Name="Bhudi Agent"
       Language="1033"
-      Version="2.2.0"
+      Version="2.2.8"
       Manufacturer="Bhudi / Cyber Bastion"
       UpgradeCode="6DCAACF5-F55A-49B5-8632-893587BD4EC3"
       InstallerVersion="500"
@@ -27,8 +25,6 @@
     <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
 
     <Property Id="SERVERURL" Secure="yes" Value="https://bhudi-online-production.up.railway.app" />
-    <!-- Set at install time: msiexec ... ENROLLMENTTOKEN=... (no default Value — WiX forbids empty string) -->
-    <Property Id="ENROLLMENTTOKEN" Secure="yes" />
 
     <Feature Id="ProductFeature" Title="Bhudi Agent" Level="1">
       <ComponentGroupRef Id="ProductComponents" />
@@ -77,9 +73,7 @@
 
         <RegistryValue Root="HKLM" Key="Software\Microsoft\Windows\CurrentVersion\Uninstall\BhudiAgent" Name="DisplayName" Value="Bhudi Agent" Type="string" />
         <RegistryValue Root="HKLM" Key="Software\Microsoft\Windows\CurrentVersion\Uninstall\BhudiAgent" Name="Publisher" Value="Bhudi / Cyber Bastion" Type="string" />
-        <RegistryValue Root="HKLM" Key="Software\Microsoft\Windows\CurrentVersion\Uninstall\BhudiAgent" Name="DisplayVersion" Value="2.2.0" Type="string" />
-        <RegistryValue Root="HKLM" Key="Software\Bhudi\Agent" Name="ServerUrl" Type="string" Value="[SERVERURL]" />
-        <RegistryValue Root="HKLM" Key="Software\Bhudi\Agent" Name="EnrollmentToken" Type="string" Value="[ENROLLMENTTOKEN]" />
+        <RegistryValue Root="HKLM" Key="Software\Microsoft\Windows\CurrentVersion\Uninstall\BhudiAgent" Name="DisplayVersion" Value="2.2.8" Type="string" />
       </Component>
 
       <Component Id="SupportClientBinary" Guid="B7E2C41A-9D5F-4A2B-8C31-0E6F9A12D4B8">
