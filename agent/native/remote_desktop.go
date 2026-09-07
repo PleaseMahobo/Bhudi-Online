@@ -60,7 +60,12 @@ func startRemoteDesktop(serverURL, agentID string, command map[string]any) map[s
 }
 
 func runDesktopSession(wsURL, sessionID, sessionMode, displayProtocol string, monitorIndex int) {
-	fmt.Println("[remote-desktop] connecting", wsURL, "monitor", monitorIndex)
+	// SetThreadDesktop / BitBlt are OS-thread-affine. Without LockOSThread the
+	// goroutine can migrate after attach and capture still sees Session 0.
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
+	fmt.Println("[remote-desktop] connecting", wsURL, "monitor", monitorIndex, "console", activeConsoleSessionID())
 	dialer := websocket.Dialer{HandshakeTimeout: 20 * time.Second}
 	conn, resp, err := dialer.Dial(wsURL, nil)
 	if err != nil {
@@ -82,12 +87,10 @@ func runDesktopSession(wsURL, sessionID, sessionMode, displayProtocol string, mo
 	fmt.Println("[remote-desktop] attached:", string(msg)[:min(120, len(msg))])
 	_ = conn.SetReadDeadline(time.Time{})
 
-	// Switch onto the interactive console desktop before enumerating monitors
-	// or capturing frames (required when the agent runs as LocalSystem / Session 0).
 	if err := ensureInteractiveDesktop(); err != nil {
 		_ = writeJSON(conn, map[string]any{
 			"type": "error", "session_id": sessionID,
-			"message": "screen capture unavailable: " + err.Error() + " (" + desktopStatusNote() + ")",
+			"message": "screen capture unavailable: " + err.Error() + " (" + desktopStatusNote() + "). Log a user onto the console of this PC, then reconnect.",
 		})
 		fmt.Println("[remote-desktop] interactive desktop:", err, desktopStatusNote())
 		return
@@ -112,8 +115,10 @@ func runDesktopSession(wsURL, sessionID, sessionMode, displayProtocol string, mo
 		"native_w": fw, "native_h": fh,
 		"monitor_index": monitorIndex, "origin_x": ox, "origin_y": oy,
 		"encoding": "jpeg", "monitors": mons,
+		"agent_version": agentVersion, "console_session": activeConsoleSessionID(),
 	})
-	fmt.Printf("[remote-desktop] monitor=%d origin=(%d,%d) size=%dx%d count=%d\n", monitorIndex, ox, oy, fw, fh, len(mons))
+	fmt.Printf("[remote-desktop] monitor=%d origin=(%d,%d) size=%dx%d count=%d version=%s\n",
+		monitorIndex, ox, oy, fw, fh, len(mons), agentVersion)
 
 	stop := make(chan struct{})
 	var once sync.Once
@@ -122,6 +127,7 @@ func runDesktopSession(wsURL, sessionID, sessionMode, displayProtocol string, mo
 	nativeW, nativeH := fw, fh
 	frameW, frameH := fw, fh
 	var frameMu sync.Mutex
+	inputCh := make(chan map[string]any, 64)
 
 	go func() {
 		defer closeStop()
@@ -167,7 +173,14 @@ func runDesktopSession(wsURL, sessionID, sessionMode, displayProtocol string, mo
 						}
 						mapped["x"] = fx
 						mapped["y"] = fy
-						applyDesktopInputAt(mapped, nW, nH, ox, oy)
+						mapped["_ox"] = float64(ox)
+						mapped["_oy"] = float64(oy)
+						mapped["_nw"] = float64(nW)
+						mapped["_nh"] = float64(nH)
+						select {
+						case inputCh <- mapped:
+						default:
+						}
 					}
 				}
 			}
@@ -177,23 +190,48 @@ func runDesktopSession(wsURL, sessionID, sessionMode, displayProtocol string, mo
 		}
 	}()
 
-	ticker := time.NewTicker(350 * time.Millisecond)
+	ticker := time.NewTicker(200 * time.Millisecond)
 	defer ticker.Stop()
 	seq := 0
+	failStreak := 0
 	for {
 		select {
 		case <-stop:
 			fmt.Println("[remote-desktop] session ended", sessionID)
 			return
+		case ev := <-inputCh:
+			_ = ensureInteractiveDesktop()
+			nW := int(numVal(ev["_nw"]))
+			nH := int(numVal(ev["_nh"]))
+			oX := int(numVal(ev["_ox"]))
+			oY := int(numVal(ev["_oy"]))
+			if nW <= 0 {
+				nW = nativeW
+			}
+			if nH <= 0 {
+				nH = nativeH
+			}
+			applyDesktopInputAt(ev, nW, nH, oX, oY)
 		case <-ticker.C:
-			img, err := captureScreenRegion(monitorIndex)
-			if err != nil {
-				fmt.Println("[remote-desktop] capture:", err)
+			if err := ensureInteractiveDesktop(); err != nil {
+				failStreak++
+				if failStreak == 1 || failStreak%25 == 0 {
+					fmt.Println("[remote-desktop] desktop attach:", err, desktopStatusNote())
+				}
 				continue
 			}
+			img, err := captureScreenRegion(monitorIndex)
+			if err != nil {
+				failStreak++
+				if failStreak == 1 || failStreak%25 == 0 {
+					fmt.Println("[remote-desktop] capture:", err, desktopStatusNote())
+				}
+				continue
+			}
+			failStreak = 0
 			img = maybeScale(img, 1600)
 			var buf bytes.Buffer
-			if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: 60}); err != nil {
+			if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: 55}); err != nil {
 				continue
 			}
 			bw, bh := img.Bounds().Dx(), img.Bounds().Dy()
