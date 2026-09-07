@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, computed_field
+
+# Agent is "online" (green) if a heartbeat/last_seen is within this window.
+# Independent of whether a console user is logged on — service heartbeats only.
+ONLINE_THRESHOLD_SECONDS = 180
 
 
 # ==========================================================
@@ -145,6 +149,62 @@ class AgentResponse(BaseModel):
     created_at: datetime
 
     updated_at: datetime
+
+    def _seen_at(self) -> datetime | None:
+        """Most recent proof the agent service is alive (not tied to interactive logon)."""
+        for candidate in (self.last_heartbeat, self.last_checkin, self.last_seen):
+            if candidate is None:
+                continue
+            if candidate.tzinfo is None:
+                return candidate.replace(tzinfo=timezone.utc)
+            return candidate
+        return None
+
+    def _age_seconds(self) -> int | None:
+        seen = self._seen_at()
+        if seen is None:
+            return None
+        return max(0, int((datetime.now(timezone.utc) - seen).total_seconds()))
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def presence(self) -> Literal["online", "offline"]:
+        """Service reachability: online while the PC is on and the agent heartbeats."""
+        if self.revoked or self.quarantined:
+            return "offline"
+        age = self._age_seconds()
+        if age is None:
+            return "offline"
+        if age <= ONLINE_THRESHOLD_SECONDS:
+            return "online"
+        return "offline"
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def presence_color(self) -> Literal["green", "red"]:
+        """Portal indicator: green = machine reachable, red = offline / powered off / no agent."""
+        return "green" if self.presence == "online" else "red"
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def presence_label(self) -> str:
+        if self.revoked:
+            return "Revoked"
+        if self.quarantined:
+            return "Quarantined"
+        if self.presence == "online":
+            return "Online"
+        return "Offline"
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def seconds_since_seen(self) -> int | None:
+        return self._age_seconds()
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def online_threshold_seconds(self) -> int:
+        return ONLINE_THRESHOLD_SECONDS
 
 
 # ==========================================================
