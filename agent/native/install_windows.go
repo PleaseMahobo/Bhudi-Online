@@ -13,7 +13,9 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	"unsafe"
 
+	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/registry"
 )
 
@@ -270,28 +272,57 @@ func installSupportClient(destDir string) error {
 	return startSupportIfPresent(destDir)
 }
 
+func activeInteractiveSessionID() (uint32, error) {
+	sid := windows.WTSGetActiveConsoleSessionId()
+	if sid != 0xFFFFFFFF {
+		return sid, nil
+	}
+	return 0, fmt.Errorf("no active interactive console session")
+}
+
+func startSupportInActiveSession(dest string) (uint32, error) {
+	sid, err := activeInteractiveSessionID()
+	if err != nil {
+		return 0, err
+	}
+	var token windows.Token
+	if err := windows.WTSQueryUserToken(sid, &token); err != nil {
+		return 0, fmt.Errorf("query user token for session %d: %w", sid, err)
+	}
+	defer token.Close()
+
+	exe, err := windows.UTF16PtrFromString(dest)
+	if err != nil { return 0, err }
+	cmdline, err := windows.UTF16PtrFromString(""" + dest + """)
+	if err != nil { return 0, err }
+	var si windows.StartupInfo
+	si.Cb = uint32(unsafe.Sizeof(si))
+	si.Desktop, _ = windows.UTF16PtrFromString("winsta0\\default")
+	var pi windows.ProcessInformation
+	if err := windows.CreateProcessAsUser(token, exe, cmdline, nil, nil, false, windows.CREATE_UNICODE_ENVIRONMENT|windows.CREATE_NEW_PROCESS_GROUP, nil, "", &si, &pi); err != nil {
+		return 0, fmt.Errorf("CreateProcessAsUser session %d: %w", sid, err)
+	}
+	defer windows.CloseHandle(pi.Thread)
+	defer windows.CloseHandle(pi.Process)
+	return pi.ProcessId, nil
+}
+
 func startSupportIfPresent(destDir string) error {
 	dest := filepath.Join(destDir, supportExeName)
 	if st, err := os.Stat(dest); err != nil || st.IsDir() {
 		return fmt.Errorf("support binary missing at %s", dest)
 	}
-	// Avoid duplicate instances
+	// The tray must run in the logged-in user's interactive session, not in
+	// LocalSystem/session 0. Do not launch it detached from the service/installer.
 	_ = exec.Command("taskkill", "/F", "/IM", supportExeName).Run()
 	time.Sleep(300 * time.Millisecond)
-	cmd := exec.Command(dest)
-	cmd.Stdout = nil
-	cmd.Stderr = nil
-	cmd.Stdin = nil
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		CreationFlags: 0x00000008 | 0x00000200, // DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
-		HideWindow:    true,
-	}
-	if err := cmd.Start(); err != nil {
-		logInstall("support start failed: %v", err)
+	pid, err := startSupportInActiveSession(dest)
+	if err != nil {
+		logInstall("support interactive-session start failed: %v", err)
 		return err
 	}
-	logInstall("support started pid=%d", cmd.Process.Pid)
-	fmt.Println("Support tray started:", dest)
+	logInstall("support started in interactive session pid=%d", pid)
+	fmt.Println("Support tray started in active user session:", dest)
 	return nil
 }
 
