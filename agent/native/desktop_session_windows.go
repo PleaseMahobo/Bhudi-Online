@@ -31,6 +31,7 @@ var (
 	attachedWinsta uintptr
 	desktopReady   bool
 	desktopLastErr string
+	desktopKind    string
 	dpiAwareOnce   sync.Once
 )
 
@@ -73,8 +74,24 @@ func consoleHasUser() bool {
 	return true
 }
 
-// ensureInteractiveDesktop switches *this OS thread* onto WinSta0 and the
-// active input desktop. Callers MUST runtime.LockOSThread() for capture/input.
+func openNamedDesktop(name string, access uintptr) (uintptr, error) {
+	n := utf16Ptr(name)
+	h, _, err := procOpenDesktopW.Call(uintptr(unsafe.Pointer(n)), 0, 0, access)
+	if h == 0 {
+		h, _, err = procOpenDesktopW.Call(uintptr(unsafe.Pointer(n)), 0, 0, maximumAllowed)
+	}
+	if h == 0 {
+		h, _, err = procOpenDesktopW.Call(uintptr(unsafe.Pointer(n)), 0, 0, genericAll)
+	}
+	if h == 0 {
+		return 0, err
+	}
+	return h, nil
+}
+
+// ensureInteractiveDesktop switches this OS thread onto WinSta0 and the best
+// available interactive desktop (input → Default → Winlogon → Screen-saver).
+// Callers MUST runtime.LockOSThread() for capture/input.
 func ensureInteractiveDesktop() error {
 	desktopMu.Lock()
 	defer desktopMu.Unlock()
@@ -89,24 +106,12 @@ func ensureInteractiveDesktop() error {
 	}
 
 	winstaName := utf16Ptr("WinSta0")
-	hwinsta, _, errW := procOpenWindowStationW.Call(
-		uintptr(unsafe.Pointer(winstaName)),
-		0,
-		winstaAllAccess,
-	)
+	hwinsta, _, errW := procOpenWindowStationW.Call(uintptr(unsafe.Pointer(winstaName)), 0, winstaAllAccess)
 	if hwinsta == 0 {
-		hwinsta, _, errW = procOpenWindowStationW.Call(
-			uintptr(unsafe.Pointer(winstaName)),
-			0,
-			maximumAllowed,
-		)
+		hwinsta, _, errW = procOpenWindowStationW.Call(uintptr(unsafe.Pointer(winstaName)), 0, maximumAllowed)
 	}
 	if hwinsta == 0 {
-		hwinsta, _, errW = procOpenWindowStationW.Call(
-			uintptr(unsafe.Pointer(winstaName)),
-			0,
-			genericAll,
-		)
+		hwinsta, _, errW = procOpenWindowStationW.Call(uintptr(unsafe.Pointer(winstaName)), 0, genericAll)
 	}
 	if hwinsta != 0 {
 		ok, _, errSet := procSetProcessWindowStation.Call(hwinsta)
@@ -128,72 +133,73 @@ func ensureInteractiveDesktop() error {
 			desktopJournalRecord | desktopJournalPlayback,
 	)
 
-	var h uintptr
-	var errOpen error
-	h, _, errOpen = procOpenInputDesktop.Call(0, 0, access)
-	if h == 0 {
-		h, _, errOpen = procOpenInputDesktop.Call(0, 0, maximumAllowed)
+	type candidate struct {
+		kind string
+		open func() (uintptr, error)
 	}
-	if h == 0 {
-		h, _, errOpen = procOpenInputDesktop.Call(0, 0, genericAll)
+	candidates := []candidate{
+		{"input", func() (uintptr, error) {
+			h, _, err := procOpenInputDesktop.Call(0, 0, access)
+			if h == 0 {
+				h, _, err = procOpenInputDesktop.Call(0, 0, maximumAllowed)
+			}
+			if h == 0 {
+				h, _, err = procOpenInputDesktop.Call(0, 0, genericAll)
+			}
+			if h == 0 {
+				return 0, err
+			}
+			return h, nil
+		}},
+		{"default", func() (uintptr, error) { return openNamedDesktop("Default", access) }},
+		{"winlogon", func() (uintptr, error) { return openNamedDesktop("Winlogon", access) }},
+		{"screen-saver", func() (uintptr, error) { return openNamedDesktop("Screen-saver", access) }},
 	}
-	if h == 0 {
-		defName := utf16Ptr("Default")
-		h, _, errOpen = procOpenDesktopW.Call(
-			uintptr(unsafe.Pointer(defName)),
-			0,
-			0,
-			access,
-		)
-	}
-	if h == 0 {
-		defName := utf16Ptr("Default")
-		h, _, errOpen = procOpenDesktopW.Call(
-			uintptr(unsafe.Pointer(defName)),
-			0,
-			0,
-			maximumAllowed,
-		)
-	}
-	if h == 0 {
-		desktopReady = false
-		hint := "is a user logged on to the console session?"
-		if !consoleHasUser() {
-			hint = "no logged-on console user — log onto the PC locally, then reconnect remote desktop"
+
+	var lastOpenErr error
+	for _, c := range candidates {
+		h, errOpen := c.open()
+		if h == 0 {
+			lastOpenErr = errOpen
+			continue
 		}
-		desktopLastErr = fmt.Sprintf("OpenInputDesktop/OpenDesktop failed: %v (%s, console_session=%d)", errOpen, hint, sid)
-		return fmt.Errorf("%s", desktopLastErr)
+		ok, _, errSet := procSetThreadDesktop.Call(h)
+		if ok == 0 {
+			procCloseDesktop.Call(h)
+			lastOpenErr = errSet
+			continue
+		}
+		if attachedDesk != 0 && attachedDesk != h {
+			procCloseDesktop.Call(attachedDesk)
+		}
+		attachedDesk = h
+		desktopReady = true
+		desktopKind = c.kind
+		desktopLastErr = ""
+		return nil
 	}
 
-	ok, _, errSet := procSetThreadDesktop.Call(h)
-	if ok == 0 {
-		procCloseDesktop.Call(h)
-		desktopReady = false
-		desktopLastErr = fmt.Sprintf("SetThreadDesktop failed: %v (need LockOSThread; console_session=%d)", errSet, sid)
-		return fmt.Errorf("%s", desktopLastErr)
+	desktopReady = false
+	hint := "is a user logged on, or is the login screen visible?"
+	if !consoleHasUser() {
+		hint = "no interactive user — attempted Winlogon (login screen); open failed"
 	}
-
-	if attachedDesk != 0 && attachedDesk != h {
-		procCloseDesktop.Call(attachedDesk)
-	}
-	attachedDesk = h
-	desktopReady = true
-	desktopLastErr = ""
-	return nil
+	desktopLastErr = fmt.Sprintf("desktop attach failed: %v (%s, console_session=%d)", lastOpenErr, hint, sid)
+	return fmt.Errorf("%s", desktopLastErr)
 }
 
 func desktopStatusNote() string {
 	desktopMu.Lock()
 	defer desktopMu.Unlock()
 	sid := activeConsoleSessionID()
-	base := fmt.Sprintf("console_session=%d has_user=%v", sid, consoleHasUser())
+	base := fmt.Sprintf("console_session=%d has_user=%v desktop=%s", sid, consoleHasUser(), desktopKind)
 	if desktopReady {
-		return base + " input-desktop attached"
+		return base + " attached"
 	}
 	if desktopLastErr != "" {
 		return base + " " + desktopLastErr
 	}
-	return base + " input-desktop not attached"
+	return base + " not attached"
 }
 
 func activeConsoleSessionID() uint32 {
