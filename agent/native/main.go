@@ -8,8 +8,8 @@ import (
 	"strings"
 )
 
-// Set at link time: -ldflags "-X main.agentVersion=2.2.8"
-var agentVersion = "2.2.8"
+// Set at link time: -ldflags "-X main.agentVersion=2.2.9"
+var agentVersion = "2.2.9"
 
 func main() {
 	if len(os.Args) < 2 {
@@ -68,34 +68,54 @@ func main() {
 Commands:
   enroll   [-server URL]   Enroll and persist identity
   install  [-server URL]   Install as OS service (requires elevation on Windows)
-  upgrade  [-server URL]   Upgrade binary and service registration
-  uninstall                Remove service and startup registration
-  service  [-server URL]   Run as Windows service host
-  run      [-server URL]   Foreground agent loop
-  version                  Print version
+  upgrade  [-server URL]   Replace binary & restart service (keeps identity)
+  uninstall                Remove service, tasks, and startup entries
+  service  [-server URL]   Run as native Windows Service (SCM entrypoint)
+  run      [-server URL]   Foreground run (debug)
+  version
+
+Windows (Administrator):
+  bhudi-agent.exe install -server https://api.example.com
+  bhudi-agent.exe upgrade -server https://api.example.com
+  bhudi-agent.exe uninstall
+
+Linux (prefer sudo for boot-wide systemd unit):
+  sudo ./bhudi-agent-linux-amd64 install -server https://api.example.com
+
+macOS:
+  sudo ./bhudi-agent-darwin-arm64 install -server https://api.example.com
+
+Install log:
+  Windows: %ProgramData%\Bhudi\Agent\install.log
+  Linux:   /var/log/bhudi-agent-install.log (root) or ~/.local/share/bhudi-agent/install.log
+  macOS:   ~/Library/Logs/Bhudi/install.log
+
+MSI / enterprise deploy:
+  Use bhudi-agent-setup.msi (per-machine, auto-start service) from the Bhudi portal or
+  GitHub release tag agent-native-latest.
 `)
 	default:
-		fmt.Fprintf(os.Stderr, "unknown command: %s\n", cmd)
-		os.Exit(2)
+		runAgent(parseRunFlags(os.Args[1:]))
 	}
 }
 
 func parseRunFlags(args []string) runConfig {
-	fs := flag.NewFlagSet("bhudi-agent", flag.ContinueOnError)
-	server := fs.String("server", envOr("BHUDI_SERVER_URL", defaultServerURL), "API base URL")
-	interval := fs.Int("interval", 15, "heartbeat interval seconds")
+	fs := flag.NewFlagSet("run", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	server := fs.String("server", envOr("BHUDI_SERVER_URL", defaultServerURL), "server")
+	interval := fs.Int("interval", 10, "heartbeat seconds")
 	_ = fs.Parse(args)
 	return runConfig{Server: strings.TrimRight(*server, "/"), Interval: *interval}
 }
 
+func fatal(err error) {
+	fmt.Fprintln(os.Stderr, "error:", err)
+	os.Exit(1)
+}
+
 func envOr(k, def string) string {
-	if v := os.Getenv(k); v != "" {
+	if v := strings.TrimSpace(os.Getenv(k)); v != "" {
 		return v
 	}
 	return def
-}
-
-func fatal(err error) {
-	fmt.Fprintln(os.Stderr, err)
-	os.Exit(1)
 }
