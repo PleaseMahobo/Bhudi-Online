@@ -158,6 +158,11 @@ func monitorRect(index int) (x, y, w, h int, err error) {
 
 // captureScreenRegion captures one monitor (or primary if index is out of range).
 func captureScreenRegion(monitorIndex int) (image.Image, error) {
+	// Attach to the interactive user desktop so Session 0 / service agents
+	// can BitBlt the console session instead of a blank Session 0 surface.
+	if err := ensureInteractiveDesktop(); err != nil {
+		return nil, err
+	}
 	x, y, w, h, err := monitorRect(monitorIndex)
 	if err != nil {
 		return nil, err
@@ -177,13 +182,18 @@ func captureRect(srcX, srcY, w, h int) (image.Image, error) {
 		return nil, fmt.Errorf("invalid capture size %dx%d", w, h)
 	}
 
+	// Re-assert interactive desktop on each frame in case the console session changed.
+	if err := ensureInteractiveDesktop(); err != nil {
+		return nil, err
+	}
+
 	desktop, _, _ := procGetDesktopWindow.Call()
 	hdcScreen, _, _ := procGetDC.Call(desktop)
 	if hdcScreen == 0 {
 		hdcScreen, _, _ = procGetDC.Call(0)
 	}
 	if hdcScreen == 0 {
-		return nil, fmt.Errorf("GetDC failed — agent must run in an interactive user desktop (not Session 0 / pure service)")
+		return nil, fmt.Errorf("GetDC failed — agent must run in an interactive user desktop (not Session 0 / pure service); %s", desktopStatusNote())
 	}
 	defer procReleaseDC.Call(desktop, hdcScreen)
 
@@ -262,15 +272,13 @@ func captureViaGetDIBits(hdcScreen, hdcMem uintptr, srcX, srcY, w, h int) (image
 		return nil, err
 	}
 
-	// Bottom-up DIB; stride DWORD-aligned for 32-bpp = w*4 already when w is fine,
-	// but use explicit SizeImage.
 	stride := ((w*32 + 31) / 32) * 4
 	buf := make([]byte, stride*h)
 	bi := bitmapInfo{
 		Header: bitmapInfoHeader{
 			Size:        uint32(unsafe.Sizeof(bitmapInfoHeader{})),
 			Width:       int32(w),
-			Height:      int32(h), // positive = bottom-up for GetDIBits
+			Height:      int32(h),
 			Planes:      1,
 			BitCount:    32,
 			Compression: biRGB,
@@ -278,7 +286,6 @@ func captureViaGetDIBits(hdcScreen, hdcMem uintptr, srcX, srcY, w, h int) (image
 		},
 	}
 
-	// hdc must be the mem DC that currently has the bitmap selected (or 0).
 	ret, _, errCall := procGetDIBits.Call(
 		hdcMem,
 		hbm,
@@ -292,7 +299,6 @@ func captureViaGetDIBits(hdcScreen, hdcMem uintptr, srcX, srcY, w, h int) (image
 		return nil, fmt.Errorf("GetDIBits failed: %v", errCall)
 	}
 
-	// Flip bottom-up → top-down RGBA
 	img := image.NewRGBA(image.Rect(0, 0, w, h))
 	for row := 0; row < h; row++ {
 		srcRow := buf[(h-1-row)*stride : (h-1-row)*stride+w*4]
@@ -348,7 +354,6 @@ func applyDesktopInputAt(ev map[string]any, frameW, frameH, originX, originY int
 		applyDesktopInput(ev, image.Rect(0, 0, 1920, 1080))
 		return
 	}
-	// Map normalized or frame-space coords onto the captured region origin.
 	t := strVal(ev["type"])
 	nx := numVal(ev["x"])
 	ny := numVal(ev["y"])
@@ -363,8 +368,6 @@ func applyDesktopInputAt(ev map[string]any, frameW, frameH, originX, originY int
 	}
 	ev2["x"] = float64(x + originX)
 	ev2["y"] = float64(y + originY)
-	// applyDesktopInput adds captureOrigin again for virtual-screen coords when
-	// using absolute pixel values — strip that by using absolute path below.
 	applyDesktopInputAbsolute(ev2)
 }
 
