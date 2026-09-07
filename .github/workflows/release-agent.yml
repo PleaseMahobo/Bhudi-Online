@@ -37,17 +37,22 @@ jobs:
           New-Item -ItemType Directory -Force dist | Out-Null
           $ld = "-s -w -X main.agentVersion=$ver"
           $env:CGO_ENABLED = "0"
-          $env:GOOS = "windows"; $env:GOARCH = "amd64"
-          go mod download\n          go build -trimpath -mod=readonly -ldflags $ld -o dist/bhudi-agent.exe .
-          Copy-Item dist/bhudi-agent.exe dist/bhudi-agent-windows-amd64.exe
+          $env:GOOS = "windows"
+          $env:GOARCH = "amd64"
+          go mod download
+          go build -trimpath -ldflags $ld -o dist/bhudi-agent.exe .
+          if (-not (Test-Path dist/bhudi-agent.exe)) { throw "bhudi-agent.exe build failed" }
+          Copy-Item dist/bhudi-agent.exe dist/bhudi-agent-windows-amd64.exe -Force
 
       - name: Build support client
         working-directory: agent/support-client
         shell: pwsh
         run: |
           $env:CGO_ENABLED = "0"
-          $env:GOOS = "windows"; $env:GOARCH = "amd64"
-          go mod download\n          go build -trimpath -mod=readonly -ldflags "-s -w -H=windowsgui" -o ../native/dist/bhudi-support.exe .
+          $env:GOOS = "windows"
+          $env:GOARCH = "amd64"
+          go mod download
+          go build -trimpath -ldflags "-s -w -H=windowsgui" -o ../native/dist/bhudi-support.exe .
           if (-not (Test-Path ../native/dist/bhudi-support.exe)) { throw "bhudi-support.exe build failed" }
 
       - name: Build customer installer base with bundled agent and support client
@@ -57,9 +62,12 @@ jobs:
           Copy-Item agent/native/dist/bhudi-support.exe agent/cmd/bhudi-agent-setup/bhudi-support.exe -Force
           Push-Location agent/cmd/bhudi-agent-setup
           $env:CGO_ENABLED = "0"
-          $env:GOOS = "windows"; $env:GOARCH = "amd64"
-          go mod download\n          go build -tags release -trimpath -mod=readonly -ldflags "-s -w -H=windowsgui" -o ../../native/dist/BhudiAgent-Setup.exe .
+          $env:GOOS = "windows"
+          $env:GOARCH = "amd64"
+          go mod download
+          go build -tags release -trimpath -ldflags "-s -w -H=windowsgui" -o ../../native/dist/BhudiAgent-Setup.exe .
           Pop-Location
+          if (-not (Test-Path agent/native/dist/BhudiAgent-Setup.exe)) { throw "BhudiAgent-Setup.exe build failed" }
 
       - uses: actions/setup-dotnet@v4
         with:
@@ -145,8 +153,9 @@ jobs:
           VER="${VER#agent-v}"
           [ -n "$VER" ] || VER=2.2.8
           mkdir -p dist
+          go mod download
           CGO_ENABLED=0 GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} \
-            go build -trimpath -mod=readonly -ldflags="-s -w -X main.agentVersion=$VER" \
+            go build -trimpath -ldflags="-s -w -X main.agentVersion=$VER" \
             -o dist/${{ matrix.out }} .
       - uses: actions/upload-artifact@v4
         with:
@@ -171,7 +180,7 @@ jobs:
           tag_name: agent-native-latest
           name: Bhudi Native Agent (enterprise)
           body: |
-            ## Enterprise native agent
+            ## Enterprise native agent **2.2.8**
 
             | File | Platform |
             |------|----------|
@@ -184,7 +193,12 @@ jobs:
 
             ### Silent MSI
             ```bat
-            msiexec /i bhudi-agent-setup.msi /qn SERVERURL=https://bhudi-online-production.up.railway.app ENROLLMENTTOKEN=...
+            msiexec /i bhudi-agent-setup.msi /qn /norestart SERVERURL=https://bhudi-online-production.up.railway.app
+            ```
+
+            ### EXE upgrade
+            ```bat
+            bhudi-agent.exe upgrade -server https://bhudi-online-production.up.railway.app
             ```
 
             ### Customer EXE
