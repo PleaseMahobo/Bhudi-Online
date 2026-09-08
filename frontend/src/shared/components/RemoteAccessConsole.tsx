@@ -7,10 +7,30 @@ import { getDevices } from '@/lib/api';
 import MfaRequiredPanel from '@/shared/components/MfaRequiredPanel';
 import { useMfaGate } from '@/shared/hooks/useMfaGate';
 
-type Device = { id: string; device_id?: string; agent_id?: string; hostname?: string; name?: string; status?: string };
+type Device = { id: string; device_id?: string; agent_id?: string; hostname?: string; name?: string; status?: string; agent_version?: string };
 type MonitorInfo = { index: number; name: string; width: number; height: number; primary?: boolean };
 // HTTP stays same-origin so Next.js auth proxies can attach cookies.
 const API_BASE = '';
+const MIN_REMOTE_DESKTOP_AGENT_VERSION = '2.2.10';
+
+function parseVersion(value?: string): number[] | null {
+  if (!value) return null;
+  const match = value.trim().replace(/^v/i, '').match(/^(\d+)\.(\d+)\.(\d+)/);
+  return match ? match.slice(1).map(Number) : null;
+}
+
+function isVersionAtLeast(actual?: string, minimum = MIN_REMOTE_DESKTOP_AGENT_VERSION): boolean | null {
+  const a = parseVersion(actual);
+  const b = parseVersion(minimum);
+  if (!a || !b) return null;
+  for (let i = 0; i < Math.max(a.length, b.length); i += 1) {
+    const av = a[i] ?? 0;
+    const bv = b[i] ?? 0;
+    if (av > bv) return true;
+    if (av < bv) return false;
+  }
+  return true;
+}
 
 // WebSockets must hit the Railway API host (Vercel cannot upgrade / proxy WS to FastAPI).
 function apiHttpBase(): string {
@@ -43,6 +63,9 @@ export default function RemoteAccessConsole() {
   const [monitors, setMonitors] = useState<MonitorInfo[]>([]);
   const [monitorIndex, setMonitorIndex] = useState(0);
   const [fitMode, setFitMode] = useState<'contain' | 'width'>('contain');
+  const selectedDevice = devices.find((d) => deviceAgentId(d) === agentId);
+  const selectedAgentVersion = selectedDevice?.agent_version;
+  const remoteDesktopCompatible = isVersionAtLeast(selectedAgentVersion);
   const wsRef = useRef<WebSocket | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const frameSize = useRef({ w: 1280, h: 720 });
@@ -387,6 +410,22 @@ export default function RemoteAccessConsole() {
             <span className="font-mono text-xs text-slate-400">session {sessionId.slice(0, 8)}…</span>
           ) : null}
         </span>
+        {agentId ? (
+          <span className={
+            'inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium ' +
+            (remoteDesktopCompatible === true
+              ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+              : remoteDesktopCompatible === false
+                ? 'border-amber-200 bg-amber-50 text-amber-700'
+                : 'border-slate-200 bg-slate-50 text-slate-600')
+          }>
+            Agent v{selectedAgentVersion || 'unknown'} · {remoteDesktopCompatible === true
+              ? 'Remote desktop compatible'
+              : remoteDesktopCompatible === false
+                ? `Update required (minimum v${MIN_REMOTE_DESKTOP_AGENT_VERSION})`
+                : 'Compatibility unknown'}
+          </span>
+        ) : null}
         {error ? (
           <span className="inline-flex items-center gap-1 text-red-600">
             <XCircle className="h-4 w-4" /> {error}
@@ -456,7 +495,11 @@ export default function RemoteAccessConsole() {
             />
             {!hasFrame && (
               <p className="pointer-events-none absolute text-sm text-slate-500">
-                No frames yet — Connect with agent v2.2.8+.
+                No frames yet — {selectedAgentVersion
+                  ? remoteDesktopCompatible === true
+                    ? `waiting for frames from agent v${selectedAgentVersion} (compatible)`
+                    : `agent v${selectedAgentVersion} needs v${MIN_REMOTE_DESKTOP_AGENT_VERSION}+ for remote desktop`
+                  : 'waiting for agent version and remote desktop frames'}.
               </p>
             )}
           </div>
