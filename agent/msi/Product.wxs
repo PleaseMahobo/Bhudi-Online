@@ -11,7 +11,7 @@
   <Package
       Name="Bhudi Agent"
       Language="1033"
-      Version="2.2.8"
+      Version="2.2.10"
       Manufacturer="Bhudi / Cyber Bastion"
       UpgradeCode="6DCAACF5-F55A-49B5-8632-893587BD4EC3"
       InstallerVersion="500"
@@ -73,7 +73,7 @@
 
         <RegistryValue Root="HKLM" Key="Software\Microsoft\Windows\CurrentVersion\Uninstall\BhudiAgent" Name="DisplayName" Value="Bhudi Agent" Type="string" />
         <RegistryValue Root="HKLM" Key="Software\Microsoft\Windows\CurrentVersion\Uninstall\BhudiAgent" Name="Publisher" Value="Bhudi / Cyber Bastion" Type="string" />
-        <RegistryValue Root="HKLM" Key="Software\Microsoft\Windows\CurrentVersion\Uninstall\BhudiAgent" Name="DisplayVersion" Value="2.2.8" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Microsoft\Windows\CurrentVersion\Uninstall\BhudiAgent" Name="DisplayVersion" Value="2.2.10" Type="string" />
       </Component>
 
       <Component Id="SupportClientBinary" Guid="B7E2C41A-9D5F-4A2B-8C31-0E6F9A12D4B8">
