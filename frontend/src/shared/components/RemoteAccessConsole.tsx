@@ -143,8 +143,8 @@ export default function RemoteAccessConsole() {
     try {
       const path =
         mode === 'desktop'
-          ? '/api/v1/runtime/remote/desktop'
-          : '/api/v1/runtime/remote/terminal';
+          ? '/api/v1/remote-access/desktop'
+          : '/api/v1/remote-access/terminal';
       const body =
         mode === 'desktop'
           ? {
