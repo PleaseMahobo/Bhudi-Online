@@ -19,6 +19,7 @@ from app.models.agent import Agent
 from app.models.user import User
 from app.state import device_state
 from app.services.remote_session_manager import remote_session_manager
+from app.services.agent_dispatcher import AgentDispatcher
 from app.services.agent_enrollment_service import AgentEnrollmentService
 
 router = APIRouter(prefix="/runtime")
@@ -322,13 +323,41 @@ def command_history(agent_id: str):
 
 
 @router.get("/agents/{agent_id}/commands/pending")
-def pending_commands(agent_id: str, agent_token: str | None = None):
+def pending_commands(agent_id: str, agent_token: str | None = None, db: Session = Depends(get_db)):
     _require_agent_token(agent_id, agent_token)
+
+    # Native production agents poll this canonical runtime endpoint. Remote-access
+    # operations are queued durably in AgentCommand, so bridge that persistent queue
+    # here instead of leaving remote.desktop.start stranded in the SQL dispatcher.
+    commands: list[dict[str, Any]] = []
+    try:
+        dispatcher = AgentDispatcher(db)
+        persistent = dispatcher.get_pending_commands(uuid.UUID(agent_id))
+        for command in persistent:
+            commands.append({
+                "id": str(command.id),
+                "command_id": str(command.id),
+                "command": "",
+                "shell": False,
+                "command_type": command.command_type,
+                "payload": command.payload if isinstance(command.payload, dict) else {},
+                "status": command.status,
+                "priority": command.priority,
+                "timeout_seconds": command.timeout_seconds,
+            })
+            dispatcher.mark_sent(command.id)
+    except Exception as exc:
+        db.rollback()
+        print(f"[runtime] persistent command poll skipped: {exc}")
+
+    # Preserve compatibility for legacy runtime-only commands.
     pending = [c for c in _commands.get(agent_id, []) if c.get("status") == "pending"]
     for command in pending:
         command["status"] = "dispatched"
+        commands.append(command)
+
     _persist_agents()
-    return {"commands": pending}
+    return {"commands": commands}
 
 
 @router.get("/agents/{agent_id}/commands/{command_id}")
@@ -352,10 +381,16 @@ def acknowledge_command(agent_id: str, command_id: str, body: CommandAck, agent_
 
 
 @router.post("/agents/{agent_id}/commands/{command_id}/result")
-def command_result(agent_id: str, command_id: str, body: CommandResult, agent_token: str | None = None):
+def command_result(
+    agent_id: str,
+    command_id: str,
+    body: CommandResult,
+    agent_token: str | None = None,
+    db: Session = Depends(get_db),
+):
     agent = _require_agent_token(agent_id, agent_token)
     for command in _commands.get(agent_id, []):
-        if command.get("id") == command_id:
+        if command.get("id") == command_id or command.get("command_id") == command_id:
             command["exit_code"] = body.exit_code
             command["stdout"] = body.stdout
             command["stderr"] = body.stderr
@@ -368,7 +403,27 @@ def command_result(agent_id: str, command_id: str, body: CommandResult, agent_to
                 agent["commands_failed"] = int(agent.get("commands_failed") or 0) + 1
             _persist_agents()
             return {"ok": True, "command": command}
-    raise HTTPException(status_code=404, detail="Command not found")
+
+    # Results for persistent remote-access commands arrive through the same
+    # canonical runtime callback and must complete the SQL command record.
+    try:
+        dispatcher = AgentDispatcher(db)
+        command = dispatcher.mark_completed(
+            uuid.UUID(command_id),
+            {
+                "exit_code": body.exit_code,
+                "stdout": body.stdout,
+                "stderr": body.stderr,
+            },
+        )
+        agent["commands_completed" if body.exit_code == 0 else "commands_failed"] = int(
+            agent.get("commands_completed" if body.exit_code == 0 else "commands_failed") or 0
+        ) + 1
+        _persist_agents()
+        return {"ok": True, "command_id": str(command.id), "status": command.status}
+    except Exception:
+        db.rollback()
+        raise HTTPException(status_code=404, detail="Command not found")
 
 
 @router.websocket("/agents/{agent_id}/stream")
