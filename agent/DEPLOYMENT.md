@@ -1,4 +1,4 @@
-# Bhudi Agent 2.2.8 — Silent install & deployment tools
+# Bhudi Agent 2.2.10 — Silent install & deployment tools
 
 ## Silent EXE
 
@@ -26,7 +26,7 @@ msiexec /i bhudi-agent-setup.msi /qn /norestart SERVERURL=https://YOUR-API
 ## Intune / GPO / PDQ
 
 - Install: `SILENT_UPGRADE.bat https://YOUR-API` or MSI command above
-- Detection: service `BhudiAgent` + `bhudi-agent.exe version` contains `2.2.8`
+- Detection: service `BhudiAgent` + `bhudi-agent.exe version` contains `2.2.10`
 - Context: System
 - Ship `bhudi-support.exe` beside the agent for tray tickets
 
