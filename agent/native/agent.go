@@ -116,7 +116,16 @@ func cycle(client *http.Client, server string, ident *identity) error {
 		return err
 	}
 	for _, c := range cmds {
-		code, out, errOut := runShell(c.Command, c.Shell)
+		result := executeEnterpriseCommand(server, *ident, map[string]any{
+			"command_id":   c.CommandID,
+			"command":      c.Command,
+			"shell":        c.Shell,
+			"command_type": c.CommandType,
+			"payload":      c.Payload,
+		})
+		code, _ := result["exit_code"].(int)
+		out := str(result["stdout"])
+		errOut := str(result["stderr"])
 		_ = postResult(client, server, *ident, c.CommandID, code, out, errOut)
 	}
 	return nil
@@ -145,6 +154,10 @@ func executeEnterpriseCommand(server string, ident identity, cmd map[string]any)
 		return runPatchScan(payload)
 	case "patch_install":
 		return runPatchInstall(payload)
+	case "remote.desktop.start":
+		return startRemoteDesktop(server, ident.AgentID, cmd)
+	case "remote.terminal.start":
+		return startRemoteTerminal(server, ident.AgentID, cmd)
 	default:
 		command := str(cmd["command"])
 		if command == "" {

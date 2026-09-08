@@ -39,7 +39,6 @@ def run_agent(identity_path: Path) -> subprocess.CompletedProcess[str]:
             "BHUDI_HOSTNAME": "bhudi-ci-agent",
             "BHUDI_IDENTITY_PATH": str(identity_path),
             "BHUDI_CONFIG_PATH": str(identity_path.with_name("agent_config.json")),
-            "BHUDI_ENROLL_SECRET": "e2e-test-secret",
         }
     )
     return subprocess.run(

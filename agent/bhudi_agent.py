@@ -90,7 +90,15 @@ def metrics() -> dict:
 
 
 def enroll() -> dict:
-    body = {"hostname": agent_hostname(), "agent_version": "1.2.1-sprint-3", "platform": platform.platform(), "enrollment_secret": os.getenv("BHUDI_ENROLL_SECRET") or "phase-ab-test"}
+    body = {"hostname": agent_hostname(), "agent_version": "1.2.1-sprint-3", "platform": platform.platform()}
+    # Send an enrollment credential only when one was explicitly provisioned.
+    # The runtime API supports compatibility enrollment without a tenant-bound
+    # credential; forcing the legacy fallback secret into every request makes
+    # isolated runtime/E2E deployments incorrectly enter the durable tenant
+    # enrollment path and fail when no tenant schema is present.
+    enrollment_secret = os.getenv("BHUDI_ENROLL_SECRET")
+    if enrollment_secret:
+        body["enrollment_secret"] = enrollment_secret
     r = requests.post(api("/runtime/enroll"), json=body, timeout=15)
     r.raise_for_status()
     data = r.json()
