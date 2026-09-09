@@ -80,46 +80,56 @@ def _ensure_table(conn) -> None:
     global _TABLE_READY
     if _TABLE_READY:
         return
+    from sqlalchemy import text
+
     conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS device_metrics (
-            id UUID PRIMARY KEY,
-            device_id UUID NULL,
-            cpu_usage NUMERIC NULL,
-            ram_usage NUMERIC NULL,
-            disk_usage NUMERIC NULL,
-            recorded_at TIMESTAMPTZ DEFAULT now(),
-            tenant_id UUID NULL
+        text(
+            """
+            CREATE TABLE IF NOT EXISTS device_metrics (
+                id UUID PRIMARY KEY,
+                device_id UUID NULL,
+                cpu_usage NUMERIC NULL,
+                ram_usage NUMERIC NULL,
+                disk_usage NUMERIC NULL,
+                recorded_at TIMESTAMPTZ DEFAULT now(),
+                tenant_id UUID NULL
+            )
+            """
         )
-        """
     )
     conn.execute(
-        """
-        CREATE INDEX IF NOT EXISTS idx_device_metrics_device_recorded
-        ON device_metrics (device_id, recorded_at DESC)
-        """
-    )
-    conn.execute(
-        """
-        CREATE INDEX IF NOT EXISTS idx_device_metrics_recorded_brin
-        ON device_metrics USING BRIN (recorded_at)
-        """
-    )
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS devices (
-            id UUID PRIMARY KEY,
-            hostname TEXT NULL,
-            ip TEXT NULL,
-            status TEXT NULL,
-            cpu INTEGER NULL,
-            ram INTEGER NULL,
-            disk INTEGER NULL,
-            last_seen TIMESTAMPTZ NULL,
-            agent_version TEXT NULL,
-            created_at TIMESTAMPTZ DEFAULT now()
+        text(
+            """
+            CREATE INDEX IF NOT EXISTS idx_device_metrics_device_recorded
+            ON device_metrics (device_id, recorded_at DESC)
+            """
         )
-        """
+    )
+    conn.execute(
+        text(
+            """
+            CREATE INDEX IF NOT EXISTS idx_device_metrics_recorded_brin
+            ON device_metrics USING BRIN (recorded_at)
+            """
+        )
+    )
+    conn.execute(
+        text(
+            """
+            CREATE TABLE IF NOT EXISTS devices (
+                id UUID PRIMARY KEY,
+                hostname TEXT NULL,
+                ip TEXT NULL,
+                status TEXT NULL,
+                cpu INTEGER NULL,
+                ram INTEGER NULL,
+                disk INTEGER NULL,
+                last_seen TIMESTAMPTZ NULL,
+                agent_version TEXT NULL,
+                created_at TIMESTAMPTZ DEFAULT now()
+            )
+            """
+        )
     )
     _TABLE_READY = True
 
