@@ -84,7 +84,7 @@ func startSupportInActiveSession(dest string) (uint32, error) {
 	sid, err := activeInteractiveSessionID(); if err != nil { return 0, err }; var token windows.Token; if err := windows.WTSQueryUserToken(sid, &token); err != nil { return 0, fmt.Errorf("query user token for session %d: %w", sid, err) }; defer token.Close()
 	exe, err := windows.UTF16PtrFromString(dest); if err != nil { return 0, err }; cmdline, err := windows.UTF16PtrFromString(fmt.Sprintf("\"%s\"", dest)); if err != nil { return 0, err }
 	var si windows.StartupInfo; si.Cb = uint32(unsafe.Sizeof(si)); si.Desktop, _ = windows.UTF16PtrFromString("winsta0\\default"); var pi windows.ProcessInformation
-	if err := windows.CreateProcessAsUser(token, exe, cmdline, nil, nil, false, windows.CREATE_UNICODE_ENVIRONMENT|windows.CREATE_NEW_PROCESS_GROUP, nil, "", &si, &pi); err != nil { return 0, fmt.Errorf("CreateProcessAsUser session %d: %w", sid, err) }; defer windows.CloseHandle(pi.Thread); defer windows.CloseHandle(pi.Process); return pi.ProcessId, nil
+	if err := windows.CreateProcessAsUser(token, exe, cmdline, nil, nil, false, windows.CREATE_UNICODE_ENVIRONMENT|windows.CREATE_NEW_PROCESS_GROUP, nil, nil, &si, &pi); err != nil { return 0, fmt.Errorf("CreateProcessAsUser session %d: %w", sid, err) }; defer windows.CloseHandle(pi.Thread); defer windows.CloseHandle(pi.Process); return pi.ProcessId, nil
 }
 
 func startSupportIfPresent(destDir string) error {
