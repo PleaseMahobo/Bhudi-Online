@@ -1,0 +1,1 @@
+web: python -u -m uvicorn app.main:app --host 0.0.0.0 --port $PORT --log-level debug --ws websockets --ws-max-size ${WS_MAX_SIZE:-1048576} --ws-max-queue ${WS_MAX_QUEUE:-16} --ws-ping-interval ${WS_PING_INTERVAL:-20} --ws-ping-timeout ${WS_PING_TIMEOUT:-20} --ws-per-message-deflate ${WS_PER_MESSAGE_DEFLATE:-true}
