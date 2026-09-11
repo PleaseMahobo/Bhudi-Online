@@ -9,6 +9,7 @@ from decimal import Decimal
 from typing import Any
 
 _lock = threading.Lock()
+_SCHEMA_LOCK = threading.Lock()
 _MEMORY: dict[str, deque[dict[str, Any]]] = defaultdict(lambda: deque(maxlen=720))
 _TABLE_READY = False
 
@@ -28,9 +29,7 @@ def record_heartbeat_metrics(
     status: str | None = None,
 ) -> None:
     """Record one sample. Always writes memory; best-effort DB + Prometheus."""
-    if not agent_id:
-        return
-    if cpu_percent is None and memory_percent is None and disk_percent is None:
+    if not agent_id or (cpu_percent is None and memory_percent is None and disk_percent is None):
         return
 
     ts = _utcnow()
@@ -77,61 +76,68 @@ def record_heartbeat_metrics(
 
 
 def _ensure_table(conn) -> None:
+    """Initialize legacy metrics tables once, serializing concurrent heartbeats."""
     global _TABLE_READY
     if _TABLE_READY:
         return
+
     from sqlalchemy import text
 
-    conn.execute(
-        text(
-            """
-            CREATE TABLE IF NOT EXISTS device_metrics (
-                id UUID PRIMARY KEY,
-                device_id UUID NULL,
-                cpu_usage NUMERIC NULL,
-                ram_usage NUMERIC NULL,
-                disk_usage NUMERIC NULL,
-                recorded_at TIMESTAMPTZ DEFAULT now(),
-                tenant_id UUID NULL
+    with _SCHEMA_LOCK:
+        if _TABLE_READY:
+            return
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS device_metrics (
+                    id UUID PRIMARY KEY,
+                    device_id UUID NULL,
+                    cpu_usage NUMERIC NULL,
+                    ram_usage NUMERIC NULL,
+                    disk_usage NUMERIC NULL,
+                    recorded_at TIMESTAMPTZ DEFAULT now(),
+                    tenant_id UUID NULL
+                )
+                """
             )
-            """
         )
-    )
-    conn.execute(
-        text(
-            """
-            CREATE INDEX IF NOT EXISTS idx_device_metrics_device_recorded
-            ON device_metrics (device_id, recorded_at DESC)
-            """
-        )
-    )
-    conn.execute(
-        text(
-            """
-            CREATE INDEX IF NOT EXISTS idx_device_metrics_recorded_brin
-            ON device_metrics USING BRIN (recorded_at)
-            """
-        )
-    )
-    conn.execute(
-        text(
-            """
-            CREATE TABLE IF NOT EXISTS devices (
-                id UUID PRIMARY KEY,
-                hostname TEXT NULL,
-                ip TEXT NULL,
-                status TEXT NULL,
-                cpu INTEGER NULL,
-                ram INTEGER NULL,
-                disk INTEGER NULL,
-                last_seen TIMESTAMPTZ NULL,
-                agent_version TEXT NULL,
-                created_at TIMESTAMPTZ DEFAULT now()
+        conn.execute(
+            text(
+                """
+                CREATE INDEX IF NOT EXISTS idx_device_metrics_device_recorded
+                ON device_metrics (device_id, recorded_at DESC)
+                """
             )
-            """
         )
-    )
-    _TABLE_READY = True
+        conn.execute(
+            text(
+                """
+                CREATE INDEX IF NOT EXISTS idx_device_metrics_recorded_brin
+                ON device_metrics USING BRIN (recorded_at)
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS devices (
+                    id UUID PRIMARY KEY,
+                    hostname TEXT NULL,
+                    ip TEXT NULL,
+                    status TEXT NULL,
+                    cpu INTEGER NULL,
+                    ram INTEGER NULL,
+                    disk INTEGER NULL,
+                    last_seen TIMESTAMPTZ NULL,
+                    agent_version TEXT NULL,
+                    created_at TIMESTAMPTZ DEFAULT now()
+                )
+                """
+            )
+        )
+        # Release DDL locks before another heartbeat can begin its DML transaction.
+        conn.commit()
+        _TABLE_READY = True
 
 
 def _persist_db(
@@ -146,7 +152,6 @@ def _persist_db(
     recorded_at: datetime,
 ) -> None:
     from sqlalchemy import text
-
     from app.database.session import SessionLocal
 
     if SessionLocal is None:
@@ -219,7 +224,6 @@ def get_metrics(
     minutes = max(5, min(int(minutes or 60), 60 * 24 * 7))
     limit = max(10, min(int(limit or 500), 5000))
     cutoff = _utcnow() - timedelta(minutes=minutes)
-
     rows: list[dict[str, Any]] = []
 
     with _lock:
@@ -240,7 +244,6 @@ def get_metrics(
 
     try:
         from sqlalchemy import text
-
         from app.database.session import SessionLocal
 
         if SessionLocal is not None:
@@ -287,9 +290,7 @@ def get_metrics(
         if key:
             by_ts[key] = r
     ordered = [by_ts[k] for k in sorted(by_ts.keys())]
-    if len(ordered) > limit:
-        ordered = ordered[-limit:]
-    return ordered
+    return ordered[-limit:] if len(ordered) > limit else ordered
 
 
 def latest_for_agents(agent_ids: list[str] | None = None) -> dict[str, dict[str, Any]]:
