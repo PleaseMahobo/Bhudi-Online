@@ -25,6 +25,8 @@ var (
 	wtsapi32                         = syscall.NewLazyDLL("wtsapi32.dll")
 	procWTSGetActiveConsoleSessionId = kernel32.NewProc("WTSGetActiveConsoleSessionId")
 	procWTSQueryUserToken            = wtsapi32.NewProc("WTSQueryUserToken")
+	procGetCurrentProcessId         = kernel32.NewProc("GetCurrentProcessId")
+	procProcessIdToSessionId        = kernel32.NewProc("ProcessIdToSessionId")
 
 	desktopMu      sync.Mutex
 	attachedDesk   uintptr
@@ -32,6 +34,8 @@ var (
 	desktopReady   bool
 	desktopLastErr string
 	desktopKind    string
+	desktopWinstaErr string
+	desktopCandidateErr string
 	dpiAwareOnce   sync.Once
 )
 
@@ -102,6 +106,7 @@ func ensureInteractiveDesktop() error {
 	if sid == 0xFFFFFFFF {
 		desktopReady = false
 		desktopLastErr = "no active console session (WTSGetActiveConsoleSessionId=0xFFFFFFFF)"
+		desktopCandidateErr = ""
 		return fmt.Errorf("%s", desktopLastErr)
 	}
 
@@ -116,15 +121,18 @@ func ensureInteractiveDesktop() error {
 	if hwinsta != 0 {
 		ok, _, errSet := procSetProcessWindowStation.Call(hwinsta)
 		if ok == 0 {
-			desktopLastErr = fmt.Sprintf("SetProcessWindowStation(WinSta0) failed: %v", errSet)
+			desktopWinstaErr = fmt.Sprintf("SetProcessWindowStation(WinSta0) failed: %v", errSet)
+			desktopLastErr = desktopWinstaErr
 		} else {
+			desktopWinstaErr = ""
 			if attachedWinsta != 0 && attachedWinsta != hwinsta {
 				procCloseWindowStation.Call(attachedWinsta)
 			}
 			attachedWinsta = hwinsta
 		}
 	} else {
-		desktopLastErr = fmt.Sprintf("OpenWindowStation(WinSta0) failed: %v", errW)
+		desktopWinstaErr = fmt.Sprintf("OpenWindowStation(WinSta0) failed: %v", errW)
+		desktopLastErr = desktopWinstaErr
 	}
 
 	access := uintptr(
@@ -157,16 +165,19 @@ func ensureInteractiveDesktop() error {
 	}
 
 	var lastOpenErr error
+	desktopCandidateErr = ""
 	for _, c := range candidates {
 		h, errOpen := c.open()
 		if h == 0 {
 			lastOpenErr = errOpen
+			desktopCandidateErr = fmt.Sprintf("%s open: %v", c.kind, errOpen)
 			continue
 		}
 		ok, _, errSet := procSetThreadDesktop.Call(h)
 		if ok == 0 {
 			procCloseDesktop.Call(h)
 			lastOpenErr = errSet
+			desktopCandidateErr = fmt.Sprintf("%s SetThreadDesktop: %v", c.kind, errSet)
 			continue
 		}
 		if attachedDesk != 0 && attachedDesk != h {
@@ -176,6 +187,7 @@ func ensureInteractiveDesktop() error {
 		desktopReady = true
 		desktopKind = c.kind
 		desktopLastErr = ""
+		desktopCandidateErr = ""
 		return nil
 	}
 
@@ -185,7 +197,36 @@ func ensureInteractiveDesktop() error {
 		hint = "no interactive user — attempted Winlogon (login screen); open failed"
 	}
 	desktopLastErr = fmt.Sprintf("desktop attach failed: %v (%s, console_session=%d)", lastOpenErr, hint, sid)
+	if desktopCandidateErr == "" { desktopCandidateErr = desktopLastErr }
 	return fmt.Errorf("%s", desktopLastErr)
+}
+
+func processSessionID() uint32 {
+	pid, _, _ := procGetCurrentProcessId.Call()
+	var sid uint32
+	ok, _, _ := procProcessIdToSessionId.Call(pid, uintptr(unsafe.Pointer(&sid)))
+	if ok == 0 { return 0xFFFFFFFF }
+	return sid
+}
+
+// desktopDiagnostics returns a structured troubleshooting snapshot without
+// exposing screen content or credentials.
+func desktopDiagnostics() map[string]any {
+	desktopMu.Lock()
+	defer desktopMu.Unlock()
+	consoleSID := activeConsoleSessionID()
+	return map[string]any{
+		"process_session": processSessionID(),
+		"console_session": consoleSID,
+		"console_has_user": consoleHasUser(),
+		"desktop_ready": desktopReady,
+		"desktop_kind": desktopKind,
+		"attached_winsta": attachedWinsta != 0,
+		"attached_desktop": attachedDesk != 0,
+		"winsta_error": desktopWinstaErr,
+		"candidate_error": desktopCandidateErr,
+		"last_error": desktopLastErr,
+	}
 }
 
 func desktopStatusNote() string {

@@ -86,16 +86,25 @@ func runDesktopSession(wsURL, sessionID, sessionMode, displayProtocol string, mo
 	}
 	fmt.Println("[remote-desktop] attached:", string(msg)[:min(120, len(msg))])
 	_ = conn.SetReadDeadline(time.Time{})
+	_ = writeJSON(conn, map[string]any{
+		"type": "status", "session_id": sessionID, "status": "session_capture_diagnostics",
+		"message": "Inspecting Windows interactive desktop", "diagnostics": desktopDiagnostics(),
+	})
 
 	if err := ensureInteractiveDesktop(); err != nil {
 		_ = writeJSON(conn, map[string]any{
 			"type": "error", "session_id": sessionID,
 			"message": "screen capture unavailable: " + err.Error() + " (" + desktopStatusNote() + "). Log a user onto the console of this PC, then reconnect.",
+			"diagnostics": desktopDiagnostics(),
 		})
 		fmt.Println("[remote-desktop] interactive desktop:", err, desktopStatusNote())
 		return
 	}
 	fmt.Println("[remote-desktop] desktop status:", desktopStatusNote())
+	_ = writeJSON(conn, map[string]any{
+		"type": "status", "session_id": sessionID, "status": "session_capture_ready",
+		"message": "Windows interactive desktop attached", "diagnostics": desktopDiagnostics(),
+	})
 
 	ox, oy, fw, fh, err := monitorRect(monitorIndex)
 	if err != nil {
@@ -217,6 +226,7 @@ func runDesktopSession(wsURL, sessionID, sessionMode, displayProtocol string, mo
 				failStreak++
 				if failStreak == 1 || failStreak%25 == 0 {
 					fmt.Println("[remote-desktop] desktop attach:", err, desktopStatusNote())
+					_ = writeJSON(conn, map[string]any{"type": "status", "session_id": sessionID, "status": "session_capture_attach_failed", "message": err.Error(), "diagnostics": desktopDiagnostics()})
 				}
 				continue
 			}
@@ -225,6 +235,7 @@ func runDesktopSession(wsURL, sessionID, sessionMode, displayProtocol string, mo
 				failStreak++
 				if failStreak == 1 || failStreak%25 == 0 {
 					fmt.Println("[remote-desktop] capture:", err, desktopStatusNote())
+					_ = writeJSON(conn, map[string]any{"type": "status", "session_id": sessionID, "status": "session_capture_frame_failed", "message": err.Error(), "diagnostics": desktopDiagnostics()})
 				}
 				continue
 			}
