@@ -135,8 +135,8 @@ def _ensure_table(conn) -> None:
                 """
             )
         )
-        # Release DDL locks before another heartbeat can begin its DML transaction.
-        conn.commit()
+        # Keep DDL in the caller's Session transaction. The outer session.commit()
+        # must commit both schema initialization and the metrics writes atomically.
         _TABLE_READY = True
 
 
