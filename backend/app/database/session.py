@@ -12,7 +12,7 @@ from app.core.config import settings
 
 
 def normalize_database_url(url: str) -> str:
-    """Railway often provides postgres://; SQLAlchemy needs postgresql://."""
+    """Normalize PostgreSQL URLs and repair shared Supabase pooler tenant routing."""
     url = (url or "").strip()
     if not url:
         return url
@@ -20,6 +20,24 @@ def normalize_database_url(url: str) -> str:
         url = "postgresql://" + url[len("postgres://") :]
     if url.startswith("postgresql://") and "+psycopg" not in url and "+psycopg2" not in url:
         url = "postgresql+psycopg://" + url[len("postgresql://") :]
+
+    # Supabase shared poolers require the project ref in the username
+    # (postgres.<project-ref>). Railway may contain a copied connection string
+    # with the plain "postgres" username, which Supavisor rejects with
+    # ENOIDENTIFIER before password authentication is attempted.
+    project_ref = os.getenv("SUPABASE_PROJECT_REF", "").strip()
+    if project_ref and ".pooler.supabase.com" in url:
+        try:
+            scheme, rest = url.split("://", 1)
+            credentials, hostpart = rest.split("@", 1)
+            username, password = credentials.split(":", 1)
+            if username == "postgres":
+                url = f"{scheme}://postgres.{project_ref}:{password}@{hostpart}"
+        except ValueError:
+            # Leave malformed URLs untouched so the normal connection error
+            # reports the actual configuration problem.
+            pass
+
     return url
 
 
