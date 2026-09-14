@@ -16,6 +16,25 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+type desktopInputTiming struct {
+	mu                 sync.RWMutex
+	lastEventID        string
+	lastWindowsInputAt int64
+}
+
+func (t *desktopInputTiming) set(eventID string, windowsInputAt int64) {
+	t.mu.Lock()
+	t.lastEventID = eventID
+	t.lastWindowsInputAt = windowsInputAt
+	t.mu.Unlock()
+}
+
+func (t *desktopInputTiming) get() (string, int64) {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.lastEventID, t.lastWindowsInputAt
+}
+
 func startRemoteDesktop(serverURL, agentID string, command map[string]any) map[string]any {
 	payload, _ := command["payload"].(map[string]any)
 	if payload == nil {
@@ -154,9 +173,10 @@ func runDesktopSession(wsURL, sessionID, sessionMode, displayProtocol string, mo
 	closeStop := func() { once.Do(func() { close(stop) }) }
 
 	nativeW, nativeH := fw, fh
+	inputTiming := &desktopInputTiming{}
 
 	if sessionMode == "control" {
-		go runDesktopInputChannel(inputWSURL(wsURL, inputToken), sessionID, inputToken, nativeW, nativeH, ox, oy, closeStop)
+		go runDesktopInputChannel(inputWSURL(wsURL, inputToken), sessionID, inputToken, nativeW, nativeH, ox, oy, inputTiming, closeStop)
 	}
 
 	go func() {
@@ -184,8 +204,6 @@ func runDesktopSession(wsURL, sessionID, sessionMode, displayProtocol string, mo
 	defer ticker.Stop()
 	seq := 0
 	failStreak := 0
-	var lastInputEventID string
-	var lastWindowsInputAtMs int64
 	for {
 		select {
 		case <-stop:
@@ -215,16 +233,16 @@ func runDesktopSession(wsURL, sessionID, sessionMode, displayProtocol string, mo
 				"frame_sent_at_ms": time.Now().UnixMilli(),
 				"data": base64.StdEncoding.EncodeToString(buf.Bytes()),
 			}
-			if lastInputEventID != "" {
-				frame["input_event_id"] = lastInputEventID
-				frame["windows_input_at_ms"] = lastWindowsInputAtMs
+			if eventID, windowsInputAt := inputTiming.get(); eventID != "" {
+				frame["input_event_id"] = eventID
+				frame["windows_input_at_ms"] = windowsInputAt
 			}
 			_ = writeJSON(conn, frame)
 		}
 	}
 }
 
-func runDesktopInputChannel(wsURL, sessionID, inputToken string, frameW, frameH, originX, originY int, closeSession func()) {
+func runDesktopInputChannel(wsURL, sessionID, inputToken string, frameW, frameH, originX, originY int, timing *desktopInputTiming, closeSession func()) {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 
@@ -290,6 +308,7 @@ func runDesktopInputChannel(wsURL, sessionID, inputToken string, frameW, frameH,
 		ev["_oy"] = float64(originY)
 		applyDesktopInputAt(ev, frameW, frameH, originX, originY)
 		windowsInputAt := time.Now().UnixMilli()
+		timing.set(eventID, windowsInputAt)
 		ack := map[string]any{
 			"type": "input_ack",
 			"session_id": sessionID,
