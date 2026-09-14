@@ -7,7 +7,8 @@ Loop:
   3. Poll pending enterprise commands
   4. Poll pending runtime commands
   5. Poll pending software deployments
-  6. Execute and post results
+  6. Periodic endpoint-security scan + report
+  7. Execute and post results
 """
 from __future__ import annotations
 
@@ -25,11 +26,13 @@ try:
     from .executor import execute_command_record
     from .streaming_session import streaming_session_coordinator
     from .software_deploy import execute_deployment
+    from .endpoint_security import scan_endpoint_security, to_ingest_payloads
 except ImportError:
     from command_framework import execute_named
     from executor import execute_command_record
     from streaming_session import streaming_session_coordinator
     from software_deploy import execute_deployment
+    from endpoint_security import scan_endpoint_security, to_ingest_payloads
 
 try:
     import psutil
@@ -46,6 +49,10 @@ DEFAULT_CONFIG_PATH = Path(__file__).with_name("agent_config.json")
 DEFAULT_IDENTITY_PATH = Path(__file__).with_name("agent_identity.json")
 CONFIG_PATH = Path(os.getenv("BHUDI_CONFIG_PATH") or DEFAULT_CONFIG_PATH)
 IDENTITY_PATH = Path(os.getenv("BHUDI_IDENTITY_PATH") or DEFAULT_IDENTITY_PATH)
+
+# Run endpoint-security scan every N heartbeat cycles (default ~60s if interval=10)
+SECURITY_SCAN_EVERY = max(1, int(os.getenv("BHUDI_SECURITY_SCAN_EVERY", "6")))
+_security_cycle = 0
 
 
 def load_json(path: Path) -> dict:
@@ -90,12 +97,7 @@ def metrics() -> dict:
 
 
 def enroll() -> dict:
-    body = {"hostname": agent_hostname(), "agent_version": "1.2.1-sprint-3", "platform": platform.platform()}
-    # Send an enrollment credential only when one was explicitly provisioned.
-    # The runtime API supports compatibility enrollment without a tenant-bound
-    # credential; forcing the legacy fallback secret into every request makes
-    # isolated runtime/E2E deployments incorrectly enter the durable tenant
-    # enrollment path and fail when no tenant schema is present.
+    body = {"hostname": agent_hostname(), "agent_version": "1.3.0-endpoint-security", "platform": platform.platform()}
     enrollment_secret = os.getenv("BHUDI_ENROLL_SECRET")
     if enrollment_secret:
         body["enrollment_secret"] = enrollment_secret
@@ -231,13 +233,65 @@ def process_deployments(ident: dict) -> None:
             print(f"[deploy] final report failed: {e}")
 
 
+def report_endpoint_security() -> None:
+    """Scan local security products and POST each result to the ingest API."""
+    try:
+        scan = scan_endpoint_security()
+    except Exception as exc:
+        print(f"[endpoint-security] scan failed: {exc}")
+        return
+
+    device_id = os.getenv("BHUDI_DEVICE_ID") or None
+    payloads = to_ingest_payloads(scan, device_id=device_id)
+    reported = 0
+    for payload in payloads:
+        # Drop device_id if not a valid UUID string to avoid 422
+        if payload.get("device_id") and len(str(payload["device_id"])) < 32:
+            payload["device_id"] = None
+        try:
+            r = requests.post(api("/endpoint-security/ingest/agent"), json=payload, timeout=20)
+            if r.status_code in (200, 201):
+                reported += 1
+            else:
+                print(f"[endpoint-security] ingest {payload.get('provider_key')}: HTTP {r.status_code} {r.text[:200]}")
+        except Exception as exc:
+            print(f"[endpoint-security] ingest error {payload.get('provider_key')}: {exc}")
+
+    summary = scan.get("summary") or {}
+    print(
+        f"[endpoint-security] scanned products={len(payloads)} "
+        f"installed={summary.get('total_detected', 0)} "
+        f"healthy={summary.get('healthy', 0)} reported={reported}"
+    )
+
+
 def execute_enterprise_command(command: dict) -> dict:
     command_type = str(command.get("command_type") or "")
     payload = command.get("payload") or {}
-    if command_type in {"inventory", "processes", "services", "software", "windows_updates", "event_logs", "network", "disks", "printers", "remote_script", "remote_powershell"}:
+    if command_type in {
+        "inventory",
+        "processes",
+        "services",
+        "software",
+        "windows_updates",
+        "event_logs",
+        "network",
+        "disks",
+        "printers",
+        "remote_script",
+        "remote_powershell",
+        "endpoint_security",
+        "endpoint-security",
+        "security_scan",
+        "av_scan",
+    }:
         return execute_named(command_type, payload)
     if is_interactive_remote_session(command):
-        return streaming_session_coordinator.start(server_url=server_url(), agent_id=enterprise_agent_id(_CURRENT_IDENTITY), command=command)
+        return streaming_session_coordinator.start(
+            server_url=server_url(),
+            agent_id=enterprise_agent_id(_CURRENT_IDENTITY),
+            command=command,
+        )
     return execute_command_record(command)
 
 
@@ -245,7 +299,7 @@ _CURRENT_IDENTITY: dict = {}
 
 
 def run_once(ident: dict) -> None:
-    global _CURRENT_IDENTITY
+    global _CURRENT_IDENTITY, _security_cycle
     _CURRENT_IDENTITY = ident
     hb = send_heartbeat(ident)
     print(f"[heartbeat] ok pending={hb.get('pending_commands', 0)}")
@@ -277,12 +331,26 @@ def run_once(ident: dict) -> None:
     except Exception as exc:
         print(f"[deploy] cycle failed: {exc}")
 
+    # Periodic endpoint-security detection + report
+    _security_cycle += 1
+    if _security_cycle >= SECURITY_SCAN_EVERY:
+        _security_cycle = 0
+        try:
+            report_endpoint_security()
+        except Exception as exc:
+            print(f"[endpoint-security] cycle failed: {exc}")
+
 
 def main() -> None:
     print(f"[bhudi-agent] server={server_url()}")
     ident = load_identity()
     print(f"[bhudi-agent] agent_id={ident['agent_id']} host={agent_hostname()}")
     interval = int(os.getenv("BHUDI_HEARTBEAT_INTERVAL", "10"))
+    # Run an initial security scan shortly after start
+    try:
+        report_endpoint_security()
+    except Exception as exc:
+        print(f"[endpoint-security] initial scan failed: {exc}")
     while True:
         try:
             run_once(ident)

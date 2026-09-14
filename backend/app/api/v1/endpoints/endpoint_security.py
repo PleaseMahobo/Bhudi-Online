@@ -48,7 +48,7 @@ def _finding_response(row) -> SecurityFindingResponse:
 
 @router.get("/catalog")
 def list_catalog():
-    """Supported security products for Phase 12."""
+    """Supported security products."""
     return PROVIDER_CATALOG
 
 
@@ -273,3 +273,112 @@ def recompute_device_score(device_id: UUID, db: Session = Depends(get_db)):
 def recompute_all_scores(db: Session = Depends(get_db)):
     count = EndpointSecurityService(db).recompute_all_scores()
     return {"devices_scored": count}
+
+
+# ---------- Fleet matrix ----------
+
+@router.get("/matrix")
+def security_matrix(
+    device_id: UUID | None = None,
+    hostname: str | None = None,
+    db: Session = Depends(get_db),
+):
+    """
+    Fleet endpoint-security matrix.
+
+    Returns one row per device × product with the fields needed for the UI:
+    product name, installed, version, status, real-time protection,
+    definitions up-to-date, last scan, last seen, and open threat counts.
+    """
+    svc = EndpointSecurityService(db)
+
+    # Ensure catalog providers exist so matrix columns are stable
+    svc.seed_default_providers()
+
+    agents = svc.list_agents(device_id=device_id)
+    if hostname:
+        agents = [a for a in agents if (a.hostname or "").lower() == hostname.lower()]
+
+    findings = svc.list_findings(
+        device_id=device_id,
+        status=None,  # filter client-side for open-ish
+    )
+    open_statuses = {"open", "investigating", "contained"}
+
+    # Group findings by (device_id or hostname) + provider_id
+    threat_map: dict[tuple, dict[str, int]] = {}
+    for f in findings:
+        if f.status not in open_statuses:
+            continue
+        key = (str(f.device_id) if f.device_id else None, (f.hostname or "").lower(), str(f.provider_id))
+        bucket = threat_map.setdefault(key, {"critical": 0, "high": 0, "medium": 0, "low": 0, "total": 0})
+        sev = (f.severity or "medium").lower()
+        if sev in bucket:
+            bucket[sev] += 1
+        bucket["total"] += 1
+
+    rows = []
+    for a in agents:
+        key = (
+            str(a.device_id) if a.device_id else None,
+            (a.hostname or "").lower(),
+            str(a.provider_id),
+        )
+        threats = threat_map.get(key, {"critical": 0, "high": 0, "medium": 0, "low": 0, "total": 0})
+
+        # Map internal status → matrix-friendly label
+        status = a.status or "unknown"
+        if status == "healthy":
+            matrix_status = "protected"
+        elif status == "degraded":
+            matrix_status = "at_risk"
+        elif status == "offline":
+            matrix_status = "at_risk"
+        elif status == "not_installed":
+            matrix_status = "not_installed"
+        else:
+            matrix_status = status
+
+        # Outdated if definitions known stale
+        if a.definitions_up_to_date is False and matrix_status == "protected":
+            matrix_status = "outdated"
+
+        rows.append(
+            {
+                "device_id": str(a.device_id) if a.device_id else None,
+                "hostname": a.hostname,
+                "provider_key": a.provider.provider_key if a.provider else None,
+                "product_name": a.provider.display_name if a.provider else None,
+                "installed": status != "not_installed",
+                "version": a.agent_version,
+                "status": matrix_status,
+                "raw_status": status,
+                "real_time_protection": a.real_time_protection,
+                "definitions_up_to_date": a.definitions_up_to_date,
+                "last_scan_at": a.last_scan_at.isoformat() if a.last_scan_at else None,
+                "last_seen_at": a.last_seen_at.isoformat() if a.last_seen_at else None,
+                "threats_found": threats["total"],
+                "threats_critical": threats["critical"],
+                "threats_high": threats["high"],
+                "external_agent_id": a.external_agent_id,
+                "updated_at": a.updated_at.isoformat() if a.updated_at else None,
+            }
+        )
+
+    # Stable sort: hostname then product priority
+    priority = {p["provider_key"]: i for i, p in enumerate(PROVIDER_CATALOG)}
+    rows.sort(
+        key=lambda r: (
+            (r.get("hostname") or "").lower(),
+            priority.get(r.get("provider_key") or "", 99),
+        )
+    )
+
+    return {
+        "generated_at": __import__("datetime").datetime.now(
+            __import__("datetime").timezone.utc
+        ).isoformat(),
+        "total_rows": len(rows),
+        "products": PROVIDER_CATALOG,
+        "rows": rows,
+    }
