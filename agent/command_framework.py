@@ -10,8 +10,10 @@ from typing import Any
 
 try:
     from .inventory import event_logs, inventory, network, printers, processes, services, software, updates
+    from .endpoint_security import scan_endpoint_security
 except ImportError:
     from inventory import event_logs, inventory, network, printers, processes, services, software, updates
+    from endpoint_security import scan_endpoint_security
 
 
 def _result(exit_code: int, stdout: str = "", stderr: str = "", **metadata: Any) -> dict[str, Any]:
@@ -48,6 +50,8 @@ def execute_named(command_type: str, payload: dict[str, Any] | None = None) -> d
     if name == "network": return _json_result(network())
     if name == "disks": return _json_result(inventory().get("disks", []))
     if name == "printers": return _json_result(printers())
+    if name in {"endpoint_security", "endpoint-security", "security_scan", "av_scan"}:
+        return _json_result(scan_endpoint_security())
 
     if name == "remote_powershell":
         command = str(payload.get("command") or "").strip()
