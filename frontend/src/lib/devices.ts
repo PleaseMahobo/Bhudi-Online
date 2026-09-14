@@ -2,14 +2,77 @@
 
 const API_BASE = '';
 
-async function api<T>(path: string, init?: RequestInit): Promise<T> {
+/** Single in-flight refresh so parallel 401s share one /api/auth/refresh call. */
+let refreshPromise: Promise<void> | null = null;
+
+async function refreshSessionOnce(): Promise<void> {
+  if (!refreshPromise) {
+    refreshPromise = fetch(`${API_BASE}/api/auth/refresh`, {
+      method: 'POST',
+      headers: { Accept: 'application/json' },
+      credentials: 'include',
+      cache: 'no-store',
+    })
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error(`Session refresh failed (${response.status})`);
+        }
+        await response.json().catch(() => undefined);
+      })
+      .finally(() => {
+        refreshPromise = null;
+      });
+  }
+  await refreshPromise;
+}
+
+function redirectToLogin(): void {
+  if (typeof window === 'undefined') return;
+  const next = `${window.location.pathname}${window.location.search || ''}`;
+  const target = `/login?next=${encodeURIComponent(next || '/devices')}`;
+  if (!window.location.pathname.startsWith('/login')) {
+    window.location.assign(target);
+  }
+}
+
+async function api<T>(path: string, init?: RequestInit, allowRefresh = true): Promise<T> {
   const headers = new Headers(init?.headers);
   if (!headers.has('Content-Type') && init?.body) headers.set('Content-Type', 'application/json');
   headers.set('Accept', 'application/json');
-  const response = await fetch(API_BASE + path, { ...init, headers, credentials: 'include', cache: 'no-store' });
+  const response = await fetch(API_BASE + path, {
+    ...init,
+    headers,
+    credentials: 'include',
+    cache: 'no-store',
+  });
+
+  if (
+    response.status === 401 &&
+    allowRefresh &&
+    path !== '/api/auth/login' &&
+    path !== '/api/auth/refresh' &&
+    path !== '/api/auth/logout'
+  ) {
+    try {
+      await refreshSessionOnce();
+      return api<T>(path, init, false);
+    } catch {
+      redirectToLogin();
+      throw new Error('Authentication credentials missing');
+    }
+  }
+
   if (!response.ok) {
+    if (response.status === 401) {
+      redirectToLogin();
+    }
     let message = response.statusText;
-    try { const body = await response.json(); message = body.detail ?? body.message ?? JSON.stringify(body); } catch {}
+    try {
+      const body = await response.json();
+      message = body.detail ?? body.message ?? JSON.stringify(body);
+    } catch {
+      /* keep statusText */
+    }
     throw new Error(typeof message === 'string' ? message : JSON.stringify(message));
   }
   if (response.status === 204) return undefined as T;

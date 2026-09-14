@@ -3,11 +3,20 @@
 import BhudiLogo from '@/shared/components/BhudiLogo';
 import { useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '@/shared/auth/AuthContext';
+
+function safeNextPath(raw: string | null): string {
+  if (!raw) return '/dashboard';
+  // Only allow same-origin relative paths (block open redirects)
+  if (!raw.startsWith('/') || raw.startsWith('//')) return '/dashboard';
+  if (raw.startsWith('/login') || raw.startsWith('/signup')) return '/dashboard';
+  return raw;
+}
 
 export default function LoginPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const auth = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -26,7 +35,8 @@ export default function LoginPage() {
         setError('Sign in failed. Check your email and password.');
         return;
       }
-      router.replace('/dashboard');
+      const dest = safeNextPath(searchParams.get('next'));
+      router.replace(dest);
     } catch (err: any) {
       const msg = String(err?.message || '').trim();
       if (msg.includes('mfa_required')) {
