@@ -339,8 +339,6 @@ export async function refreshAccessToken() {
 }
 
 export async function getHealth() { return request<HealthResponse>("/api/health"); }
-// Devices are tenant-scoped. Use the same-origin tenant-context proxy so the
-// portal HttpOnly session is converted into an Authorization header for Railway.
 export async function getDevices() {
   return normalizeDevicesPayload(await request<any>("/api/tenant-context/devices"));
 }
@@ -355,13 +353,35 @@ export async function createAlertRule(data: AlertRuleCreate) { return request<Al
 export async function updateAlertRule(id: string, data: Partial<AlertRuleCreate>) { return request<AlertRule>(`/api/v1/alert-engine/rules/${id}`, { method: "PATCH", body: JSON.stringify(data) }); }
 export async function deleteAlertRule(id: string) { return request<void>(`/api/v1/alert-engine/rules/${id}`, { method: "DELETE" }); }
 
-export async function listAssets(params?: { status?: string; device_id?: string; tenant_id?: string }) { const qs = new URLSearchParams(); if (params?.status) qs.set("status", params.status); if (params?.device_id) qs.set("device_id", params.device_id); if (params?.tenant_id) qs.set("tenant_id", params.tenant_id); return request<Asset[]>(`/api/v1/assets${qs.toString() ? `?${qs}` : ""}`); }
+// Assets
+export async function listAssets(params?: { status?: string; device_id?: string; tenant_id?: string }) {
+  const qs = new URLSearchParams();
+  if (params?.status) qs.set("status", params.status);
+  if (params?.device_id) qs.set("device_id", params.device_id);
+  if (params?.tenant_id) qs.set("tenant_id", params.tenant_id);
+  return request<Asset[]>(`/api/v1/assets${qs.toString() ? `?${qs}` : ""}`);
+}
 export async function createAsset(data: AssetCreate) { return request<Asset>(`/api/v1/assets`, { method: "POST", body: JSON.stringify(data) }); }
 export async function updateAsset(id: string, data: Partial<AssetCreate>) { return request<Asset>(`/api/v1/assets/${id}`, { method: "PATCH", body: JSON.stringify(data) }); }
 export async function deleteAsset(id: string) { return request<void>(`/api/v1/assets/${id}`, { method: "DELETE" }); }
 export async function changeAssetStatus(id: string, status: string, reason?: string) { return request<Asset>(`/api/v1/assets/${id}/status`, { method: "POST", body: JSON.stringify({ status, reason: reason || null }) }); }
 export async function getAssetByQr(qrCode: string) { return request<Asset>(`/api/v1/assets/by-qr/${encodeURIComponent(qrCode)}`); }
 export async function ensureAssetQr(id: string) { return request<{ asset_id: string; qr_code: string }>(`/api/v1/assets/${id}/qr`, { method: "POST" }); }
+export async function getAssetWarranty(id: string) { return request<WarrantyInfo>(`/api/v1/assets/${id}/warranty`); }
+export async function getAssetDepreciation(id: string) { return request<DepreciationInfo>(`/api/v1/assets/${id}/depreciation`); }
+export async function listAssetLifecycle(id: string) { return request<LifecycleEvent[]>(`/api/v1/assets/${id}/lifecycle`); }
+export async function listVendors(activeOnly = false) { return request<Vendor[]>(`/api/v1/assets/vendors${activeOnly ? "?active_only=true" : ""}`); }
+export async function createVendor(data: VendorCreate) { return request<Vendor>(`/api/v1/assets/vendors`, { method: "POST", body: JSON.stringify(data) }); }
+export async function updateVendor(id: string, data: Partial<VendorCreate>) { return request<Vendor>(`/api/v1/assets/vendors/${id}`, { method: "PATCH", body: JSON.stringify(data) }); }
+export async function deleteVendor(id: string) { return request<void>(`/api/v1/assets/vendors/${id}`, { method: "DELETE" }); }
+export async function listLicenses() { return request<License[]>(`/api/v1/assets/licenses`); }
+export async function createLicense(data: LicenseCreate) { return request<License>(`/api/v1/assets/licenses`, { method: "POST", body: JSON.stringify(data) }); }
+export async function updateLicense(id: string, data: Partial<LicenseCreate>) { return request<License>(`/api/v1/assets/licenses/${id}`, { method: "PATCH", body: JSON.stringify(data) }); }
+export async function deleteLicense(id: string) { return request<void>(`/api/v1/assets/licenses/${id}`, { method: "DELETE" }); }
+export async function listContracts() { return request<Contract[]>(`/api/v1/assets/contracts`); }
+export async function createContract(data: ContractCreate) { return request<Contract>(`/api/v1/assets/contracts`, { method: "POST", body: JSON.stringify(data) }); }
+export async function updateContract(id: string, data: Partial<ContractCreate>) { return request<Contract>(`/api/v1/assets/contracts/${id}`, { method: "PATCH", body: JSON.stringify(data) }); }
+export async function deleteContract(id: string) { return request<void>(`/api/v1/assets/contracts/${id}`, { method: "DELETE" }); }
 
 // Endpoint Security API
 export async function listSecurityCatalog() { return request<SecurityProviderCatalogItem[]>(`/api/v1/endpoint-security/catalog`); }
@@ -370,11 +390,24 @@ export async function listSecurityProviders(enabledOnly = false) { return reques
 export async function createSecurityProvider(data: SecurityProviderCreate) { return request<SecurityProvider>(`/api/v1/endpoint-security/providers`, { method: "POST", body: JSON.stringify(data) }); }
 export async function updateSecurityProvider(id: string, data: Partial<SecurityProviderCreate> & { last_sync_status?: string | null; last_sync_error?: string | null }) { return request<SecurityProvider>(`/api/v1/endpoint-security/providers/${id}`, { method: "PATCH", body: JSON.stringify(data) }); }
 export async function deleteSecurityProvider(id: string) { return request<void>(`/api/v1/endpoint-security/providers/${id}`, { method: "DELETE" }); }
-export async function listSecurityAgents(params?: { device_id?: string; provider_id?: string; status?: string }) { const qs = new URLSearchParams(); if (params?.device_id) qs.set("device_id", params.device_id); if (params?.provider_id) qs.set("provider_id", params.provider_id); if (params?.status) qs.set("status", params.status); return request<EndpointSecurityAgent[]>(`/api/v1/endpoint-security/agents${qs.toString() ? `?${qs}` : ""}`); }
+export async function listSecurityAgents(params?: { device_id?: string; provider_id?: string; status?: string }) {
+  const qs = new URLSearchParams();
+  if (params?.device_id) qs.set("device_id", params.device_id);
+  if (params?.provider_id) qs.set("provider_id", params.provider_id);
+  if (params?.status) qs.set("status", params.status);
+  return request<EndpointSecurityAgent[]>(`/api/v1/endpoint-security/agents${qs.toString() ? `?${qs}` : ""}`);
+}
 export async function createSecurityAgent(data: EndpointSecurityAgentCreate) { return request<EndpointSecurityAgent>(`/api/v1/endpoint-security/agents`, { method: "POST", body: JSON.stringify(data) }); }
 export async function updateSecurityAgent(id: string, data: Partial<EndpointSecurityAgentCreate>) { return request<EndpointSecurityAgent>(`/api/v1/endpoint-security/agents/${id}`, { method: "PATCH", body: JSON.stringify(data) }); }
 export async function deleteSecurityAgent(id: string) { return request<void>(`/api/v1/endpoint-security/agents/${id}`, { method: "DELETE" }); }
-export async function listSecurityFindings(params?: { device_id?: string; provider_id?: string; status?: string; severity?: string }) { const qs = new URLSearchParams(); if (params?.device_id) qs.set("device_id", params.device_id); if (params?.provider_id) qs.set("provider_id", params.provider_id); if (params?.status) qs.set("status", params.status); if (params?.severity) qs.set("severity", params.severity); return request<SecurityFinding[]>(`/api/v1/endpoint-security/findings${qs.toString() ? `?${qs}` : ""}`); }
+export async function listSecurityFindings(params?: { device_id?: string; provider_id?: string; status?: string; severity?: string }) {
+  const qs = new URLSearchParams();
+  if (params?.device_id) qs.set("device_id", params.device_id);
+  if (params?.provider_id) qs.set("provider_id", params.provider_id);
+  if (params?.status) qs.set("status", params.status);
+  if (params?.severity) qs.set("severity", params.severity);
+  return request<SecurityFinding[]>(`/api/v1/endpoint-security/findings${qs.toString() ? `?${qs}` : ""}`);
+}
 export async function createSecurityFinding(data: SecurityFindingCreate) { return request<SecurityFinding>(`/api/v1/endpoint-security/findings`, { method: "POST", body: JSON.stringify(data) }); }
 export async function updateSecurityFinding(id: string, data: Partial<SecurityFindingCreate> & { resolved_at?: string | null }) { return request<SecurityFinding>(`/api/v1/endpoint-security/findings/${id}`, { method: "PATCH", body: JSON.stringify(data) }); }
 export async function deleteSecurityFinding(id: string) { return request<void>(`/api/v1/endpoint-security/findings/${id}`, { method: "DELETE" }); }
