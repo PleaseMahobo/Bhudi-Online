@@ -169,14 +169,154 @@ export interface DeploymentEvent { id: string; job_id: string; target_id?: strin
 // =========================================================
 
 export interface SecurityProviderCatalogItem { provider_key: string; display_name: string; }
-export interface SecurityProvider { id: string; tenant_id?: string | null; provider_key: string; display_name: string; enabled: boolean; config?: Record<string, any> | null; last_sync_at?: string | null; last_sync_status?: string | null; last_sync_error?: string | null; notes?: string | null; created_at: string; updated_at: string; }
-export type SecurityProviderCreate = { provider_key: string; display_name: string; enabled?: boolean; config?: Record<string, any> | null; notes?: string | null; tenant_id?: string | null; };
-export interface EndpointSecurityAgent { id: string; device_id?: string | null; hostname?: string | null; provider_id: string; external_agent_id?: string | null; agent_version?: string | null; status: string; real_time_protection?: boolean | null; definitions_up_to_date?: boolean | null; last_scan_at?: string | null; last_seen_at?: string | null; details?: Record<string, any> | null; created_at: string; updated_at: string; provider_key?: string | null; provider_name?: string | null; }
-export type EndpointSecurityAgentCreate = { provider_id: string; device_id?: string | null; hostname?: string | null; external_agent_id?: string | null; agent_version?: string | null; status?: string; real_time_protection?: boolean | null; definitions_up_to_date?: boolean | null; last_scan_at?: string | null; last_seen_at?: string | null; details?: Record<string, any> | null; };
-export interface SecurityFinding { id: string; provider_id: string; device_id?: string | null; hostname?: string | null; external_id?: string | null; title: string; description?: string | null; severity: string; status: string; category?: string | null; confidence?: number | null; detected_at?: string | null; resolved_at?: string | null; raw?: Record<string, any> | null; created_at: string; updated_at: string; provider_key?: string | null; }
-export type SecurityFindingCreate = { provider_id: string; device_id?: string | null; hostname?: string | null; external_id?: string | null; title: string; description?: string | null; severity?: string; status?: string; category?: string | null; confidence?: number | null; detected_at?: string | null; raw?: Record<string, any> | null; };
-export interface EndpointSecurityScore { id: string; device_id: string; hostname?: string | null; score: number; grade: string; factors?: Record<string, any> | null; open_critical: number; open_high: number; agents_healthy: number; agents_total: number; computed_at: string; created_at: string; updated_at: string; }
-export interface OrgSecurityScore { devices_scored: number; average_score: number; median_score: number; grade_distribution: Record<string, number>; open_critical_total: number; open_high_total: number; providers_enabled: number; agents_healthy: number; agents_total: number; }
+export interface SecurityProvider {
+  id: string;
+  tenant_id?: string | null;
+  provider_key: string;
+  display_name: string;
+  enabled: boolean;
+  config?: Record<string, any> | null;
+  last_sync_at?: string | null;
+  last_sync_status?: string | null;
+  last_sync_error?: string | null;
+  notes?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+export type SecurityProviderCreate = {
+  provider_key: string;
+  display_name: string;
+  enabled?: boolean;
+  config?: Record<string, any> | null;
+  notes?: string | null;
+  tenant_id?: string | null;
+};
+export interface EndpointSecurityAgent {
+  id: string;
+  device_id?: string | null;
+  hostname?: string | null;
+  provider_id: string;
+  external_agent_id?: string | null;
+  agent_version?: string | null;
+  status: string;
+  real_time_protection?: boolean | null;
+  definitions_up_to_date?: boolean | null;
+  last_scan_at?: string | null;
+  last_seen_at?: string | null;
+  details?: Record<string, any> | null;
+  created_at: string;
+  updated_at: string;
+  provider_key?: string | null;
+  provider_name?: string | null;
+}
+export type EndpointSecurityAgentCreate = {
+  provider_id: string;
+  device_id?: string | null;
+  hostname?: string | null;
+  external_agent_id?: string | null;
+  agent_version?: string | null;
+  status?: string;
+  real_time_protection?: boolean | null;
+  definitions_up_to_date?: boolean | null;
+  last_scan_at?: string | null;
+  last_seen_at?: string | null;
+  details?: Record<string, any> | null;
+};
+export interface SecurityFinding {
+  id: string;
+  provider_id: string;
+  device_id?: string | null;
+  hostname?: string | null;
+  external_id?: string | null;
+  title: string;
+  description?: string | null;
+  severity: string;
+  status: string;
+  category?: string | null;
+  confidence?: number | null;
+  detected_at?: string | null;
+  resolved_at?: string | null;
+  raw?: Record<string, any> | null;
+  created_at: string;
+  updated_at: string;
+  provider_key?: string | null;
+}
+export type SecurityFindingCreate = {
+  provider_id: string;
+  device_id?: string | null;
+  hostname?: string | null;
+  external_id?: string | null;
+  title: string;
+  description?: string | null;
+  severity?: string;
+  status?: string;
+  category?: string | null;
+  confidence?: number | null;
+  detected_at?: string | null;
+  raw?: Record<string, any> | null;
+};
+export interface EndpointSecurityScore {
+  id: string;
+  device_id: string;
+  hostname?: string | null;
+  score: number;
+  grade: string;
+  factors?: Record<string, any> | null;
+  open_critical: number;
+  open_high: number;
+  agents_healthy: number;
+  agents_total: number;
+  computed_at: string;
+  created_at: string;
+  updated_at: string;
+}
+export interface OrgSecurityScore {
+  devices_scored: number;
+  average_score: number;
+  median_score: number;
+  grade_distribution: Record<string, number>;
+  open_critical_total: number;
+  open_high_total: number;
+  providers_enabled: number;
+  agents_healthy: number;
+  agents_total: number;
+}
+
+/** Fleet matrix row (product × device) from GET /endpoint-security/matrix */
+export interface SecurityMatrixRow {
+  device_id?: string | null;
+  hostname?: string | null;
+  provider_key?: string | null;
+  product_name?: string | null;
+  installed: boolean;
+  version?: string | null;
+  status: string;
+  raw_status?: string | null;
+  real_time_protection?: boolean | null;
+  definitions_up_to_date?: boolean | null;
+  last_scan_at?: string | null;
+  last_seen_at?: string | null;
+  threats_found: number;
+  threats_critical?: number;
+  threats_high?: number;
+  external_agent_id?: string | null;
+  updated_at?: string | null;
+}
+
+export interface SecurityMatrixResponse {
+  generated_at: string;
+  total_rows: number;
+  products: SecurityProviderCatalogItem[];
+  rows: SecurityMatrixRow[];
+}
+
+export interface VendorSyncResult {
+  provider_key: string;
+  status: string;
+  agents_upserted: number;
+  findings_upserted: number;
+  errors: string[];
+}
 
 // =========================================================
 // Auth — session cookies only. No browser token storage.
@@ -222,49 +362,8 @@ export async function deleteAsset(id: string) { return request<void>(`/api/v1/as
 export async function changeAssetStatus(id: string, status: string, reason?: string) { return request<Asset>(`/api/v1/assets/${id}/status`, { method: "POST", body: JSON.stringify({ status, reason: reason || null }) }); }
 export async function getAssetByQr(qrCode: string) { return request<Asset>(`/api/v1/assets/by-qr/${encodeURIComponent(qrCode)}`); }
 export async function ensureAssetQr(id: string) { return request<{ asset_id: string; qr_code: string }>(`/api/v1/assets/${id}/qr`, { method: "POST" }); }
-export async function getAssetWarranty(id: string) { return request<WarrantyInfo>(`/api/v1/assets/${id}/warranty`); }
-export async function getAssetDepreciation(id: string) { return request<DepreciationInfo>(`/api/v1/assets/${id}/depreciation`); }
-export async function listAssetLifecycle(id: string) { return request<LifecycleEvent[]>(`/api/v1/assets/${id}/lifecycle`); }
-export async function listVendors(activeOnly = false) { return request<Vendor[]>(`/api/v1/assets/vendors${activeOnly ? "?active_only=true" : ""}`); }
-export async function createVendor(data: VendorCreate) { return request<Vendor>(`/api/v1/assets/vendors`, { method: "POST", body: JSON.stringify(data) }); }
-export async function updateVendor(id: string, data: Partial<VendorCreate>) { return request<Vendor>(`/api/v1/assets/vendors/${id}`, { method: "PATCH", body: JSON.stringify(data) }); }
-export async function deleteVendor(id: string) { return request<void>(`/api/v1/assets/vendors/${id}`, { method: "DELETE" }); }
-export async function listLicenses(activeOnly = false) { return request<License[]>(`/api/v1/assets/licenses${activeOnly ? "?active_only=true" : ""}`); }
-export async function createLicense(data: LicenseCreate) { return request<License>(`/api/v1/assets/licenses`, { method: "POST", body: JSON.stringify(data) }); }
-export async function updateLicense(id: string, data: Partial<LicenseCreate>) { return request<License>(`/api/v1/assets/licenses/${id}`, { method: "PATCH", body: JSON.stringify(data) }); }
-export async function deleteLicense(id: string) { return request<void>(`/api/v1/assets/licenses/${id}`, { method: "DELETE" }); }
-export async function listContracts(status?: string) { return request<Contract[]>(`/api/v1/assets/contracts${status ? `?status=${encodeURIComponent(status)}` : ""}`); }
-export async function createContract(data: ContractCreate) { return request<Contract>(`/api/v1/assets/contracts`, { method: "POST", body: JSON.stringify(data) }); }
-export async function updateContract(id: string, data: Partial<ContractCreate>) { return request<Contract>(`/api/v1/assets/contracts/${id}`, { method: "PATCH", body: JSON.stringify(data) }); }
-export async function deleteContract(id: string) { return request<void>(`/api/v1/assets/contracts/${id}`, { method: "DELETE" }); }
-export async function listSoftware(params?: { asset_id?: string; device_id?: string }) { const qs = new URLSearchParams(); if (params?.asset_id) qs.set("asset_id", params.asset_id); if (params?.device_id) qs.set("device_id", params.device_id); return request<SoftwareItem[]>(`/api/v1/assets/software${qs.toString() ? `?${qs}` : ""}`); }
 
-export async function listTickets(params?: { status?: string; ticket_type?: string; asset_id?: string; device_id?: string; priority?: string }) { const qs = new URLSearchParams(); if (params?.status) qs.set("status", params.status); if (params?.ticket_type) qs.set("ticket_type", params.ticket_type); if (params?.asset_id) qs.set("asset_id", params.asset_id); if (params?.device_id) qs.set("device_id", params.device_id); if (params?.priority) qs.set("priority", params.priority); return request<ServiceTicket[]>(`/api/v1/itsm/tickets${qs.toString() ? `?${qs}` : ""}`); }
-export async function createTicket(data: ServiceTicketCreate) { return request<ServiceTicket>(`/api/v1/itsm/tickets`, { method: "POST", body: JSON.stringify(data) }); }
-export async function updateTicket(id: string, data: Partial<ServiceTicketCreate>) { return request<ServiceTicket>(`/api/v1/itsm/tickets/${id}`, { method: "PATCH", body: JSON.stringify(data) }); }
-export async function setTicketStatus(id: string, status: string, note?: string) { return request<ServiceTicket>(`/api/v1/itsm/tickets/${id}/status`, { method: "POST", body: JSON.stringify({ status, note: note || null }) }); }
-export async function deleteTicket(id: string) { return request<void>(`/api/v1/itsm/tickets/${id}`, { method: "DELETE" }); }
-export async function linkTicketAsset(ticketId: string, assetId: string, role?: string, notes?: string) { return request<TicketAssetLink>(`/api/v1/itsm/tickets/${ticketId}/assets`, { method: "POST", body: JSON.stringify({ asset_id: assetId, role: role || "related", notes: notes || null }) }); }
-export async function unlinkTicketAsset(ticketId: string, assetId: string) { return request<void>(`/api/v1/itsm/tickets/${ticketId}/assets/${assetId}`, { method: "DELETE" }); }
-export async function listTicketsForAsset(assetId: string) { return request<ServiceTicket[]>(`/api/v1/itsm/assets/${assetId}/tickets`); }
-export async function createTicketForAsset(assetId: string, data: Omit<ServiceTicketCreate, "asset_ids">) { return request<ServiceTicket>(`/api/v1/itsm/assets/${assetId}/tickets`, { method: "POST", body: JSON.stringify(data) }); }
-export async function listWorkNotes(ticketId: string) { return request<WorkNote[]>(`/api/v1/itsm/tickets/${ticketId}/notes`); }
-export async function addWorkNote(ticketId: string, body: string, author?: string) { return request<WorkNote>(`/api/v1/itsm/tickets/${ticketId}/notes`, { method: "POST", body: JSON.stringify({ body, author: author || null }) }); }
-export async function runWarrantyExpiryJob(withinDays = 30) { return request<ServiceTicket[]>(`/api/v1/itsm/jobs/warranty-expiry?within_days=${withinDays}`, { method: "POST" }); }
-
-export async function listPackages(params?: { package_type?: string; active_only?: boolean }) { const qs = new URLSearchParams(); if (params?.package_type) qs.set("package_type", params.package_type); if (params?.active_only) qs.set("active_only", "true"); return request<SoftwarePackage[]>(`/api/v1/software-deployment/packages${qs.toString() ? `?${qs}` : ""}`); }
-export async function createPackage(data: SoftwarePackageCreate) { return request<SoftwarePackage>(`/api/v1/software-deployment/packages`, { method: "POST", body: JSON.stringify(data) }); }
-export async function updatePackage(id: string, data: Partial<SoftwarePackageCreate>) { return request<SoftwarePackage>(`/api/v1/software-deployment/packages/${id}`, { method: "PATCH", body: JSON.stringify(data) }); }
-export async function deletePackage(id: string) { return request<void>(`/api/v1/software-deployment/packages/${id}`, { method: "DELETE" }); }
-export async function listDeploymentJobs(params?: { status?: string; package_id?: string }) { const qs = new URLSearchParams(); if (params?.status) qs.set("status", params.status); if (params?.package_id) qs.set("package_id", params.package_id); return request<DeploymentJob[]>(`/api/v1/software-deployment/jobs${qs.toString() ? `?${qs}` : ""}`); }
-export async function getDeploymentJob(id: string) { return request<DeploymentJob>(`/api/v1/software-deployment/jobs/${id}`); }
-export async function createDeploymentJob(data: DeploymentJobCreate) { return request<DeploymentJob>(`/api/v1/software-deployment/jobs`, { method: "POST", body: JSON.stringify(data) }); }
-export async function startDeploymentJob(id: string) { return request<DeploymentJob>(`/api/v1/software-deployment/jobs/${id}/start`, { method: "POST" }); }
-export async function cancelDeploymentJob(id: string) { return request<DeploymentJob>(`/api/v1/software-deployment/jobs/${id}/cancel`, { method: "POST" }); }
-export async function getDeploymentSummary(id: string) { return request<DeploymentJobSummary>(`/api/v1/software-deployment/jobs/${id}/summary`); }
-export async function listDeploymentEvents(id: string) { return request<DeploymentEvent[]>(`/api/v1/software-deployment/jobs/${id}/events`); }
-export async function rollbackDeploymentJob(id: string, opts?: { created_by?: string; notes?: string; device_ids?: string[] }) { return request<DeploymentJob>(`/api/v1/software-deployment/jobs/${id}/rollback`, { method: "POST", body: JSON.stringify({ created_by: opts?.created_by || null, notes: opts?.notes || null, device_ids: opts?.device_ids || [] }) }); }
-
+// Endpoint Security API
 export async function listSecurityCatalog() { return request<SecurityProviderCatalogItem[]>(`/api/v1/endpoint-security/catalog`); }
 export async function seedSecurityProviders() { return request<SecurityProvider[]>(`/api/v1/endpoint-security/providers/seed`, { method: "POST" }); }
 export async function listSecurityProviders(enabledOnly = false) { return request<SecurityProvider[]>(`/api/v1/endpoint-security/providers${enabledOnly ? "?enabled_only=true" : ""}`); }
@@ -284,5 +383,29 @@ export async function listSecurityScores(minScore?: number) { return request<End
 export async function getDeviceSecurityScore(deviceId: string) { return request<EndpointSecurityScore>(`/api/v1/endpoint-security/scores/${deviceId}`); }
 export async function recomputeDeviceSecurityScore(deviceId: string) { return request<EndpointSecurityScore>(`/api/v1/endpoint-security/scores/${deviceId}/recompute`, { method: "POST" }); }
 export async function recomputeAllSecurityScores() { return request<{ devices_scored: number }>(`/api/v1/endpoint-security/scores/recompute-all`, { method: "POST" }); }
+
+/** Fleet security matrix (product × device) */
+export async function getSecurityMatrix(params?: { device_id?: string; hostname?: string }) {
+  const qs = new URLSearchParams();
+  if (params?.device_id) qs.set("device_id", params.device_id);
+  if (params?.hostname) qs.set("hostname", params.hostname);
+  return request<SecurityMatrixResponse>(`/api/v1/endpoint-security/matrix${qs.toString() ? `?${qs}` : ""}`);
+}
+
+/** Cloud connectors available (CrowdStrike, SentinelOne, etc.) */
+export async function listSecurityConnectors() {
+  return request<{ connectors: string[]; note: string }>(`/api/v1/endpoint-security/connectors`);
+}
+
+/** Sync one provider from vendor cloud API */
+export async function syncSecurityProvider(providerId: string) {
+  return request<VendorSyncResult>(`/api/v1/endpoint-security/providers/${providerId}/sync`, { method: "POST" });
+}
+
+/** Sync all enabled providers that have cloud connectors */
+export async function syncAllSecurityProviders(tenantId?: string) {
+  const qs = tenantId ? `?tenant_id=${tenantId}` : "";
+  return request<{ results: VendorSyncResult[] }>(`/api/v1/endpoint-security/providers/sync-all${qs}`, { method: "POST" });
+}
 
 export * from "./api-modules";
