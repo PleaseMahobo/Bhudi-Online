@@ -46,6 +46,12 @@ function authHeaders(): HeadersInit {
   return { 'Content-Type': 'application/json', Accept: 'application/json' };
 }
 
+function mouseButtonName(button: number): 'left' | 'middle' | 'right' {
+  if (button === 2) return 'right';
+  if (button === 1) return 'middle';
+  return 'left';
+}
+
 export default function RemoteAccessConsole() {
   const { blocked: mfaBlocked } = useMfaGate();
   const searchParams = useSearchParams();
@@ -103,7 +109,11 @@ export default function RemoteAccessConsole() {
   function sendInput(payload: Record<string, unknown>) {
     const ws = wsRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
-    ws.send(JSON.stringify(payload));
+    try {
+      ws.send(JSON.stringify(payload));
+    } catch {
+      // The desktop frame stream remains independent of transient input-send failures.
+    }
   }
 
   function drawFrame(b64: string, w?: number, h?: number) {
@@ -249,33 +259,37 @@ export default function RemoteAccessConsole() {
   }
 
   function onCanvasMouseDown(e: React.MouseEvent<HTMLCanvasElement>) {
+    e.preventDefault();
+    e.currentTarget.focus();
     const { x, y } = canvasCoords(e);
-    sendInput({ type: 'mouse', action: 'down', button: e.button, x, y });
+    sendInput({ type: 'mousedown', button: mouseButtonName(e.button), x, y });
   }
   function onCanvasMouseUp(e: React.MouseEvent<HTMLCanvasElement>) {
+    e.preventDefault();
     const { x, y } = canvasCoords(e);
-    sendInput({ type: 'mouse', action: 'up', button: e.button, x, y });
+    sendInput({ type: 'mouseup', button: mouseButtonName(e.button), x, y });
   }
   function onCanvasClick(e: React.MouseEvent<HTMLCanvasElement>) {
-    const { x, y } = canvasCoords(e);
-    sendInput({ type: 'mouse', action: 'click', button: e.button, x, y });
+    // mousedown + mouseup are sufficient to generate the native click; do not
+    // emit a second click event, which would double-activate controls remotely.
+    e.preventDefault();
   }
   function onCanvasMouseMove(e: React.MouseEvent<HTMLCanvasElement>) {
     const { x, y } = canvasCoords(e);
-    sendInput({ type: 'mouse', action: 'move', x, y });
+    sendInput({ type: 'mousemove', x, y });
   }
   function onCanvasWheel(e: React.WheelEvent<HTMLCanvasElement>) {
     e.preventDefault();
     const { x, y } = canvasCoords(e);
-    sendInput({ type: 'mouse', action: 'wheel', x, y, deltaY: e.deltaY });
+    sendInput({ type: 'wheel', x, y, deltaY: e.deltaY });
   }
   function onCanvasKeyDown(e: React.KeyboardEvent<HTMLCanvasElement>) {
     e.preventDefault();
-    sendInput({ type: 'key', action: 'down', key: e.key, code: e.code });
+    sendInput({ type: 'keydown', key: e.key, code: e.code });
   }
   function onCanvasKeyUp(e: React.KeyboardEvent<HTMLCanvasElement>) {
     e.preventDefault();
-    sendInput({ type: 'key', action: 'up', key: e.key, code: e.code });
+    sendInput({ type: 'keyup', key: e.key, code: e.code });
   }
 
   return (
