@@ -19,7 +19,20 @@ const inputCls =
 
 const ROLES = ['viewer', 'technician', 'manager', 'admin', 'customer', 'system_admin'] as const;
 
+type TabId = 'wizard' | 'orgs' | 'sites' | 'contacts' | 'techs' | 'users' | 'billing';
+
+const TABS: { id: TabId; label: string }[] = [
+  { id: 'wizard', label: 'New customer' },
+  { id: 'orgs', label: 'Organizations' },
+  { id: 'sites', label: 'Sites' },
+  { id: 'contacts', label: 'Contacts' },
+  { id: 'techs', label: 'Technicians' },
+  { id: 'users', label: 'Users & access' },
+  { id: 'billing', label: 'Billing plans' },
+];
+
 export default function MspPage() {
+  const [tab, setTab] = useState<TabId>('wizard');
   const [orgs, setOrgs] = useState<any[]>([]);
   const [sites, setSites] = useState<any[]>([]);
   const [techs, setTechs] = useState<any[]>([]);
@@ -29,7 +42,6 @@ export default function MspPage() {
   const [info, setInfo] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  // Wizard form
   const [wiz, setWiz] = useState({
     name: '',
     email: '',
@@ -42,7 +54,6 @@ export default function MspPage() {
     contactPhone: '',
   });
 
-  // Invite form
   const [invite, setInvite] = useState({
     email: '',
     role: 'viewer',
@@ -67,13 +78,14 @@ export default function MspPage() {
       setTechs(t);
       setContacts(c);
       setPlans(p);
-      if (!invite.tenant_id && o.length) {
-        setInvite((prev) => ({ ...prev, tenant_id: o[0].tenant_id }));
-      }
+      setInvite((prev) => {
+        if (prev.tenant_id || !o.length) return prev;
+        return { ...prev, tenant_id: o[0].tenant_id };
+      });
     } catch (e: any) {
       setError(e?.message || String(e));
     }
-  }, [invite.tenant_id]);
+  }, []);
 
   useEffect(() => {
     load();
@@ -121,6 +133,7 @@ export default function MspPage() {
       });
       setInvite((prev) => ({ ...prev, tenant_id: result.organization.tenant_id }));
       await load();
+      setTab('orgs');
     } catch (e: any) {
       setError(e?.message || String(e));
     } finally {
@@ -176,8 +189,13 @@ export default function MspPage() {
   return (
     <ModuleShell
       title="Customers"
-      subtitle="Create customers, invite users with roles, and manage organizations"
+      subtitle="Organizations, sites, contacts, access, and billing"
       breadcrumbs={[{ label: 'Customers' }]}
+      actions={
+        <Btn variant="ghost" onClick={load}>
+          Refresh
+        </Btn>
+      }
     >
       <Err error={error} />
       {info && (
@@ -186,196 +204,167 @@ export default function MspPage() {
         </div>
       )}
 
-      <Panel title="New customer wizard">
-        <p className="mb-4 text-sm text-slate-500">
-          Creates organization, default site, and primary contact in one step. A tenant is auto-created for agent
-          enrollment.
-        </p>
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-          <div className="space-y-2">
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Organization</p>
-            <input
-              className={inputCls}
-              placeholder="Customer name *"
-              value={wiz.name}
-              onChange={(e) => setWiz({ ...wiz, name: e.target.value })}
-            />
-            <input
-              className={inputCls}
-              placeholder="Company email"
-              value={wiz.email}
-              onChange={(e) => setWiz({ ...wiz, email: e.target.value })}
-            />
-            <input
-              className={inputCls}
-              placeholder="Phone"
-              value={wiz.phone}
-              onChange={(e) => setWiz({ ...wiz, phone: e.target.value })}
-            />
-          </div>
-          <div className="space-y-2">
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Site</p>
-            <input
-              className={inputCls}
-              placeholder="Site name *"
-              value={wiz.siteName}
-              onChange={(e) => setWiz({ ...wiz, siteName: e.target.value })}
-            />
-            <input
-              className={inputCls}
-              placeholder="City"
-              value={wiz.siteCity}
-              onChange={(e) => setWiz({ ...wiz, siteCity: e.target.value })}
-            />
-          </div>
-          <div className="space-y-2">
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Primary contact</p>
-            <input
-              className={inputCls}
-              placeholder="First name *"
-              value={wiz.contactFirst}
-              onChange={(e) => setWiz({ ...wiz, contactFirst: e.target.value })}
-            />
-            <input
-              className={inputCls}
-              placeholder="Last name"
-              value={wiz.contactLast}
-              onChange={(e) => setWiz({ ...wiz, contactLast: e.target.value })}
-            />
-            <input
-              className={inputCls}
-              placeholder="Email"
-              value={wiz.contactEmail}
-              onChange={(e) => setWiz({ ...wiz, contactEmail: e.target.value })}
-            />
-            <input
-              className={inputCls}
-              placeholder="Phone"
-              value={wiz.contactPhone}
-              onChange={(e) => setWiz({ ...wiz, contactPhone: e.target.value })}
-            />
-          </div>
-        </div>
-        <div className="mt-4 flex gap-2">
-          <Btn onClick={onWizardSubmit}>{busy ? 'Working…' : 'Create customer'}</Btn>
-          <Btn variant="ghost" onClick={load}>
-            Refresh
-          </Btn>
-        </div>
-      </Panel>
+      <div className="mb-5 flex flex-wrap gap-1 border-b border-slate-200 pb-px">
+        {TABS.map((t) => {
+          const active = tab === t.id;
+          return (
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => setTab(t.id)}
+              className={
+                'relative -mb-px rounded-t-lg px-3.5 py-2.5 text-sm font-medium transition ' +
+                (active
+                  ? 'border border-b-white border-slate-200 bg-white text-indigo-700'
+                  : 'border border-transparent text-slate-500 hover:bg-slate-100 hover:text-slate-800')
+              }
+            >
+              {t.label}
+              {t.id === 'orgs' && orgs.length > 0 && (
+                <span className="ml-1.5 rounded-full bg-slate-100 px-1.5 text-[10px] font-semibold text-slate-600">
+                  {orgs.length}
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </div>
 
-      <Panel title="Invite user (credentials + rights)">
-        <p className="mb-4 text-sm text-slate-500">
-          Binds a portal user to a customer tenant and RBAC role. User signs in with Supabase using the same email;
-          Bhudi maps identity and applies tenant + role.
-        </p>
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3">
-          <input
-            className={inputCls}
-            placeholder="Email *"
-            value={invite.email}
-            onChange={(e) => setInvite({ ...invite, email: e.target.value })}
-          />
-          <select
-            className={inputCls}
-            value={invite.role}
-            onChange={(e) => setInvite({ ...invite, role: e.target.value })}
-          >
-            {ROLES.map((r) => (
-              <option key={r} value={r}>
-                {r}
-              </option>
-            ))}
-          </select>
-          <select
-            className={inputCls}
-            value={invite.tenant_id}
-            onChange={(e) => setInvite({ ...invite, tenant_id: e.target.value })}
-          >
-            <option value="">Select customer tenant *</option>
-            {orgs.map((o) => (
-              <option key={o.id} value={o.tenant_id}>
-                {o.name} ({String(o.tenant_id).slice(0, 8)}…)
-              </option>
-            ))}
-          </select>
-          <input
-            className={inputCls}
-            placeholder="First name"
-            value={invite.first_name}
-            onChange={(e) => setInvite({ ...invite, first_name: e.target.value })}
-          />
-          <input
-            className={inputCls}
-            placeholder="Last name"
-            value={invite.last_name}
-            onChange={(e) => setInvite({ ...invite, last_name: e.target.value })}
-          />
-        </div>
-        <div className="mt-4">
-          <Btn onClick={onInvite}>{busy ? 'Working…' : 'Invite user'}</Btn>
-        </div>
-        {lastTempPassword && (
-          <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-            <p className="font-semibold">Temporary password (copy now — shown once)</p>
-            <code className="mt-1 block break-all font-mono text-base">{lastTempPassword}</code>
+      {tab === 'wizard' && (
+        <Panel title="New customer wizard">
+          <p className="mb-4 text-sm text-slate-500">
+            Creates organization, default site, and primary contact in one step. A tenant is auto-created for agent
+            enrollment.
+          </p>
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+            <div className="space-y-2">
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Organization</p>
+              <input
+                className={inputCls}
+                placeholder="Customer name *"
+                value={wiz.name}
+                onChange={(e) => setWiz({ ...wiz, name: e.target.value })}
+              />
+              <input
+                className={inputCls}
+                placeholder="Company email"
+                value={wiz.email}
+                onChange={(e) => setWiz({ ...wiz, email: e.target.value })}
+              />
+              <input
+                className={inputCls}
+                placeholder="Phone"
+                value={wiz.phone}
+                onChange={(e) => setWiz({ ...wiz, phone: e.target.value })}
+              />
+            </div>
+            <div className="space-y-2">
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Site</p>
+              <input
+                className={inputCls}
+                placeholder="Site name *"
+                value={wiz.siteName}
+                onChange={(e) => setWiz({ ...wiz, siteName: e.target.value })}
+              />
+              <input
+                className={inputCls}
+                placeholder="City"
+                value={wiz.siteCity}
+                onChange={(e) => setWiz({ ...wiz, siteCity: e.target.value })}
+              />
+            </div>
+            <div className="space-y-2">
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Primary contact</p>
+              <input
+                className={inputCls}
+                placeholder="First name *"
+                value={wiz.contactFirst}
+                onChange={(e) => setWiz({ ...wiz, contactFirst: e.target.value })}
+              />
+              <input
+                className={inputCls}
+                placeholder="Last name"
+                value={wiz.contactLast}
+                onChange={(e) => setWiz({ ...wiz, contactLast: e.target.value })}
+              />
+              <input
+                className={inputCls}
+                placeholder="Email"
+                value={wiz.contactEmail}
+                onChange={(e) => setWiz({ ...wiz, contactEmail: e.target.value })}
+              />
+              <input
+                className={inputCls}
+                placeholder="Phone"
+                value={wiz.contactPhone}
+                onChange={(e) => setWiz({ ...wiz, contactPhone: e.target.value })}
+              />
+            </div>
           </div>
-        )}
-      </Panel>
+          <div className="mt-4">
+            <Btn onClick={onWizardSubmit}>{busy ? 'Working…' : 'Create customer'}</Btn>
+          </div>
+        </Panel>
+      )}
 
-      <Panel title="Organizations">
-        {orgs.length === 0 ? (
-          <p className="text-sm text-slate-500">No organizations yet.</p>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-slate-200 text-left text-slate-500">
-                  <th className="py-2 pr-4 font-medium">Name</th>
-                  <th className="py-2 pr-4 font-medium">Type</th>
-                  <th className="py-2 pr-4 font-medium">Status</th>
-                  <th className="py-2 pr-4 font-medium">Tenant</th>
-                  <th className="py-2 pr-4 font-medium">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {orgs.map((o) => (
-                  <tr key={o.id} className="border-b border-slate-100 text-slate-700">
-                    <td className="py-2.5 pr-4 font-medium">{o.name}</td>
-                    <td className="py-2.5 pr-4">{o.org_type}</td>
-                    <td className="py-2.5 pr-4">{o.status}</td>
-                    <td className="max-w-[12rem] truncate py-2.5 pr-4 font-mono text-xs">{o.tenant_id}</td>
-                    <td className="py-2.5 pr-4">
-                      <button
-                        type="button"
-                        disabled={busy}
-                        onClick={() => onDeleteOrg(o)}
-                        className="rounded-lg border border-red-200 px-3 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-50 disabled:opacity-50"
-                      >
-                        Delete
-                      </button>
-                    </td>
+      {tab === 'orgs' && (
+        <Panel title="Organizations">
+          {orgs.length === 0 ? (
+            <p className="text-sm text-slate-500">
+              No organizations yet.{' '}
+              <button type="button" className="font-semibold text-indigo-600" onClick={() => setTab('wizard')}>
+                Create one
+              </button>
+            </p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-slate-200 text-left text-slate-500">
+                    <th className="py-2 pr-4 font-medium">Name</th>
+                    <th className="py-2 pr-4 font-medium">Type</th>
+                    <th className="py-2 pr-4 font-medium">Status</th>
+                    <th className="py-2 pr-4 font-medium">Tenant</th>
+                    <th className="py-2 pr-4 font-medium">Actions</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </Panel>
+                </thead>
+                <tbody>
+                  {orgs.map((o) => (
+                    <tr key={o.id} className="border-b border-slate-100 text-slate-700">
+                      <td className="py-2.5 pr-4 font-medium">{o.name}</td>
+                      <td className="py-2.5 pr-4">{o.org_type}</td>
+                      <td className="py-2.5 pr-4">{o.status}</td>
+                      <td className="max-w-[12rem] truncate py-2.5 pr-4 font-mono text-xs">{o.tenant_id}</td>
+                      <td className="py-2.5 pr-4">
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={() => onDeleteOrg(o)}
+                          className="rounded-lg border border-red-200 px-3 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-50 disabled:opacity-50"
+                        >
+                          Delete
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Panel>
+      )}
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+      {tab === 'sites' && (
         <Panel title="Sites">
           <DataTable
             columns={['Name', 'Org', 'City']}
             rows={sites.map((s) => [s.name, s.organization_id, s.city])}
+            empty="No sites yet. Create a customer to add the first site."
           />
         </Panel>
-        <Panel title="Technicians">
-          <DataTable
-            columns={['Name', 'Email', 'Status']}
-            rows={techs.map((t) => [t.display_name || t.name, t.email, t.status])}
-          />
-        </Panel>
+      )}
+
+      {tab === 'contacts' && (
         <Panel title="Contacts">
           <DataTable
             columns={['Name', 'Email', 'Type']}
@@ -384,12 +373,90 @@ export default function MspPage() {
               c.email,
               c.contact_type,
             ])}
+            empty="No contacts yet."
           />
         </Panel>
+      )}
+
+      {tab === 'techs' && (
+        <Panel title="Technicians">
+          <DataTable
+            columns={['Name', 'Email', 'Status']}
+            rows={techs.map((t) => [t.display_name || t.name, t.email, t.status])}
+            empty="No technicians listed."
+          />
+        </Panel>
+      )}
+
+      {tab === 'users' && (
+        <Panel title="Invite user (credentials + rights)">
+          <p className="mb-4 text-sm text-slate-500">
+            Binds a portal user to a customer tenant and RBAC role. User signs in with Supabase using the same email;
+            Bhudi maps identity and applies tenant + role.
+          </p>
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3">
+            <input
+              className={inputCls}
+              placeholder="Email *"
+              value={invite.email}
+              onChange={(e) => setInvite({ ...invite, email: e.target.value })}
+            />
+            <select
+              className={inputCls}
+              value={invite.role}
+              onChange={(e) => setInvite({ ...invite, role: e.target.value })}
+            >
+              {ROLES.map((r) => (
+                <option key={r} value={r}>
+                  {r}
+                </option>
+              ))}
+            </select>
+            <select
+              className={inputCls}
+              value={invite.tenant_id}
+              onChange={(e) => setInvite({ ...invite, tenant_id: e.target.value })}
+            >
+              <option value="">Select customer tenant *</option>
+              {orgs.map((o) => (
+                <option key={o.id} value={o.tenant_id}>
+                  {o.name} ({String(o.tenant_id).slice(0, 8)}…)
+                </option>
+              ))}
+            </select>
+            <input
+              className={inputCls}
+              placeholder="First name"
+              value={invite.first_name}
+              onChange={(e) => setInvite({ ...invite, first_name: e.target.value })}
+            />
+            <input
+              className={inputCls}
+              placeholder="Last name"
+              value={invite.last_name}
+              onChange={(e) => setInvite({ ...invite, last_name: e.target.value })}
+            />
+          </div>
+          <div className="mt-4">
+            <Btn onClick={onInvite}>{busy ? 'Working…' : 'Invite user'}</Btn>
+          </div>
+          {lastTempPassword && (
+            <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+              <p className="font-semibold">Temporary password (copy now — shown once)</p>
+              <code className="mt-1 block break-all font-mono text-base">{lastTempPassword}</code>
+            </div>
+          )}
+        </Panel>
+      )}
+
+      {tab === 'billing' && (
         <Panel
           title="Billing plans"
           actions={
-            <Btn variant="ghost" onClick={() => seedBillingPlans().then(load).catch((e) => setError(e.message))}>
+            <Btn
+              variant="ghost"
+              onClick={() => seedBillingPlans().then(load).catch((e) => setError(e.message))}
+            >
               Seed defaults
             </Btn>
           }
@@ -397,9 +464,10 @@ export default function MspPage() {
           <DataTable
             columns={['Code', 'Name', 'Price']}
             rows={plans.map((p) => [p.code, p.name, p.price_monthly ?? p.price ?? p.unit_amount])}
+            empty="No plans yet. Seed defaults to add starter plans."
           />
         </Panel>
-      </div>
+      )}
     </ModuleShell>
   );
 }
