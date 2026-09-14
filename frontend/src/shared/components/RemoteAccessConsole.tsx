@@ -11,6 +11,7 @@ type Device = { id: string; device_id?: string; agent_id?: string; hostname?: st
 type MonitorInfo = { index: number; name: string; width: number; height: number; primary?: boolean };
 const API_BASE = '';
 const MIN_REMOTE_DESKTOP_AGENT_VERSION = '2.2.10';
+const MAX_PENDING_INPUTS = 256;
 
 function parseVersion(value?: string): number[] | null {
   if (!value) return null;
@@ -52,6 +53,11 @@ export default function RemoteAccessConsole() {
     const browserSentAtMs = Date.now();
     const message = { ...payload, event_id: eventId, browser_sent_at_ms: browserSentAtMs };
     pendingInputsRef.current.set(eventId, { browserSentAtMs, ackAtMs: 0 });
+    while (pendingInputsRef.current.size > MAX_PENDING_INPUTS) {
+      const oldest = pendingInputsRef.current.keys().next().value;
+      if (typeof oldest !== 'string') break;
+      pendingInputsRef.current.delete(oldest);
+    }
     try { ws.send(JSON.stringify(message)); } catch { pendingInputsRef.current.delete(eventId); }
   }
   function drawFrame(b64: string, w?: number, h?: number, inputEventId?: string) {
