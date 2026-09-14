@@ -23,8 +23,6 @@ _INPUT_EVENT_TYPES = frozenset(
         "keyup",
         "keypress",
         "keyboard",
-        "terminal_input",
-        "close",
     }
 )
 
@@ -209,21 +207,26 @@ class RemoteSessionManager:
         state = self.get_session(session_id)
         if state is None:
             return
+        was_input = websocket in state.dashboard_input_connections
+        if was_input:
+            state.dashboard_input_connections.remove(websocket)
         if websocket in state.dashboard_connections:
             state.dashboard_connections.remove(websocket)
-        if websocket in state.dashboard_input_connections:
-            state.dashboard_input_connections.remove(websocket)
-        if not state.dashboard_connections and not state.dashboard_input_connections and state.agent_connection is None and state.agent_input_connection is None:
+        if not was_input and not state.dashboard_connections and state.agent_connection is None:
             state.status = "idle"
 
     async def disconnect_agent(self, session_id: UUID | str, websocket: WebSocket | None = None) -> None:
         state = self.get_session(session_id)
         if state is None:
             return
-        if websocket is None or state.agent_connection is websocket:
-            state.agent_connection = None
+        was_input = websocket is not None and state.agent_input_connection is websocket
         if websocket is None or state.agent_input_connection is websocket:
             state.agent_input_connection = None
+        was_video = websocket is None or state.agent_connection is websocket
+        if was_video:
+            state.agent_connection = None
+        if was_input and not was_video:
+            return
         if state.status != "closed":
             state.status = "waiting_for_agent"
         await self._broadcast_to_dashboards(state, {"type": "agent_disconnected", "session": state.snapshot()})
@@ -267,26 +270,6 @@ class RemoteSessionManager:
         if event_type.startswith("input_") or event_type == "input_channel_ready":
             return
         await self._broadcast_to_dashboards(state, message)
-
-    async def relay_agent_input_message(self, session_id: UUID | str, message: dict[str, Any]) -> None:
-        state = self.get_session(session_id)
-        if state is None:
-            return
-        event = dict(message)
-        event["agent_received_at_ms"] = event.get("agent_received_at_ms") or _now_ms()
-        state.transcript.append(event)
-        if event.get("type") in {"input_ack", "input_error"}:
-            dead: list[WebSocket] = []
-            for websocket in state.dashboard_input_connections:
-                try:
-                    await websocket.send_json(event)
-                except Exception:
-                    dead.append(websocket)
-            for websocket in dead:
-                if websocket in state.dashboard_input_connections:
-                    state.dashboard_input_connections.remove(websocket)
-            return
-        await self._broadcast_to_dashboards(state, event)
 
     async def close_session(self, session_id: UUID | str, reason: str = "closed_by_operator") -> RemoteSessionState | None:
         state = self.get_session(session_id)
