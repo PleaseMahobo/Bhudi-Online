@@ -181,24 +181,17 @@ func runDesktopSession(wsURL, sessionID, sessionMode, displayProtocol string, mo
 				case "mouse", "mousemove", "mousedown", "mouseup", "click", "wheel",
 					"keydown", "keyup", "keypress", "keyboard":
 					if sessionMode == "control" {
-						frameMu.Lock()
-						fW, fH, nW, nH := frameW, frameH, nativeW, nativeH
-						frameMu.Unlock()
 						mapped := map[string]any{}
 						for k, v := range inner {
 							mapped[k] = v
 						}
-						fx, fy := numVal(inner["x"]), numVal(inner["y"])
-						if fW > 0 && fH > 0 {
-							fx = fx * float64(nW) / float64(fW)
-							fy = fy * float64(nH) / float64(fH)
-						}
-						mapped["x"] = fx
-						mapped["y"] = fy
+						// Pointer coordinates are normalized by the browser against the
+						// actual rendered canvas. Convert them to native monitor pixels
+						// exactly once in applyDesktopInputAt, preserving old pixel clients.
 						mapped["_ox"] = float64(ox)
 						mapped["_oy"] = float64(oy)
-						mapped["_nw"] = float64(nW)
-						mapped["_nh"] = float64(nH)
+						mapped["_nw"] = float64(nativeW)
+						mapped["_nh"] = float64(nativeH)
 						select {
 						case inputCh <- mapped:
 						default:
