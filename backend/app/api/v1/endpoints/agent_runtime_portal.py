@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from app.core.access_tiers import require_mfa_for_actions
 from app.core.dependencies import current_tenant_user
+from app.database.session import get_db
 from app.api.v1.endpoints.agent_runtime import (
     CommandCreate,
     RemoteDesktopBody,
@@ -19,6 +20,7 @@ from app.api.v1.endpoints.agent_runtime import (
     _require_agent_token,
 )
 from app.services.remote_session_manager import remote_session_manager
+from app.services.agent_dispatcher import AgentDispatcher
 
 router = APIRouter(prefix="/runtime", tags=["agent-runtime-portal"])
 
@@ -103,18 +105,46 @@ def command_history(agent_id: str, user=Depends(current_tenant_user)):
     return {"commands": list(reversed(_commands.get(agent_id, [])))}
 
 
-# This exact route must be registered before the portal's generic
-# /commands/{command_id} route. Otherwise FastAPI interprets "pending" as a
-# command_id and applies tenant-user authentication, producing a misleading
-# "Authentication credentials missing" response for a healthy native agent.
+# Agent polling must use the same durable SQL command queue as the production
+# portal. This exact route is intentionally kept ahead of the generic
+# /commands/{command_id} route so "pending" is never interpreted as a command id.
 @router.get("/agents/{agent_id}/commands/pending")
-def agent_pending_commands(agent_id: str, agent_token: str | None = None):
+def agent_pending_commands(
+    agent_id: str,
+    agent_token: str | None = None,
+    db=Depends(get_db),
+):
     _require_agent_token(agent_id, agent_token)
-    pending = [c for c in _commands.get(agent_id, []) if c.get("status") == "pending"]
-    for command in pending:
+
+    commands: list[dict] = []
+    try:
+        dispatcher = AgentDispatcher(db)
+        persistent = dispatcher.get_pending_commands(uuid.UUID(agent_id))
+        for command in persistent:
+            commands.append({
+                "id": str(command.id),
+                "command_id": str(command.id),
+                "command": "",
+                "shell": False,
+                "command_type": command.command_type,
+                "payload": command.payload if isinstance(command.payload, dict) else {},
+                "status": command.status,
+                "priority": command.priority,
+                "timeout_seconds": command.timeout_seconds,
+            })
+            dispatcher.mark_sent(command.id)
+    except Exception as exc:
+        db.rollback()
+        print(f"[runtime] portal persistent command poll skipped: {exc}")
+
+    # Preserve compatibility for commands that are intentionally runtime-only.
+    legacy_pending = [c for c in _commands.get(agent_id, []) if c.get("status") == "pending"]
+    for command in legacy_pending:
         command["status"] = "dispatched"
+        commands.append(command)
+
     _persist_agents()
-    return {"commands": pending}
+    return {"commands": commands}
 
 
 @router.get("/agents/{agent_id}/commands/{command_id}")
