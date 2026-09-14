@@ -1,0 +1,55 @@
+name: Deploy API (Railway)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "backend/**"
+      - ".github/workflows/deploy-railway.yml"
+      - "railway.toml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: railway-api-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Require Railway token
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: |
+          if [ -z "$RAILWAY_TOKEN" ]; then
+            echo "::error::Missing secret RAILWAY_TOKEN."
+            echo "Create a Railway Project Token (Project → Settings → Tokens),"
+            echo "then add it as repo secret RAILWAY_TOKEN."
+            echo "Optional secrets: RAILWAY_SERVICE_ID, RAILWAY_ENVIRONMENT"
+            exit 1
+          fi
+
+      - name: Install Railway CLI
+        run: npm install -g @railway/cli
+
+      - name: Deploy backend to Railway
+        working-directory: backend
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          RAILWAY_SERVICE_ID: ${{ secrets.RAILWAY_SERVICE_ID }}
+          RAILWAY_ENVIRONMENT: ${{ secrets.RAILWAY_ENVIRONMENT }}
+        run: |
+          ARGS=(up --detach --ci)
+          if [ -n "$RAILWAY_SERVICE_ID" ]; then
+            ARGS+=(--service "$RAILWAY_SERVICE_ID")
+          fi
+          if [ -n "$RAILWAY_ENVIRONMENT" ]; then
+            ARGS+=(--environment "$RAILWAY_ENVIRONMENT")
+          fi
+          echo "Deploying backend/ with: railway ${ARGS[*]}"
+          railway "${ARGS[@]}"
