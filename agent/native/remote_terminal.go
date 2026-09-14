@@ -81,6 +81,18 @@ func runTerminalSession(wsURL, sessionID, shellName, cwd string) {
 	}
 	defer conn.Close()
 
+	// Gorilla WebSocket permits one concurrent reader and one concurrent writer,
+	// but not multiple concurrent writers. Terminal stdout/stderr pumps and the
+	// dashboard reader can all emit messages, so serialize every write for this
+	// session. The mutex is scoped to this connection and does not bottleneck
+	// unrelated remote sessions.
+	var writeMu sync.Mutex
+	writeSessionJSON := func(v any) error {
+		writeMu.Lock()
+		defer writeMu.Unlock()
+		return writeJSON(conn, v)
+	}
+
 	_ = conn.SetReadDeadline(time.Now().Add(30 * time.Second))
 	_, msg, err := conn.ReadMessage()
 	if err != nil {
@@ -122,11 +134,11 @@ func runTerminalSession(wsURL, sessionID, shellName, cwd string) {
 	}
 	if err := cmd.Start(); err != nil {
 		fmt.Println("[remote-terminal] start shell:", err)
-		_ = writeJSON(conn, map[string]any{"type": "error", "session_id": sessionID, "message": err.Error()})
+		_ = writeSessionJSON(map[string]any{"type": "error", "session_id": sessionID, "message": err.Error()})
 		return
 	}
 
-	_ = writeJSON(conn, map[string]any{
+	_ = writeSessionJSON(map[string]any{
 		"type":       "terminal_ready",
 		"session_id": sessionID,
 		"shell":      shellPath,
@@ -146,7 +158,7 @@ func runTerminalSession(wsURL, sessionID, shellName, cwd string) {
 		for {
 			n, err := br.Read(buf)
 			if n > 0 {
-				_ = writeJSON(conn, map[string]any{
+				_ = writeSessionJSON(map[string]any{
 					"type":       "output",
 					"session_id": sessionID,
 					"stream":     stream,
@@ -188,14 +200,14 @@ func runTerminalSession(wsURL, sessionID, shellName, cwd string) {
 				case "command":
 					_, _ = io.WriteString(stdin, strVal(inner["command"])+"\n")
 				case "resize":
-					_ = writeJSON(conn, map[string]any{
+					_ = writeSessionJSON(map[string]any{
 						"type":       "resize_ack",
 						"session_id": sessionID,
 						"rows":       inner["rows"],
 						"cols":       inner["cols"],
 					})
 				case "close":
-					_ = writeJSON(conn, map[string]any{
+					_ = writeSessionJSON(map[string]any{
 						"type":       "session_closed",
 						"session_id": sessionID,
 						"reason":     "closed_by_operator",
