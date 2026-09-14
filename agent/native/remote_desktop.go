@@ -45,6 +45,28 @@ func startRemoteDesktop(serverURL, agentID string, command map[string]any) map[s
 	if err != nil {
 		return resultErr(err.Error())
 	}
+
+	// The Windows service runs as LocalSystem in Session 0 and cannot reliably
+	// capture the logged-on user's WinSta0/default desktop. Start the same native
+	// binary as a worker in the active user's interactive session. The worker reads
+	// the already-persisted agent identity locally and connects to the exact session.
+	if runtime.GOOS == "windows" && isWindowsServiceProcess() {
+		if err := launchDesktopWorker(serverURL, sessionID, sessionMode, displayProtocol, monitorIndex); err != nil {
+			return resultErr("failed to launch interactive desktop worker: " + err.Error())
+		}
+		return map[string]any{
+			"exit_code": 0,
+			"stdout":    "launched interactive remote desktop worker " + sessionID,
+			"stderr":    "",
+			"metadata": map[string]any{
+				"session_id": sessionID, "streaming": true,
+				"stream_path": "/api/v1/remote-access/sessions/" + sessionID + "/dashboard",
+				"session_type": "desktop", "session_mode": sessionMode,
+				"display_protocol": displayProtocol, "monitor_index": monitorIndex,
+			},
+		}
+	}
+
 	go runDesktopSession(wsURL, sessionID, sessionMode, displayProtocol, monitorIndex)
 	return map[string]any{
 		"exit_code": 0,
