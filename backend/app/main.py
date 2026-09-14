@@ -96,6 +96,12 @@ async def startup_event():
             print("[startup] device health worker started (missed heartbeats + scores)")
         except Exception as e:
             print(f"[startup] device_health_worker skipped: {e}")
+        try:
+            from app.workers.report_schedule_worker import report_schedule_worker
+            report_schedule_worker.start()
+            print("[startup] report schedule worker started (daily device health + scheduled reports)")
+        except Exception as e:
+            print(f"[startup] report_schedule_worker skipped: {e}")
 
 
 @app.on_event("shutdown")
@@ -119,6 +125,11 @@ async def shutdown_event():
     try:
         from app.workers.device_health_worker import device_health_worker
         device_health_worker.stop()
+    except Exception:
+        pass
+    try:
+        from app.workers.report_schedule_worker import report_schedule_worker
+        report_schedule_worker.stop()
     except Exception:
         pass
 
