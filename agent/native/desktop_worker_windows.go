@@ -13,7 +13,7 @@ import (
     "golang.org/x/sys/windows"
 )
 
-func launchDesktopWorker(serverURL, sessionID, sessionMode, displayProtocol string, monitorIndex int) error {
+func launchDesktopWorker(serverURL, sessionID, sessionMode, displayProtocol string, monitorIndex int, inputToken string) error {
     sid, err := activeInteractiveSessionID()
     if err != nil { return err }
     var token windows.Token
@@ -23,7 +23,7 @@ func launchDesktopWorker(serverURL, sessionID, sessionMode, displayProtocol stri
     if err != nil { return fmt.Errorf("resolve agent executable: %w", err) }
     exe, err = filepath.Abs(exe)
     if err != nil { return fmt.Errorf("resolve agent executable path: %w", err) }
-    commandLine := fmt.Sprintf("\"%s\" desktop-worker -server \"%s\" -session \"%s\" -mode \"%s\" -protocol \"%s\" -monitor %d", exe, serverURL, sessionID, sessionMode, displayProtocol, monitorIndex)
+    commandLine := fmt.Sprintf("\"%s\" desktop-worker -server \"%s\" -session \"%s\" -mode \"%s\" -protocol \"%s\" -monitor %d -input-token \"%s\"", exe, serverURL, sessionID, sessionMode, displayProtocol, monitorIndex, inputToken)
     desktop, _ := windows.UTF16PtrFromString("winsta0\\default")
     cmdline, _ := windows.UTF16PtrFromString(commandLine)
     var si windows.StartupInfo
@@ -40,9 +40,9 @@ func launchDesktopWorker(serverURL, sessionID, sessionMode, displayProtocol stri
     return nil
 }
 
-func desktopWorkerArgs(args []string) (runConfig, string, string, string, int, bool) {
+func desktopWorkerArgs(args []string) (runConfig, string, string, string, int, string, bool) {
     server := envOr("BHUDI_SERVER_URL", defaultServerURL)
-    sessionID, mode, protocol := "", "control", "native"
+    sessionID, mode, protocol, inputToken := "", "control", "native", ""
     monitor := 0
     for i := 0; i+1 < len(args); i += 2 {
         switch strings.ToLower(args[i]) {
@@ -51,10 +51,11 @@ func desktopWorkerArgs(args []string) (runConfig, string, string, string, int, b
         case "-mode": mode = args[i+1]
         case "-protocol": protocol = args[i+1]
         case "-monitor": fmt.Sscanf(args[i+1], "%d", &monitor)
+        case "-input-token": inputToken = args[i+1]
         }
     }
-    if strings.TrimSpace(sessionID) == "" { return runConfig{}, "", "", "", 0, false }
-    return runConfig{Server: strings.TrimRight(server, "/")}, sessionID, mode, protocol, monitor, true
+    if strings.TrimSpace(sessionID) == "" { return runConfig{}, "", "", "", 0, "", false }
+    return runConfig{Server: strings.TrimRight(server, "/")}, sessionID, mode, protocol, monitor, inputToken, true
 }
 
 func loadStoredIdentity() (identity, error) {
