@@ -34,20 +34,48 @@ export default function RemoteAccessConsole() {
   const [busy, setBusy] = useState(false); const [error, setError] = useState(''); const [sessionId, setSessionId] = useState<string | null>(null);
   const [status, setStatus] = useState('Idle'); const [termLog, setTermLog] = useState(''); const [termInput, setTermInput] = useState('');
   const [hasFrame, setHasFrame] = useState(false); const [monitors, setMonitors] = useState<MonitorInfo[]>([]); const [monitorIndex, setMonitorIndex] = useState(0);
-  const [fitMode, setFitMode] = useState<'contain' | 'width'>('contain'); const selectedDevice = devices.find((d) => deviceAgentId(d) === agentId);
+  const [fitMode, setFitMode] = useState<'contain' | 'width'>('contain'); const [inputLatencyMs, setInputLatencyMs] = useState<number | null>(null);
+  const selectedDevice = devices.find((d) => deviceAgentId(d) === agentId);
   const selectedAgentVersion = selectedDevice?.agent_version; const remoteDesktopCompatible = isVersionAtLeast(selectedAgentVersion);
-  const wsRef = useRef<WebSocket | null>(null); const canvasRef = useRef<HTMLCanvasElement | null>(null); const frameSize = useRef({ w: 1280, h: 720 });
+  const wsRef = useRef<WebSocket | null>(null); const inputWsRef = useRef<WebSocket | null>(null); const canvasRef = useRef<HTMLCanvasElement | null>(null); const frameSize = useRef({ w: 1280, h: 720 });
+  const inputSeqRef = useRef(0); const pendingInputsRef = useRef(new Map<string, { browserSentAtMs: number; ackAtMs: number; windowsInputAtMs?: number }>());
   const loadDevices = useCallback(async () => { try { const rows = await getDevices().catch(() => []); setDevices(Array.isArray(rows) ? (rows as Device[]) : []); } catch { setDevices([]); } }, []);
   useEffect(() => { void loadDevices(); const id = setInterval(loadDevices, 15000); return () => clearInterval(id); }, [loadDevices]);
   useEffect(() => { const a = searchParams.get('agent') || searchParams.get('device') || ''; const m = searchParams.get('mode'); if (a) setAgentId(a); if (m === 'desktop' || m === 'terminal') setMode(m); }, [searchParams]);
-  useEffect(() => () => { wsRef.current?.close(); }, []);
+  useEffect(() => () => { inputWsRef.current?.close(); wsRef.current?.close(); }, []);
   function deviceAgentId(d: Device): string { return String(d.agent_id || d.device_id || d.id || ''); }
-  function sendInput(payload: Record<string, unknown>) { const ws = wsRef.current; if (!ws || ws.readyState !== WebSocket.OPEN) return; try { ws.send(JSON.stringify(payload)); } catch {} }
-  function drawFrame(b64: string, w?: number, h?: number) { const canvas = canvasRef.current; if (!canvas) return; const img = new Image(); img.onload = () => { const width = w || img.width || frameSize.current.w; const height = h || img.height || frameSize.current.h; frameSize.current = { w: width, h: height }; canvas.width = width; canvas.height = height; const ctx = canvas.getContext('2d'); if (!ctx) return; ctx.drawImage(img, 0, 0, width, height); setHasFrame(true); }; img.src = b64.startsWith('data:') ? b64 : `data:image/jpeg;base64,${b64}`; }
+  function sendInput(payload: Record<string, unknown>) {
+    const ws = inputWsRef.current?.readyState === WebSocket.OPEN ? inputWsRef.current : wsRef.current?.readyState === WebSocket.OPEN ? wsRef.current : null;
+    if (!ws) return;
+    const eventId = `input-${Date.now()}-${inputSeqRef.current + 1}`;
+    inputSeqRef.current += 1;
+    const browserSentAtMs = Date.now();
+    const message = { ...payload, event_id: eventId, browser_sent_at_ms: browserSentAtMs };
+    pendingInputsRef.current.set(eventId, { browserSentAtMs, ackAtMs: 0 });
+    try { ws.send(JSON.stringify(message)); } catch { pendingInputsRef.current.delete(eventId); }
+  }
+  function drawFrame(b64: string, w?: number, h?: number, inputEventId?: string) {
+    const canvas = canvasRef.current; if (!canvas) return;
+    const img = new Image();
+    img.onload = () => {
+      const displayedAtMs = Date.now();
+      const width = w || img.width || frameSize.current.w; const height = h || img.height || frameSize.current.h;
+      frameSize.current = { w: width, h: height }; canvas.width = width; canvas.height = height;
+      const ctx = canvas.getContext('2d'); if (!ctx) return; ctx.drawImage(img, 0, 0, width, height); setHasFrame(true);
+      if (inputEventId) {
+        const timing = pendingInputsRef.current.get(inputEventId);
+        if (timing?.browserSentAtMs) {
+          setInputLatencyMs(Math.max(0, displayedAtMs - timing.browserSentAtMs));
+          pendingInputsRef.current.delete(inputEventId);
+        }
+      }
+    };
+    img.src = b64.startsWith('data:') ? b64 : `data:image/jpeg;base64,${b64}`;
+  }
   async function startSession() {
     if (mfaBlocked) { setError('Enable MFA at /mfa/setup before remote access.'); return; }
     if (!agentId) { setError('Select a device / agent first.'); return; }
-    setBusy(true); setError(''); setStatus('Queueing session…'); setHasFrame(false); setTermLog(''); wsRef.current?.close();
+    setBusy(true); setError(''); setStatus('Queueing session…'); setHasFrame(false); setTermLog(''); setInputLatencyMs(null); inputSeqRef.current = 0; pendingInputsRef.current.clear(); inputWsRef.current?.close(); wsRef.current?.close();
     try {
       const path = mode === 'desktop' ? '/api/v1/remote-access/desktop' : '/api/v1/remote-access/terminal';
       const body = mode === 'desktop' ? { agent_id: agentId, session_mode: 'control', display_protocol: 'native', monitor_index: monitorIndex } : { agent_id: agentId, shell };
@@ -55,12 +83,22 @@ export default function RemoteAccessConsole() {
       const data = await res.json().catch(() => ({}));
       if (!res.ok) { const detail = data.detail; const msg = (typeof detail === 'object' && detail?.message) || (typeof detail === 'string' && detail) || res.statusText || 'Failed to start'; if (res.status === 403 && (detail?.code === 'mfa_setup_required' || String(msg).toLowerCase().includes('mfa'))) throw new Error('Enable MFA at /mfa/setup before remote access.'); throw new Error(String(msg)); }
       const sid = data.session_id as string; if (!sid) throw new Error('No session_id returned'); setSessionId(sid); setStatus('Connecting…');
-      const url = `${wsBase()}/api/v1/remote-access/sessions/${sid}/dashboard`; const ws = new WebSocket(url); wsRef.current = ws;
-      ws.onopen = () => setStatus('Connected — waiting for agent'); ws.onerror = () => setError(`WebSocket error — check NEXT_PUBLIC_API_URL and agent online (stream: ${url})`); ws.onclose = () => setStatus('Disconnected');
-      ws.onmessage = (ev) => { try { const msg = JSON.parse(String(ev.data)); const type = msg.type as string; if (type === 'desktop_ready') { setStatus('Desktop ready'); if (Array.isArray(msg.monitors)) setMonitors(msg.monitors); } else if (type === 'frame' || type === 'desktop_frame') { const b64 = msg.data || msg.frame || msg.image; if (typeof b64 === 'string') drawFrame(b64, msg.width, msg.height); } else if (type === 'terminal_output' || type === 'stdout') { const chunk = String(msg.data || msg.output || msg.text || ''); if (chunk) setTermLog((prev) => (prev + chunk).slice(-20000)); } else if (type === 'error') setError(String(msg.message || msg.error || 'Remote session error')); else if (type === 'status') setStatus(String(msg.message || msg.status || 'Active')); } catch {} };
+      const streamUrl = `${wsBase()}/api/v1/remote-access/sessions/${sid}/dashboard`; const ws = new WebSocket(streamUrl); wsRef.current = ws;
+      ws.onopen = () => setStatus(mode === 'desktop' ? 'Video connected — waiting for agent' : 'Connected — waiting for agent'); ws.onerror = () => setError(`WebSocket error — check NEXT_PUBLIC_API_URL and agent online (stream: ${streamUrl})`); ws.onclose = () => { if (wsRef.current === ws) setStatus('Disconnected'); };
+      ws.onmessage = (ev) => { try { const msg = JSON.parse(String(ev.data)); const type = msg.type as string; if (type === 'desktop_ready') { setStatus('Desktop ready'); if (Array.isArray(msg.monitors)) setMonitors(msg.monitors); } else if (type === 'frame' || type === 'desktop_frame') { const b64 = msg.data || msg.frame || msg.image; if (typeof b64 === 'string') drawFrame(b64, msg.width, msg.height, msg.input_event_id); } else if (type === 'terminal_output' || type === 'stdout') { const chunk = String(msg.data || msg.output || msg.text || ''); if (chunk) setTermLog((prev) => (prev + chunk).slice(-20000)); } else if (type === 'error') setError(String(msg.message || msg.error || 'Remote session error')); else if (type === 'status') setStatus(String(msg.message || msg.status || 'Active')); } catch {} };
+      if (mode === 'desktop') {
+        const inputToken = data?.payload?.input_token as string | undefined;
+        if (!inputToken) throw new Error('Remote session did not return an authenticated input credential.');
+        const inputUrl = `${wsBase()}/api/v1/remote-access/sessions/${sid}/dashboard?channel=input&token=${encodeURIComponent(inputToken)}`;
+        const inputWs = new WebSocket(inputUrl); inputWsRef.current = inputWs;
+        inputWs.onopen = () => setStatus('Control connected — waiting for agent');
+        inputWs.onerror = () => setError('Remote control input channel failed to authenticate.');
+        inputWs.onclose = () => { if (inputWsRef.current === inputWs) inputWsRef.current = null; };
+        inputWs.onmessage = (ev) => { try { const msg = JSON.parse(String(ev.data)); if (msg.type === 'input_ack' && msg.event_id) { const timing = pendingInputsRef.current.get(String(msg.event_id)); if (timing) { timing.ackAtMs = Date.now(); timing.windowsInputAtMs = Number(msg.windows_input_at_ms || 0) || undefined; pendingInputsRef.current.set(String(msg.event_id), timing); } } else if (msg.type === 'input_error') { setError(String(msg.message || 'Remote control input error')); } } catch {} };
+      }
     } catch (e) { setError(e instanceof Error ? e.message : 'Failed to start session'); setStatus('Failed'); } finally { setBusy(false); }
   }
-  function stopSession() { wsRef.current?.close(); wsRef.current = null; setSessionId(null); setStatus('Disconnected'); setHasFrame(false); }
+  function stopSession() { inputWsRef.current?.close(); inputWsRef.current = null; wsRef.current?.close(); wsRef.current = null; setSessionId(null); setStatus('Disconnected'); setHasFrame(false); setInputLatencyMs(null); pendingInputsRef.current.clear(); }
   function sendTerm() { const cmd = termInput.trim(); if (!cmd) return; sendInput({ type: 'terminal_input', data: cmd + '\n' }); setTermLog((prev) => prev + `\n> ${cmd}\n`); setTermInput(''); }
   function canvasCoords(e: React.MouseEvent<HTMLCanvasElement>) { const canvas = canvasRef.current; if (!canvas) return { x: 0, y: 0 }; const rect = canvas.getBoundingClientRect(); if (rect.width <= 0 || rect.height <= 0) return { x: 0, y: 0 }; const localX = Math.max(0, Math.min(rect.width, e.clientX - rect.left)); const localY = Math.max(0, Math.min(rect.height, e.clientY - rect.top)); return { x: Number((localX / rect.width).toFixed(6)), y: Number((localY / rect.height).toFixed(6)) }; }
   function onCanvasMouseDown(e: React.MouseEvent<HTMLCanvasElement>) { e.preventDefault(); e.currentTarget.focus(); const { x, y } = canvasCoords(e); sendInput({ type: 'mousedown', button: mouseButtonName(e.button), x, y }); }
@@ -80,7 +118,7 @@ export default function RemoteAccessConsole() {
       {mode === 'terminal' && <div><label className="mb-1 block text-xs font-medium text-slate-500">Shell</label><select value={shell} onChange={(e) => setShell(e.target.value)} className="rounded-xl border border-slate-200 px-3 py-2 text-sm" disabled={mfaBlocked}><option value="powershell">PowerShell</option><option value="cmd">CMD</option><option value="bash">bash</option></select></div>}
       <div className="flex gap-2">{!sessionId ? <button type="button" onClick={() => void startSession()} disabled={busy || !agentId || mfaBlocked} className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-500 disabled:opacity-50">{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wifi className="h-4 w-4" />}Connect</button> : <button type="button" onClick={stopSession} className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">Disconnect</button>}<button type="button" onClick={() => void loadDevices()} className="inline-flex items-center gap-1 rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-600"><RefreshCw className="h-4 w-4" /></button></div>
     </div>
-    <div className="flex flex-wrap items-center gap-3 text-sm"><span className="inline-flex items-center gap-1.5 text-slate-600"><Wifi className="h-4 w-4" />Status: <strong>{status}</strong>{sessionId ? <span className="font-mono text-xs text-slate-400">session {sessionId.slice(0, 8)}…</span> : null}</span>{agentId ? <span className={'inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium ' + (remoteDesktopCompatible === true ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : remoteDesktopCompatible === false ? 'border-amber-200 bg-amber-50 text-amber-700' : 'border-slate-200 bg-slate-50 text-slate-600')}>Agent v{selectedAgentVersion || 'unknown'} · {remoteDesktopCompatible === true ? 'Remote desktop compatible' : remoteDesktopCompatible === false ? `Update required (minimum v${MIN_REMOTE_DESKTOP_AGENT_VERSION})` : 'Compatibility unknown'}</span> : null}{error ? <span className="inline-flex items-center gap-1 text-red-600"><XCircle className="h-4 w-4" />{error}</span> : null}</div>
+    <div className="flex flex-wrap items-center gap-3 text-sm"><span className="inline-flex items-center gap-1.5 text-slate-600"><Wifi className="h-4 w-4" />Status: <strong>{status}</strong>{sessionId ? <span className="font-mono text-xs text-slate-400">session {sessionId.slice(0, 8)}…</span> : null}</span>{inputLatencyMs !== null && <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-600">Input → next frame: {inputLatencyMs} ms</span>}{agentId ? <span className={'inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium ' + (remoteDesktopCompatible === true ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : remoteDesktopCompatible === false ? 'border-amber-200 bg-amber-50 text-amber-700' : 'border-slate-200 bg-slate-50 text-slate-600')}>Agent v{selectedAgentVersion || 'unknown'} · {remoteDesktopCompatible === true ? 'Remote desktop compatible' : remoteDesktopCompatible === false ? `Update required (minimum v${MIN_REMOTE_DESKTOP_AGENT_VERSION})` : 'Compatibility unknown'}</span> : null}{error ? <span className="inline-flex items-center gap-1 text-red-600"><XCircle className="h-4 w-4" />{error}</span> : null}</div>
     {mode === 'desktop' && <div className="overflow-hidden rounded-2xl border border-slate-800 bg-slate-950 shadow-sm"><div className="flex items-center justify-between border-b border-white/10 px-3 py-2 text-xs text-slate-300"><span>Remote desktop</span><div className="flex items-center gap-2"><button type="button" onClick={() => setFitMode('contain')} className={'rounded px-2 py-1 ' + (fitMode === 'contain' ? 'bg-white/15 text-white' : 'hover:bg-white/10')}>Fit page</button><button type="button" onClick={() => setFitMode('width')} className={'rounded px-2 py-1 ' + (fitMode === 'width' ? 'bg-white/15 text-white' : 'hover:bg-white/10')}>Fit width</button><button type="button" onClick={() => { const el = canvasRef.current?.parentElement; if (el?.requestFullscreen) void el.requestFullscreen(); }} className="rounded px-2 py-1 hover:bg-white/10">Fullscreen</button></div></div><div className={'relative flex bg-black p-2 ' + (fitMode === 'contain' ? 'max-h-[min(80vh,900px)] items-center justify-center overflow-auto' : 'items-start justify-center overflow-auto')}><canvas ref={canvasRef} tabIndex={0} onMouseDown={onCanvasMouseDown} onMouseUp={onCanvasMouseUp} onClick={onCanvasClick} onMouseMove={onCanvasMouseMove} onWheel={onCanvasWheel} onKeyDown={onCanvasKeyDown} onKeyUp={onCanvasKeyUp} onContextMenu={(e) => e.preventDefault()} style={{ display: 'block', width: fitMode === 'width' ? '100%' : 'auto', maxWidth: '100%', maxHeight: fitMode === 'contain' ? 'min(80vh, 880px)' : undefined, height: 'auto', cursor: 'crosshair', userSelect: 'none', touchAction: 'none' }} className="outline-none focus:ring-2 focus:ring-indigo-500" />{!hasFrame && <p className="pointer-events-none absolute text-sm text-slate-500">No frames yet — {selectedAgentVersion ? remoteDesktopCompatible === true ? `waiting for frames from agent v${selectedAgentVersion} (compatible)` : `agent v${selectedAgentVersion} needs v${MIN_REMOTE_DESKTOP_AGENT_VERSION}+ for remote desktop` : 'waiting for agent version and remote desktop frames'}.</p>}</div><p className="border-t border-white/10 px-3 py-1.5 text-[11px] text-slate-500">Click the screen to focus, then click/drag/type. Change Display and reconnect to switch monitors.</p></div>}
     {mode === 'terminal' && <div className="overflow-hidden rounded-2xl border border-slate-200 bg-slate-950 shadow-sm"><pre className="max-h-[420px] min-h-[280px] overflow-auto p-4 font-mono text-[12px] text-emerald-300">{termLog || 'Terminal output will appear here…'}</pre><div className="flex border-t border-white/10"><input value={termInput} onChange={(e) => setTermInput(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && sendTerm()} placeholder="Type a command…" className="flex-1 bg-transparent px-3 py-2 font-mono text-sm text-white outline-none" disabled={!sessionId} /><button type="button" onClick={sendTerm} disabled={!sessionId} className="px-4 text-sm font-medium text-indigo-300 hover:text-white disabled:opacity-40">Send</button></div></div>}
   </div>);
