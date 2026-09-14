@@ -25,6 +25,7 @@ from app.services.endpoint_security_service import (
     PROVIDER_CATALOG,
     EndpointSecurityService,
 )
+from app.services.vendor_security_connectors import CONNECTORS, sync_all_enabled, sync_provider
 
 router = APIRouter(prefix="/endpoint-security", tags=["Endpoint Security"])
 
@@ -48,7 +49,6 @@ def _finding_response(row) -> SecurityFindingResponse:
 
 @router.get("/catalog")
 def list_catalog():
-    """Supported security products."""
     return PROVIDER_CATALOG
 
 
@@ -103,6 +103,31 @@ def update_provider(
 def delete_provider(provider_id: UUID, db: Session = Depends(get_db)):
     if not EndpointSecurityService(db).delete_provider(provider_id):
         raise HTTPException(404, "Provider not found")
+
+
+@router.post("/providers/{provider_id}/sync")
+def sync_provider_cloud(provider_id: UUID, db: Session = Depends(get_db)):
+    """Pull agents/findings from the vendor cloud API (if connector exists)."""
+    row = EndpointSecurityService(db).get_provider(provider_id)
+    if not row:
+        raise HTTPException(404, "Provider not found")
+    result = sync_provider(db, row)
+    return result.to_dict()
+
+
+@router.post("/providers/sync-all")
+def sync_all_providers(tenant_id: UUID | None = None, db: Session = Depends(get_db)):
+    """Run cloud sync for every enabled provider that has a connector."""
+    return {"results": sync_all_enabled(db, tenant_id=tenant_id)}
+
+
+@router.get("/connectors")
+def list_cloud_connectors():
+    """Which provider_keys have a cloud API connector implemented."""
+    return {
+        "connectors": sorted(CONNECTORS.keys()),
+        "note": "Agent-side detection works for all catalog products; cloud sync is optional.",
+    }
 
 
 # ---------- Agents ----------
@@ -247,9 +272,7 @@ def org_security_score(db: Session = Depends(get_db)):
 
 
 @router.get("/scores", response_model=list[EndpointSecurityScoreResponse])
-def list_scores(
-    min_score: int | None = None, db: Session = Depends(get_db)
-):
+def list_scores(min_score: int | None = None, db: Session = Depends(get_db)):
     return EndpointSecurityService(db).list_scores(min_score=min_score)
 
 
@@ -261,10 +284,7 @@ def get_device_score(device_id: UUID, db: Session = Depends(get_db)):
     return row
 
 
-@router.post(
-    "/scores/{device_id}/recompute",
-    response_model=EndpointSecurityScoreResponse,
-)
+@router.post("/scores/{device_id}/recompute", response_model=EndpointSecurityScoreResponse)
 def recompute_device_score(device_id: UUID, db: Session = Depends(get_db)):
     return EndpointSecurityService(db).compute_device_score(device_id)
 
@@ -283,29 +303,16 @@ def security_matrix(
     hostname: str | None = None,
     db: Session = Depends(get_db),
 ):
-    """
-    Fleet endpoint-security matrix.
-
-    Returns one row per device × product with the fields needed for the UI:
-    product name, installed, version, status, real-time protection,
-    definitions up-to-date, last scan, last seen, and open threat counts.
-    """
     svc = EndpointSecurityService(db)
-
-    # Ensure catalog providers exist so matrix columns are stable
     svc.seed_default_providers()
 
     agents = svc.list_agents(device_id=device_id)
     if hostname:
         agents = [a for a in agents if (a.hostname or "").lower() == hostname.lower()]
 
-    findings = svc.list_findings(
-        device_id=device_id,
-        status=None,  # filter client-side for open-ish
-    )
+    findings = svc.list_findings(device_id=device_id)
     open_statuses = {"open", "investigating", "contained"}
 
-    # Group findings by (device_id or hostname) + provider_id
     threat_map: dict[tuple, dict[str, int]] = {}
     for f in findings:
         if f.status not in open_statuses:
@@ -319,27 +326,19 @@ def security_matrix(
 
     rows = []
     for a in agents:
-        key = (
-            str(a.device_id) if a.device_id else None,
-            (a.hostname or "").lower(),
-            str(a.provider_id),
-        )
+        key = (str(a.device_id) if a.device_id else None, (a.hostname or "").lower(), str(a.provider_id))
         threats = threat_map.get(key, {"critical": 0, "high": 0, "medium": 0, "low": 0, "total": 0})
 
-        # Map internal status → matrix-friendly label
         status = a.status or "unknown"
         if status == "healthy":
             matrix_status = "protected"
-        elif status == "degraded":
-            matrix_status = "at_risk"
-        elif status == "offline":
+        elif status in {"degraded", "offline"}:
             matrix_status = "at_risk"
         elif status == "not_installed":
             matrix_status = "not_installed"
         else:
             matrix_status = status
 
-        # Outdated if definitions known stale
         if a.definitions_up_to_date is False and matrix_status == "protected":
             matrix_status = "outdated"
 
@@ -365,19 +364,13 @@ def security_matrix(
             }
         )
 
-    # Stable sort: hostname then product priority
     priority = {p["provider_key"]: i for i, p in enumerate(PROVIDER_CATALOG)}
-    rows.sort(
-        key=lambda r: (
-            (r.get("hostname") or "").lower(),
-            priority.get(r.get("provider_key") or "", 99),
-        )
-    )
+    rows.sort(key=lambda r: ((r.get("hostname") or "").lower(), priority.get(r.get("provider_key") or "", 99)))
+
+    from datetime import datetime, timezone
 
     return {
-        "generated_at": __import__("datetime").datetime.now(
-            __import__("datetime").timezone.utc
-        ).isoformat(),
+        "generated_at": datetime.now(timezone.utc).isoformat(),
         "total_rows": len(rows),
         "products": PROVIDER_CATALOG,
         "rows": rows,
