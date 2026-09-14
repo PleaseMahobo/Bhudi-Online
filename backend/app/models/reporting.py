@@ -31,6 +31,7 @@ REPORT_TYPES = (
     "patch_compliance",
     "security_compliance",
     "asset",
+    "device_health",
     "custom",
 )
 
@@ -354,6 +355,23 @@ SYSTEM_TEMPLATES: list[dict[str, Any]] = [
         "default_format": "csv",
         "definition": {
             "sections": ["hardware", "software", "licenses", "warranty_expiry"]
+        },
+    },
+    {
+        "template_key": "device_health_daily",
+        "name": "Daily Device Health Report",
+        "description": "Fleet health scores, online/offline status, grade distribution, and worst devices",
+        "report_type": "device_health",
+        "audience": "technician",
+        "default_format": "json",
+        "definition": {
+            "sections": [
+                "summary",
+                "by_grade",
+                "by_status",
+                "worst_devices",
+                "device_detail",
+            ]
         },
     },
 ]
