@@ -39,6 +39,93 @@ export async function seedBillingPlans() { return request<any[]>(`/api/v1/msp/bi
 export async function getTenantIsolation(tenantId: string) { return request<any>(`/api/v1/msp/tenants/${tenantId}/isolation`); }
 export async function getTenantSubscription(tenantId: string) { return request<any>(`/api/v1/msp/tenants/${tenantId}/subscription`); }
 
+// Customer directory/detail helpers. These compose the existing MSP endpoints so
+// the customer UI uses the current API surface without changing backend behavior.
+export interface CustomerOverviewRow {
+  id: string;
+  tenant_id: string;
+  name: string;
+  legal_name?: string | null;
+  email?: string | null;
+  city?: string | null;
+  country?: string | null;
+  slug?: string | null;
+  status?: string | null;
+  counts: { users: number; devices: number; devices_online: number; sites: number };
+}
+
+export interface CustomerDetailUser {
+  id: string;
+  email: string;
+  first_name?: string | null;
+  last_name?: string | null;
+  role: string;
+  roles: string[];
+  active: boolean;
+  mfa_enabled?: boolean | null;
+  last_login_at?: string | null;
+}
+
+export interface CustomerDetailDevice {
+  id: string;
+  hostname?: string | null;
+  status?: string | null;
+  ip?: string | null;
+  os?: string | null;
+  agent_version?: string | null;
+  connected_via?: string | null;
+  last_seen?: string | null;
+  created_at?: string | null;
+}
+
+export interface CustomerDetail {
+  organization: any & { counts: CustomerOverviewRow["counts"] };
+  sites: any[];
+  contacts: any[];
+  technicians: any[];
+  users: CustomerDetailUser[];
+  devices: CustomerDetailDevice[];
+  isolation: any;
+}
+
+export async function getCustomersOverview(): Promise<{ customers: CustomerOverviewRow[] }> {
+  const orgs = await listOrganizations({ org_type: "client" });
+  const customers = await Promise.all(orgs.map(async (org) => {
+    const tenantId = String(org.tenant_id);
+    const [sites, contacts] = await Promise.all([
+      listSites({ organization_id: String(org.id) }).catch(() => []),
+      listContacts({ organization_id: String(org.id) }).catch(() => []),
+    ]);
+    return {
+      id: String(org.id),
+      tenant_id: tenantId,
+      name: org.name,
+      legal_name: org.legal_name,
+      email: org.email,
+      city: org.city,
+      country: org.country,
+      slug: org.slug,
+      status: org.status,
+      counts: { users: 0, devices: 0, devices_online: 0, sites: sites.length },
+      _contacts: contacts.length,
+    } as CustomerOverviewRow;
+  }));
+  return { customers };
+}
+
+export async function getCustomerDetail(orgId: string): Promise<CustomerDetail> {
+  const organization = await request<any>(`/api/v1/msp/organizations/${orgId}`);
+  const tenantId = String(organization.tenant_id);
+  const [sites, contacts, technicians, isolation] = await Promise.all([
+    listSites({ organization_id: orgId }).catch(() => []),
+    listContacts({ organization_id: orgId }).catch(() => []),
+    listTechnicians({ organization_id: orgId }).catch(() => []),
+    getTenantIsolation(tenantId).catch(() => ({})),
+  ]);
+  const counts = { users: 0, devices: 0, devices_online: 0, sites: sites.length };
+  return { organization: { ...organization, counts }, sites, contacts, technicians, users: [], devices: [], isolation };
+}
+
 // ─── Stripe billing status ─────────────────────────────────────────────
 export async function getStripeBillingStatus() { return request<any>(`/api/v1/msp/billing/stripe/status`); }
 
@@ -89,3 +176,28 @@ export async function listBackupResources(params?: { provider_id?: string; statu
 export async function listBackupJobs(params?: { provider_id?: string; status?: string }) { return request<any[]>(`/api/v1/backup/jobs${qs(params)}`); }
 export async function listBackupRestores(params?: { status?: string }) { return request<any[]>(`/api/v1/backup/restores${qs(params)}`); }
 export async function getBackupSummary() { return request<any>(`/api/v1/backup/summary`); }
+
+// ─── ITSM ─────────────────────────────────────────────────────────────
+export async function listTickets(params?: { status?: string; ticket_type?: string; asset_id?: string; device_id?: string; priority?: string; q?: string }) { return request<any[]>(`/api/v1/itsm/tickets${qs(params)}`); }
+export async function createTicket(data: Record<string, unknown>) { return request<any>(`/api/v1/itsm/tickets`, { method: "POST", body: JSON.stringify(data) }); }
+export async function setTicketStatus(ticketId: string, status: string) { return request<any>(`/api/v1/itsm/tickets/${ticketId}/status`, { method: "POST", body: JSON.stringify({ status }) }); }
+export async function deleteTicket(ticketId: string) { return request<void>(`/api/v1/itsm/tickets/${ticketId}`, { method: "DELETE" }); }
+export async function linkTicketAsset(ticketId: string, assetId: string, role = "related") { return request<any>(`/api/v1/itsm/tickets/${ticketId}/assets`, { method: "POST", body: JSON.stringify({ asset_id: assetId, role }) }); }
+export async function unlinkTicketAsset(ticketId: string, assetId: string) { return request<void>(`/api/v1/itsm/tickets/${ticketId}/assets/${assetId}`, { method: "DELETE" }); }
+export async function listTicketsForAsset(assetId: string) { return request<any[]>(`/api/v1/itsm/assets/${assetId}/tickets`); }
+export async function createTicketForAsset(assetId: string, data: Record<string, unknown>) { return request<any>(`/api/v1/itsm/assets/${assetId}/tickets`, { method: "POST", body: JSON.stringify(data) }); }
+export async function listWorkNotes(ticketId: string) { return request<any[]>(`/api/v1/itsm/tickets/${ticketId}/notes`); }
+export async function addWorkNote(ticketId: string, body: string, author?: string) { return request<any>(`/api/v1/itsm/tickets/${ticketId}/notes`, { method: "POST", body: JSON.stringify({ body, author: author ?? null }) }); }
+export async function runWarrantyExpiryJob(withinDays = 30) { return request<any[]>(`/api/v1/itsm/jobs/warranty-expiry?within_days=${encodeURIComponent(withinDays)}`, { method: "POST" }); }
+
+// ─── Software Deployment ───────────────────────────────────────────────
+export async function listPackages(params?: { package_type?: string; active_only?: boolean }) { return request<any[]>(`/api/v1/software-deployment/packages${qs(params)}`); }
+export async function createPackage(data: Record<string, unknown>) { return request<any>(`/api/v1/software-deployment/packages`, { method: "POST", body: JSON.stringify(data) }); }
+export async function deletePackage(packageId: string) { return request<void>(`/api/v1/software-deployment/packages/${packageId}`, { method: "DELETE" }); }
+export async function listDeploymentJobs(params?: { status?: string; package_id?: string }) { return request<any[]>(`/api/v1/software-deployment/jobs${qs(params)}`); }
+export async function createDeploymentJob(data: Record<string, unknown>) { return request<any>(`/api/v1/software-deployment/jobs`, { method: "POST", body: JSON.stringify(data) }); }
+export async function startDeploymentJob(jobId: string) { return request<any>(`/api/v1/software-deployment/jobs/${jobId}/start`, { method: "POST" }); }
+export async function cancelDeploymentJob(jobId: string) { return request<any>(`/api/v1/software-deployment/jobs/${jobId}/cancel`, { method: "POST" }); }
+export async function rollbackDeploymentJob(jobId: string, data: Record<string, unknown> = {}) { return request<any>(`/api/v1/software-deployment/jobs/${jobId}/rollback`, { method: "POST", body: JSON.stringify(data) }); }
+export async function getDeploymentSummary(jobId: string) { return request<any>(`/api/v1/software-deployment/jobs/${jobId}/summary`); }
+export async function listDeploymentEvents(jobId: string) { return request<any[]>(`/api/v1/software-deployment/jobs/${jobId}/events`); }
