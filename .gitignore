@@ -12,6 +12,7 @@ __pycache__/
 .eggs/
 dist/
 build/
+*.exe
 
 # Node
 node_modules/
