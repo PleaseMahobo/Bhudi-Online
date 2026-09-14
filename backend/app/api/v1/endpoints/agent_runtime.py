@@ -79,6 +79,10 @@ class HeartbeatRequest(BaseModel):
     disk_percent: float | None = None
     ip_address: str | None = None
     hostname: str | None = None
+    # Extended hardware sensors (optional)
+    temperature_c: float | None = None
+    smart_status: str | None = None
+    smart_details: dict[str, Any] | None = None
 
 
 class CommandCreate(BaseModel):
@@ -131,7 +135,6 @@ def _translate_command(platform: str | None, command: str) -> str:
 
 
 def _require_agent_token(agent_id: str, agent_token: str | None) -> dict[str, Any]:
-    """Authenticate an agent callback without revealing whether an agent ID exists."""
     agent = _agents.get(agent_id)
     stored_token = agent.get("agent_token") if agent else None
     if not agent or not agent_token or not stored_token or not secrets.compare_digest(agent_token, stored_token):
@@ -140,13 +143,6 @@ def _require_agent_token(agent_id: str, agent_token: str | None) -> dict[str, An
 
 
 def _sync_enterprise_agent(agent: dict[str, Any], db: Session) -> None:
-    """Mirror runtime enrollment into the persistent enterprise Agent registry.
-
-    The runtime API historically kept its own in-memory/persisted registry while
-    enterprise command dispatch used the SQL Agent/AgentCommand tables. That left
-    newly enrolled agents without a corresponding database Agent row, causing
-    command polling to fail. Keep the two identity layers synchronized.
-    """
     try:
         agent_id = uuid.UUID(str(agent["agent_id"]))
         row = db.get(Agent, agent_id)
@@ -173,8 +169,6 @@ def _sync_enterprise_agent(agent: dict[str, Any], db: Session) -> None:
             row.hostname = str(agent.get("hostname") or row.hostname)
             row.agent_version = str(agent.get("agent_version") or row.agent_version or "1.0.0")
             row.platform = agent.get("platform") or row.platform
-            # Preserve tenant association from secure enrollment so the portal can
-            # discover the endpoint after a runtime heartbeat/restart.
             if agent.get("tenant_id") and getattr(row, "tenant_id", None) is None:
                 row.tenant_id = uuid.UUID(str(agent["tenant_id"]))
             row.enrollment_token = agent.get("agent_token") or row.enrollment_token
@@ -182,6 +176,11 @@ def _sync_enterprise_agent(agent: dict[str, Any], db: Session) -> None:
             row.last_seen = now
             row.last_heartbeat = now
             row.enabled = True
+            if agent.get("health_score") is not None:
+                try:
+                    row.health_score = int(agent["health_score"])
+                except Exception:
+                    pass
             if row.registration_state == "pending":
                 row.registration_state = "approved"
                 row.approved = True
@@ -194,11 +193,6 @@ def _sync_enterprise_agent(agent: dict[str, Any], db: Session) -> None:
 
 @router.post("/enroll", response_model=EnrollResponse)
 def enroll(req: EnrollRequest, db: Session = Depends(get_db)):
-    # A tenant enrollment credential is authoritative. Persist the tenant-bound
-    # Agent first, then mirror that exact identity into the runtime registry.
-    # Previously this endpoint merely stored enrollment_secret in memory and
-    # created an unscoped runtime Agent, so healthy heartbeats could never appear
-    # in the tenant-safe Devices portal.
     tenant_id = None
     if req.enrollment_secret:
         persistent, token, tenant_id = AgentEnrollmentService(db).enroll_agent(
@@ -227,7 +221,10 @@ def enroll(req: EnrollRequest, db: Session = Depends(get_db)):
         "cpu_percent": None,
         "memory_percent": None,
         "disk_percent": None,
+        "temperature_c": None,
+        "smart_status": None,
         "ip_address": None,
+        "health_score": 100,
         "commands_completed": 0,
         "commands_failed": 0,
     }
@@ -235,8 +232,6 @@ def enroll(req: EnrollRequest, db: Session = Depends(get_db)):
     device_state.register_device(agent_id)
     device_state.devices[agent_id]["hostname"] = req.hostname
     device_state.devices[agent_id]["tenant_id"] = str(tenant_id) if tenant_id else None
-    # The credential path already created the durable row; legacy enrollment
-    # still receives the existing compatibility sync behavior.
     if not req.enrollment_secret:
         _sync_enterprise_agent(_agents[agent_id], db)
     _persist_agents()
@@ -248,32 +243,81 @@ def heartbeat(req: HeartbeatRequest, db: Session = Depends(get_db)):
     agent = _require_agent_token(req.agent_id, req.agent_token)
     agent["status"] = req.status
     agent["last_seen"] = datetime.now(timezone.utc).isoformat()
-    for field in ("cpu_percent", "memory_percent", "disk_percent", "ip_address", "hostname"):
-        value = getattr(req, field)
+    for field in (
+        "cpu_percent",
+        "memory_percent",
+        "disk_percent",
+        "ip_address",
+        "hostname",
+        "temperature_c",
+        "smart_status",
+    ):
+        value = getattr(req, field, None)
         if value is not None:
             agent[field] = value
-    # Keep the in-memory device registry tenant-scoped as well; otherwise a
-    # worker restart/first heartbeat can recreate an unscoped device that the
-    # tenant-safe Devices API correctly filters out.
+    if req.smart_details is not None:
+        agent["smart_details"] = req.smart_details
+
     device_state.heartbeat(req.agent_id, tenant_id=agent.get("tenant_id"))
     if req.agent_id in device_state.devices:
         if req.hostname:
             device_state.devices[req.agent_id]["hostname"] = req.hostname
         if req.ip_address:
             device_state.devices[req.agent_id]["ip_address"] = req.ip_address
+
     try:
         from app.services.metrics_service import record_heartbeat_metrics
-        record_heartbeat_metrics(agent_id=req.agent_id, hostname=req.hostname or agent.get("hostname"), cpu_percent=req.cpu_percent,
-                                 memory_percent=req.memory_percent, disk_percent=req.disk_percent,
-                                 ip_address=req.ip_address or agent.get("ip_address"), status=req.status)
+
+        record_heartbeat_metrics(
+            agent_id=req.agent_id,
+            hostname=req.hostname or agent.get("hostname"),
+            cpu_percent=req.cpu_percent,
+            memory_percent=req.memory_percent,
+            disk_percent=req.disk_percent,
+            ip_address=req.ip_address or agent.get("ip_address"),
+            status=req.status,
+        )
     except Exception as exc:
         print(f"[runtime] metrics persist skipped: {exc}")
+
+    health_info: dict[str, Any] = {}
+    try:
+        from app.services.device_health_service import DeviceHealthService
+
+        health_info = DeviceHealthService(db).on_heartbeat(
+            agent_id=req.agent_id,
+            hostname=req.hostname or agent.get("hostname"),
+            cpu_percent=req.cpu_percent,
+            memory_percent=req.memory_percent,
+            disk_percent=req.disk_percent,
+            temperature_c=req.temperature_c,
+            smart_status=req.smart_status,
+            smart_details=req.smart_details,
+            ip_address=req.ip_address or agent.get("ip_address"),
+            status=req.status,
+            raise_alerts=True,
+        )
+        if health_info.get("health_score") is not None:
+            agent["health_score"] = health_info["health_score"]
+    except Exception as exc:
+        print(f"[runtime] health scoring skipped: {exc}")
+
     _sync_enterprise_agent(agent, db)
     pending = sum(1 for c in _commands.get(req.agent_id, []) if c["status"] in ("pending", "dispatched"))
     _persist_agents()
-    return {"ok": True, "pending_commands": pending, "heartbeat_interval": 30,
-            "cpu_percent": agent.get("cpu_percent"), "memory_percent": agent.get("memory_percent"),
-            "disk_percent": agent.get("disk_percent")}
+    return {
+        "ok": True,
+        "pending_commands": pending,
+        "heartbeat_interval": 30,
+        "cpu_percent": agent.get("cpu_percent"),
+        "memory_percent": agent.get("memory_percent"),
+        "disk_percent": agent.get("disk_percent"),
+        "temperature_c": agent.get("temperature_c"),
+        "smart_status": agent.get("smart_status"),
+        "health_score": agent.get("health_score"),
+        "health_grade": health_info.get("grade"),
+        "alerts_raised": len(health_info.get("alerts") or []),
+    }
 
 
 @router.get("/agents")
@@ -305,9 +349,18 @@ def create_command(agent_id: str, body: CommandCreate, _user: User = Depends(req
     command_id = str(uuid.uuid4())
     profile = _platform_metadata(agent.get("platform"))
     cmd = {
-        "id": command_id, "command_id": command_id, "agent_id": agent_id, "command": body.command, "shell": body.shell,
-        "status": "pending", "retry_count": 0,
-        "execution_profile": {**profile, "platform": agent.get("platform"), "translated_command": _translate_command(agent.get("platform"), body.command)},
+        "id": command_id,
+        "command_id": command_id,
+        "agent_id": agent_id,
+        "command": body.command,
+        "shell": body.shell,
+        "status": "pending",
+        "retry_count": 0,
+        "execution_profile": {
+            **profile,
+            "platform": agent.get("platform"),
+            "translated_command": _translate_command(agent.get("platform"), body.command),
+        },
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     _commands.setdefault(agent_id, []).append(cmd)
@@ -325,10 +378,6 @@ def command_history(agent_id: str):
 @router.get("/agents/{agent_id}/commands/pending")
 def pending_commands(agent_id: str, agent_token: str | None = None, db: Session = Depends(get_db)):
     _require_agent_token(agent_id, agent_token)
-
-    # Native production agents poll this canonical runtime endpoint. Remote-access
-    # operations are queued durably in AgentCommand, so bridge that persistent queue
-    # here instead of leaving remote.desktop.start stranded in the SQL dispatcher.
     commands: list[dict[str, Any]] = []
     try:
         dispatcher = AgentDispatcher(db)
@@ -350,7 +399,6 @@ def pending_commands(agent_id: str, agent_token: str | None = None, db: Session 
         db.rollback()
         print(f"[runtime] persistent command poll skipped: {exc}")
 
-    # Preserve compatibility for legacy runtime-only commands.
     pending = [c for c in _commands.get(agent_id, []) if c.get("status") == "pending"]
     for command in pending:
         command["status"] = "dispatched"
@@ -404,17 +452,11 @@ def command_result(
             _persist_agents()
             return {"ok": True, "command": command}
 
-    # Results for persistent remote-access commands arrive through the same
-    # canonical runtime callback and must complete the SQL command record.
     try:
         dispatcher = AgentDispatcher(db)
         command = dispatcher.mark_completed(
             uuid.UUID(command_id),
-            {
-                "exit_code": body.exit_code,
-                "stdout": body.stdout,
-                "stderr": body.stderr,
-            },
+            {"exit_code": body.exit_code, "stdout": body.stdout, "stderr": body.stderr},
         )
         agent["commands_completed" if body.exit_code == 0 else "commands_failed"] = int(
             agent.get("commands_completed" if body.exit_code == 0 else "commands_failed") or 0
@@ -449,8 +491,14 @@ def remote_desktop(body: RemoteDesktopBody, _user: User = Depends(require_mfa_fo
     agent = _agents.get(body.agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
-    session = remote_session_manager.create_session(agent_id=body.agent_id, session_type="desktop", metadata=body.model_dump())
-    return {"session_id": session.session_id, "session_type": "desktop", "stream_path": f"/api/v1/remote-access/sessions/{session.session_id}/dashboard", "status": session.status}
+    session = remote_session_manager.create_session(
+        agent_id=body.agent_id, session_type="desktop", metadata=body.model_dump()
+    )
+    return {
+        "session_id": session.session_id,
+        "session_type": "desktop",
+        "stream_path": f"/api/v1/remote-access/sessions/{session.session_id}/stream",
+    }
 
 
 @router.post("/remote/terminal")
@@ -458,5 +506,11 @@ def remote_terminal(body: RemoteTerminalBody, _user: User = Depends(require_mfa_
     agent = _agents.get(body.agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
-    session = remote_session_manager.create_session(agent_id=body.agent_id, session_type="terminal", metadata=body.model_dump())
-    return {"session_id": session.session_id, "session_type": "terminal", "stream_path": f"/api/v1/remote-access/sessions/{session.session_id}/dashboard", "status": session.status}
+    session = remote_session_manager.create_session(
+        agent_id=body.agent_id, session_type="terminal", metadata=body.model_dump()
+    )
+    return {
+        "session_id": session.session_id,
+        "session_type": "terminal",
+        "stream_path": f"/api/v1/remote-access/sessions/{session.session_id}/stream",
+    }

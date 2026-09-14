@@ -54,7 +54,6 @@ app.include_router(api_router, prefix="/api/v1")
 
 
 async def _run_database_bootstrap():
-    """Run database bootstrap without blocking FastAPI readiness."""
     try:
         result = await asyncio.to_thread(initialize_database)
         print(f"[startup] bootstrap: {result}")
@@ -91,6 +90,12 @@ async def startup_event():
             print("[startup] ITSM SLA escalation worker started")
         except Exception as e:
             print(f"[startup] itsm_sla_worker skipped: {e}")
+        try:
+            from app.workers.device_health_worker import device_health_worker
+            device_health_worker.start()
+            print("[startup] device health worker started (missed heartbeats + scores)")
+        except Exception as e:
+            print(f"[startup] device_health_worker skipped: {e}")
 
 
 @app.on_event("shutdown")
@@ -109,6 +114,11 @@ async def shutdown_event():
     try:
         from app.workers.itsm_sla_worker import itsm_sla_worker
         itsm_sla_worker.stop()
+    except Exception:
+        pass
+    try:
+        from app.workers.device_health_worker import device_health_worker
+        device_health_worker.stop()
     except Exception:
         pass
 
@@ -138,7 +148,10 @@ async def metrics():
         body, ctype = render_metrics()
         return Response(content=body, media_type=ctype)
     except Exception:
-        return Response(content="# HELP bhudi_up 1 if process is up\n# TYPE bhudi_up gauge\nbhudi_up 1\n", media_type="text/plain; version=0.0.4")
+        return Response(
+            content="# HELP bhudi_up 1 if process is up\n# TYPE bhudi_up gauge\nbhudi_up 1\n",
+            media_type="text/plain; version=0.0.4",
+        )
 
 
 device_heartbeats: Dict[str, dict] = {}
