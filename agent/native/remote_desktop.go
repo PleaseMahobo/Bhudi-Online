@@ -46,10 +46,6 @@ func startRemoteDesktop(serverURL, agentID string, command map[string]any) map[s
 		return resultErr(err.Error())
 	}
 
-	// The Windows service runs as LocalSystem in Session 0 and cannot reliably
-	// capture the logged-on user's WinSta0/default desktop. Start the same native
-	// binary as a worker in the active user's interactive session. The worker reads
-	// the already-persisted agent identity locally and connects to the exact session.
 	if runtime.GOOS == "windows" && isWindowsServiceProcess() {
 		if err := launchDesktopWorker(serverURL, sessionID, sessionMode, displayProtocol, monitorIndex); err != nil {
 			return resultErr("failed to launch interactive desktop worker: " + err.Error())
@@ -82,8 +78,6 @@ func startRemoteDesktop(serverURL, agentID string, command map[string]any) map[s
 }
 
 func runDesktopSession(wsURL, sessionID, sessionMode, displayProtocol string, monitorIndex int) {
-	// SetThreadDesktop / BitBlt are OS-thread-affine. Without LockOSThread the
-	// goroutine can migrate after attach and capture still sees Session 0.
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 
@@ -139,16 +133,13 @@ func runDesktopSession(wsURL, sessionID, sessionMode, displayProtocol string, mo
 		"encoding": "jpeg", "monitors": mons,
 		"agent_version": agentVersion, "console_session": activeConsoleSessionID(),
 	})
-	fmt.Printf("[remote-desktop] monitor=%d origin=(%d,%d) size=%dx%d count=%d version=%s\n",
-		monitorIndex, ox, oy, fw, fh, len(mons), agentVersion)
+	fmt.Printf("[remote-desktop] monitor=%d origin=(%d,%d) size=%dx%d count=%d version=%s\n", monitorIndex, ox, oy, fw, fh, len(mons), agentVersion)
 
 	stop := make(chan struct{})
 	var once sync.Once
 	closeStop := func() { once.Do(func() { close(stop) }) }
 
 	nativeW, nativeH := fw, fh
-	frameW, frameH := fw, fh
-	var frameMu sync.Mutex
 	inputCh := make(chan map[string]any, 64)
 
 	go func() {
@@ -185,9 +176,8 @@ func runDesktopSession(wsURL, sessionID, sessionMode, displayProtocol string, mo
 						for k, v := range inner {
 							mapped[k] = v
 						}
-						// Pointer coordinates are normalized by the browser against the
-						// actual rendered canvas. Convert them to native monitor pixels
-						// exactly once in applyDesktopInputAt, preserving old pixel clients.
+						// The browser sends coordinates normalized to the rendered canvas.
+						// The native Windows input layer maps them once to native pixels.
 						mapped["_ox"] = float64(ox)
 						mapped["_oy"] = float64(oy)
 						mapped["_nw"] = float64(nativeW)
@@ -250,9 +240,6 @@ func runDesktopSession(wsURL, sessionID, sessionMode, displayProtocol string, mo
 				continue
 			}
 			bw, bh := img.Bounds().Dx(), img.Bounds().Dy()
-			frameMu.Lock()
-			frameW, frameH = bw, bh
-			frameMu.Unlock()
 			seq++
 			_ = writeJSON(conn, map[string]any{
 				"type": "frame", "session_id": sessionID, "encoding": "jpeg", "seq": seq,
