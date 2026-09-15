@@ -136,6 +136,11 @@ class RemoteAccessService:
     ) -> AgentCommand:
         command_type = REMOTE_ACCESS_COMMAND_TYPES[operation]
         enriched_payload = {"operation": operation, **payload}
+        if operation == "remote_desktop":
+            session_id = enriched_payload.get("session_id")
+            input_token = remote_session_manager.get_input_token(session_id) if session_id else None
+            if input_token:
+                enriched_payload["input_token"] = input_token
         return self.dispatcher.queue_command(
             agent_id=agent_id,
             command_type=command_type,

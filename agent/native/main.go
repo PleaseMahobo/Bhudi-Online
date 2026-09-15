@@ -46,14 +46,14 @@ func main() {
         cfg := parseRunFlags(os.Args[2:])
         if err := runWindowsService(cfg.Server); err != nil { fatal(err) }
     case "desktop-worker":
-        cfg, sessionID, mode, protocol, monitor, ok := desktopWorkerArgs(os.Args[2:])
+        cfg, sessionID, mode, protocol, monitor, inputToken, ok := desktopWorkerArgs(os.Args[2:])
         if !ok { fatal(fmt.Errorf("desktop-worker requires -session")) }
         ident, err := loadStoredIdentity()
         if err != nil { fatal(fmt.Errorf("desktop-worker identity: %w", err)) }
         wsURL, err := sessionWSURL(cfg.Server, sessionID, ident.AgentID)
         if err != nil { fatal(fmt.Errorf("desktop-worker session URL: %w", err)) }
         fmt.Printf("[remote-desktop] interactive worker starting session=%s agent=%s monitor=%d\n", sessionID, ident.AgentID, monitor)
-        runDesktopSession(wsURL, sessionID, mode, protocol, monitor)
+        runDesktopSession(wsURL, sessionID, mode, protocol, monitor, inputToken)
     case "run":
         runAgent(parseRunFlags(os.Args[2:]))
     case "version", "-v", "--version":
