@@ -1,8 +1,61 @@
 'use client';
 
 import { useState } from 'react';
-import { Mail, MessageSquare, Building2, Loader2 } from 'lucide-react';
+import {
+  Mail,
+  MessageSquare,
+  Building2,
+  Loader2,
+  Phone,
+  Shield,
+} from 'lucide-react';
 import { PageHero, SectionLabel } from '@/shared/marketing/MarketingUI';
+
+const CHANNELS = [
+  {
+    icon: Mail,
+    title: 'Email',
+    body: 'info@bhudi.online',
+    detail: 'Sales, support, and onboarding — reply target: same business day.',
+    href: 'mailto:info@bhudi.online',
+    cta: 'Email the team',
+  },
+  {
+    icon: Phone,
+    title: 'WhatsApp',
+    body: '+27 79 038 2171',
+    detail: 'Urgent help without a ticket queue. Chat the team online today.',
+    href: 'https://wa.me/27790382171',
+    cta: 'Get help now',
+  },
+  {
+    icon: MessageSquare,
+    title: 'Demo',
+    body: "Book this week's slots",
+    detail:
+      '15-minute live ops-shell walkthrough — RMM, remote control, and tickets. Limited slots per week.',
+    href: 'mailto:info@bhudi.online?subject=Book%20a%20Bhudi%20demo',
+    cta: 'Claim a demo slot',
+  },
+  {
+    icon: Building2,
+    title: 'Partners',
+    body: 'Grow with Bhudi',
+    detail:
+      'MSP and integrator program: margin, white-label, and co-selling. Partner seats are limited — apply before the next intake closes.',
+    href: 'mailto:info@bhudi.online?subject=Partner%20program%20enquiry',
+    cta: 'Apply for partner access',
+  },
+  {
+    icon: Shield,
+    title: 'CyberBastion',
+    body: 'Security that shows up',
+    detail:
+      'SOC, ethical hacking, and on-site response across Gauteng — backing Bhudi when you need hands on glass.',
+    href: 'https://www.cyberbastion.co.za',
+    cta: 'Explore managed security',
+  },
+] as const;
 
 export default function ContactPage() {
   const [sent, setSent] = useState(false);
@@ -47,25 +100,46 @@ export default function ContactPage() {
       <PageHero
         label="Contact"
         title="Talk to the Bhudi team"
-        subtitle="Sales, demos, partnership, or support — send a note and we will route it to the right person."
+        subtitle="Sales, demos, partners, or support — reach us today. Operators already running production fleets on Bhudi get answers within one business day."
       />
 
       <section className="mx-auto max-w-6xl px-4 py-16 sm:px-6">
         <div className="grid gap-12 lg:grid-cols-5">
           <div className="space-y-6 lg:col-span-2">
             <SectionLabel>Channels</SectionLabel>
-            {[
-              { icon: Mail, t: 'Email', d: 'hello@bhudi.io' },
-              { icon: MessageSquare, t: 'Demo', d: 'Book a walkthrough of the operations shell' },
-              { icon: Building2, t: 'Partners', d: 'MSP and integrator programs' },
-            ].map(({ icon: Icon, t, d }) => (
-              <div key={t} className="flex gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600">
+            <p className="text-sm text-slate-600">
+              Native agent <span className="font-medium text-slate-800">2.2.10+</span>
+              {' · '}
+              online status in under <span className="font-medium text-slate-800">3 minutes</span>
+              {' · '}
+              Gauteng + remote support
+            </p>
+            {CHANNELS.map(({ icon: Icon, title, body, detail, href, cta }) => (
+              <div key={title} className="flex gap-3">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600">
                   <Icon size={18} />
                 </div>
-                <div>
-                  <p className="font-semibold text-slate-900">{t}</p>
-                  <p className="text-sm text-slate-600">{d}</p>
+                <div className="min-w-0">
+                  <p className="font-semibold text-slate-900">{title}</p>
+                  <p className="text-sm font-medium text-indigo-700">
+                    <a
+                      href={href}
+                      target={href.startsWith('http') ? '_blank' : undefined}
+                      rel={href.startsWith('http') ? 'noopener noreferrer' : undefined}
+                      className="hover:underline"
+                    >
+                      {body}
+                    </a>
+                  </p>
+                  <p className="mt-0.5 text-sm text-slate-600">{detail}</p>
+                  <a
+                    href={href}
+                    target={href.startsWith('http') ? '_blank' : undefined}
+                    rel={href.startsWith('http') ? 'noopener noreferrer' : undefined}
+                    className="mt-1 inline-block text-sm font-semibold text-indigo-600 hover:text-indigo-500"
+                  >
+                    {cta} →
+                  </a>
                 </div>
               </div>
             ))}
@@ -76,10 +150,12 @@ export default function ContactPage() {
               <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-8 text-emerald-900">
                 <h2 className="text-lg font-semibold">Message received</h2>
                 <p className="mt-2 text-sm">
-                  Thanks — your message was submitted successfully. We typically respond within one
-                  business day.
+                  Thanks — your message was submitted successfully. We typically respond within
+                  one business day.
                 </p>
-                {warning && <p className="mt-3 text-sm text-amber-800">{warning}</p>}
+                {warning && (
+                  <p className="mt-3 text-sm text-amber-800">{warning}</p>
+                )}
               </div>
             ) : (
               <form
@@ -127,7 +203,9 @@ export default function ContactPage() {
                   />
                 </label>
                 {error && (
-                  <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>
+                  <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+                    {error}
+                  </p>
                 )}
                 <button
                   type="submit"
