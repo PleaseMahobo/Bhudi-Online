@@ -3,6 +3,7 @@
 
 export * from "./api-modules";
 export * from "./endpoint-security-client";
+export * from "./api-assets";
 
 // ---- Auth & session (kept here for the shared request helper with refresh) ----
 const API_BASE = "";
@@ -178,7 +179,7 @@ export async function deleteAlertRule(id: string) {
   return request<void>(`/api/v1/alert-engine/rules/${id}`, { method: "DELETE" });
 }
 
-// Security types used by Endpoint Security UI
+// Security types
 export interface SecurityProviderCatalogItem { provider_key: string; display_name: string; }
 export interface SecurityProvider {
   id: string;
@@ -325,7 +326,6 @@ export interface VendorSyncResult {
   errors: string[];
 }
 
-// Common asset / ITSM types used by several pages
 export type AssetStatus = "ordered" | "in_stock" | "deployed" | "in_repair" | "retired" | "disposed" | string;
 export interface Asset {
   id: string; name: string; asset_tag?: string | null; serial_number?: string | null; asset_type?: string | null;
@@ -342,3 +342,15 @@ export interface ServiceTicket {
   resolved_at?: string | null;
 }
 export interface WorkNote { id: string; ticket_id: string; body: string; author?: string | null; created_at: string; }
+
+export interface Vendor { id: string; name: string; contact_email?: string | null; contact_phone?: string | null; website?: string | null; active: boolean; notes?: string | null; created_at?: string; updated_at?: string; }
+export interface License { id: string; name: string; vendor_id?: string | null; license_key?: string | null; seats_total: number; seats_used: number; seats_available?: number; expires_at?: string | null; active: boolean; notes?: string | null; created_at?: string; updated_at?: string; }
+export interface Contract { id: string; name: string; vendor_id?: string | null; contract_type?: string | null; status: string; start_date?: string | null; end_date?: string | null; value?: number | null; notes?: string | null; created_at?: string; updated_at?: string; }
+export interface DepreciationInfo { asset_id: string; method: string; purchase_cost: number; residual_value: number; useful_life_months: number; months_elapsed: number; book_value: number; accumulated_depreciation: number; }
+export interface WarrantyInfo { asset_id: string; serial_number?: string | null; warranty_end?: string | null; warranty_active: boolean; days_remaining?: number | null; source?: string | null; }
+export interface LifecycleEvent { id: string; asset_id: string; from_status?: string | null; to_status: string; reason?: string | null; changed_by?: string | null; created_at: string; }
+export type PackageType = "msi" | "exe" | "chocolatey" | "winget" | "custom" | string;
+export interface SoftwarePackage { id: string; name: string; version: string; publisher?: string | null; description?: string | null; package_type: PackageType; is_active: boolean; created_at: string; updated_at: string; }
+export interface DeploymentJob { id: string; package_id: string; name: string; action: string; status: string; targets_total: number; targets_success: number; targets_pending: number; created_at: string; updated_at: string; }
+export interface DeploymentJobSummary { job_id: string; status: string; targets_total: number; targets_success: number; targets_failed: number; targets_pending: number; success_rate: number; finished_at?: string | null; }
+export interface DeploymentEvent { id: string; job_id: string; target_id?: string | null; level: string; message: string; created_at: string; }
