@@ -47,6 +47,7 @@ const NAV_ITEMS: NavItem[] = [
   { label: 'Print Management', href: '/assets', icon: Printer },
   { label: 'Reports', href: '/reporting', icon: BarChart3 },
   { label: 'Billing', href: '/billing', icon: CreditCard },
+  { label: 'Administrator', href: '/administrator', icon: Shield },
   { label: 'Settings', href: '/compliance', icon: Settings },
 ];
 
