@@ -1,30 +1,8 @@
 /** Phase 1–2 unified devices client (Tactical-style). */
 
+import { refreshSessionOnce } from './session-refresh';
+
 const API_BASE = '';
-
-/** Single in-flight refresh so parallel 401s share one /api/auth/refresh call. */
-let refreshPromise: Promise<void> | null = null;
-
-async function refreshSessionOnce(): Promise<void> {
-  if (!refreshPromise) {
-    refreshPromise = fetch(`${API_BASE}/api/auth/refresh`, {
-      method: 'POST',
-      headers: { Accept: 'application/json' },
-      credentials: 'include',
-      cache: 'no-store',
-    })
-      .then(async (response) => {
-        if (!response.ok) {
-          throw new Error(`Session refresh failed (${response.status})`);
-        }
-        await response.json().catch(() => undefined);
-      })
-      .finally(() => {
-        refreshPromise = null;
-      });
-  }
-  await refreshPromise;
-}
 
 function redirectToLogin(): void {
   if (typeof window === 'undefined') return;
