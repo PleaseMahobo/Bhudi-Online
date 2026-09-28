@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.core.access_tiers import require_mfa_for_actions
 from app.database.session import get_db
 from app.models.agent import Agent
+from app.models.device import Device
 from app.models.user import User
 from app.state import device_state
 from app.services.remote_session_manager import remote_session_manager
@@ -68,16 +69,84 @@ def _require_agent_token(agent_id: str, agent_token: str | None) -> dict[str, An
     return agent
 def _sync_enterprise_agent(agent: dict[str, Any], db: Session) -> None:
     try:
-        agent_id=uuid.UUID(str(agent["agent_id"])); row=db.get(Agent, agent_id); now=datetime.now(timezone.utc)
+        agent_id = uuid.UUID(str(agent["agent_id"]))
+        row = db.get(Agent, agent_id)
+        now = datetime.now(timezone.utc)
+        tenant_id = uuid.UUID(str(agent["tenant_id"])) if agent.get("tenant_id") else None
+        agent_version = str(agent.get("agent_version") or "1.0.0")
+        hostname = str(agent.get("hostname") or agent_id)
+
         if row is None:
-            row=Agent(id=agent_id, hostname=str(agent.get("hostname") or agent_id), agent_version=str(agent.get("agent_version") or "1.0.0"), platform=agent.get("platform"), enrollment_token=agent.get("agent_token"), registration_state="approved", approved=True, trusted=True, tenant_id=(uuid.UUID(str(agent["tenant_id"])) if agent.get("tenant_id") else None), status="online", enabled=True, registered_at=now, last_seen=now, last_heartbeat=now); db.add(row)
+            row = Agent(
+                id=agent_id,
+                hostname=hostname,
+                agent_version=agent_version,
+                platform=agent.get("platform"),
+                enrollment_token=agent.get("agent_token"),
+                registration_state="approved",
+                approved=True,
+                trusted=True,
+                tenant_id=tenant_id,
+                status="online",
+                enabled=True,
+                registered_at=now,
+                last_seen=now,
+                last_heartbeat=now,
+            )
+            db.add(row)
         else:
-            row.hostname=str(agent.get("hostname") or row.hostname); row.agent_version=str(agent.get("agent_version") or row.agent_version or "1.0.0"); row.platform=agent.get("platform") or row.platform
-            if agent.get("tenant_id") and getattr(row,"tenant_id",None) is None: row.tenant_id=uuid.UUID(str(agent["tenant_id"]))
-            row.enrollment_token=agent.get("agent_token") or row.enrollment_token; row.status="online"; row.last_seen=now; row.last_heartbeat=now; row.enabled=True
-            if row.registration_state=="pending": row.registration_state="approved"; row.approved=True; row.trusted=True
+            row.hostname = hostname
+            row.agent_version = agent_version or row.agent_version
+            row.platform = agent.get("platform") or row.platform
+            if tenant_id and getattr(row, "tenant_id", None) is None:
+                row.tenant_id = tenant_id
+            row.enrollment_token = agent.get("agent_token") or row.enrollment_token
+            row.status = "online"
+            row.last_seen = now
+            row.last_heartbeat = now
+            row.enabled = True
+            if row.registration_state == "pending":
+                row.registration_state = "approved"
+                row.approved = True
+                row.trusted = True
+
+        # Keep the legacy devices projection synchronized with the canonical
+        # persistent Agent row. Runtime enrollment historically updated
+        # public.agents but left public.devices.agent_version NULL, which made
+        # the portal show a blank/unknown agent version. Prefer an explicit
+        # Agent.device_id; for legacy runtime rows, the agent/device IDs are
+        # intentionally identical, so use that identity only when the device
+        # exists and belongs to the same tenant.
+        projected_device = None
+        device_id = getattr(row, "device_id", None)
+        if device_id is not None:
+            projected_device = db.get(Device, device_id)
+        if projected_device is None:
+            candidate = db.get(Device, agent_id)
+            if candidate is not None and (
+                tenant_id is None
+                or getattr(candidate, "tenant_id", None) in (None, tenant_id)
+            ):
+                projected_device = candidate
+                if getattr(row, "device_id", None) is None:
+                    row.device_id = candidate.id
+
+        if projected_device is not None:
+            projected_device.agent_version = agent_version
+            projected_device.version = agent_version
+            projected_device.hostname = hostname
+            projected_device.status = "online"
+            projected_device.last_seen = now
+            if agent.get("ip_address"):
+                projected_device.ip_address = agent["ip_address"]
+            if tenant_id and getattr(projected_device, "tenant_id", None) is None:
+                projected_device.tenant_id = tenant_id
+
         db.commit()
-    except Exception as exc: db.rollback(); print(f"[runtime] enterprise agent sync skipped: {exc}")
+    except Exception as exc:
+        db.rollback()
+        print(f"[runtime] enterprise agent sync skipped: {exc}")
+
 @router.post("/enroll", response_model=EnrollResponse)
 def enroll(req: EnrollRequest, db: Session=Depends(get_db)):
     tenant_id=None

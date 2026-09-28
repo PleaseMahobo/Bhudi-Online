@@ -110,3 +110,109 @@ def test_enrollment_token_hash_is_not_raw_token(monkeypatch):
     assert raw
     assert record.token_hash != raw
     assert len(record.token_hash) == 64
+
+
+def test_runtime_sync_projects_agent_version_to_same_tenant_device():
+    from app.api.v1.endpoints.agent_runtime import _sync_enterprise_agent
+
+    tenant_id = uuid4()
+    agent_id = uuid4()
+    agent_row = SimpleNamespace(
+        id=agent_id,
+        device_id=None,
+        hostname="CUSTOMER-PC",
+        agent_version=None,
+        platform=None,
+        tenant_id=tenant_id,
+        enrollment_token=None,
+        status="offline",
+        last_seen=None,
+        last_heartbeat=None,
+        enabled=False,
+        registration_state="approved",
+        approved=True,
+        trusted=True,
+    )
+    device_row = SimpleNamespace(
+        id=agent_id,
+        tenant_id=tenant_id,
+        agent_version=None,
+        version=None,
+        hostname=None,
+        status="offline",
+        last_seen=None,
+        ip_address=None,
+    )
+    db = FakeDB()
+    db.get = lambda model, key: agent_row if model is Agent else device_row
+
+    _sync_enterprise_agent(
+        {
+            "agent_id": str(agent_id),
+            "tenant_id": str(tenant_id),
+            "hostname": "CUSTOMER-PC",
+            "agent_version": "2.2.10",
+            "platform": "windows/amd64",
+            "agent_token": "test-token",
+            "ip_address": "192.0.2.10",
+        },
+        db,
+    )
+
+    assert device_row.agent_version == "2.2.10"
+    assert device_row.version == "2.2.10"
+    assert device_row.hostname == "CUSTOMER-PC"
+    assert agent_row.device_id == agent_id
+
+
+def test_runtime_sync_does_not_project_version_across_tenants():
+    from app.api.v1.endpoints.agent_runtime import _sync_enterprise_agent
+
+    tenant_a = uuid4()
+    tenant_b = uuid4()
+    agent_id = uuid4()
+    agent_row = SimpleNamespace(
+        id=agent_id,
+        device_id=None,
+        hostname="TENANT-A-PC",
+        agent_version="2.2.10",
+        platform="windows/amd64",
+        tenant_id=tenant_a,
+        enrollment_token=None,
+        status="offline",
+        last_seen=None,
+        last_heartbeat=None,
+        enabled=False,
+        registration_state="approved",
+        approved=True,
+        trusted=True,
+    )
+    device_row = SimpleNamespace(
+        id=agent_id,
+        tenant_id=tenant_b,
+        agent_version=None,
+        version=None,
+        hostname="TENANT-B-PC",
+        status="offline",
+        last_seen=None,
+        ip_address=None,
+    )
+    db = FakeDB()
+    db.get = lambda model, key: agent_row if model is Agent else device_row
+
+    _sync_enterprise_agent(
+        {
+            "agent_id": str(agent_id),
+            "tenant_id": str(tenant_a),
+            "hostname": "TENANT-A-PC",
+            "agent_version": "2.2.10",
+            "platform": "windows/amd64",
+            "agent_token": "test-token",
+        },
+        db,
+    )
+
+    assert device_row.agent_version is None
+    assert device_row.version is None
+    assert device_row.hostname == "TENANT-B-PC"
+    assert agent_row.device_id is None
