@@ -8,8 +8,8 @@ import (
     "strings"
 )
 
-// Set at link time: -ldflags "-X main.agentVersion=2.2.10"
-var agentVersion = "2.2.10"
+// Set at link time: -ldflags "-X main.agentVersion=2.2.11"
+var agentVersion = "2.2.11"
 
 func main() {
     if len(os.Args) < 2 {

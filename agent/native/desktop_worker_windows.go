@@ -43,7 +43,7 @@ func launchDesktopWorker(serverURL, sessionID, sessionMode, displayProtocol stri
 func desktopWorkerArgs(args []string) (runConfig, string, string, string, int, string, bool) {
     server := envOr("BHUDI_SERVER_URL", defaultServerURL)
     sessionID, mode, protocol, inputToken := "", "control", "native", ""
-    monitor := 0
+    monitor := -1
     for i := 0; i+1 < len(args); i += 2 {
         switch strings.ToLower(args[i]) {
         case "-server": server = args[i+1]

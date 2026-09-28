@@ -43,7 +43,7 @@ class RemoteDesktopRequest(BaseModel):
     session_mode: Literal["view", "control"] = "control"
     display_protocol: Literal["native", "rdp", "vnc"] = "native"
     consent_required: bool = False
-    monitor_index: int = Field(default=0, ge=0)
+    monitor_index: int = Field(default=-1, ge=-1, description="0+ = one monitor; -1 = full virtual desktop (Windows Extend these displays)")
 
 
 class RemoteTerminalRequest(BaseModel):

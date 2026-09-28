@@ -56,7 +56,7 @@ func startRemoteDesktop(serverURL, agentID string, command map[string]any) map[s
 	if sessionMode == "control" && inputToken == "" {
 		return resultErr("input_token is required for interactive remote desktop")
 	}
-	monitorIndex := 0
+	monitorIndex := -1 // full virtual desktop (extended displays)
 	if v, ok := payload["monitor_index"]; ok {
 		switch n := v.(type) {
 		case float64:
@@ -219,7 +219,7 @@ func runDesktopSession(wsURL, sessionID, sessionMode, displayProtocol string, mo
 				continue
 			}
 			failStreak = 0
-			img = maybeScale(img, 1600)
+			img = maybeScale(img, 2560)
 			var buf bytes.Buffer
 			if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: 55}); err != nil {
 				continue

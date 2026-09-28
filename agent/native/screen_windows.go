@@ -138,12 +138,28 @@ func listMonitors() []MonitorInfo {
 	return out
 }
 
+func virtualScreenRect() (x, y, w, h int) {
+	vx, _, _ := procGetSystemMetrics.Call(smXVScreen)
+	vy, _, _ := procGetSystemMetrics.Call(smYVScreen)
+	vw, _, _ := procGetSystemMetrics.Call(smCXVirtualScreen)
+	vh, _, _ := procGetSystemMetrics.Call(smCYVirtualScreen)
+	return int(int32(vx)), int(int32(vy)), int(vw), int(vh)
+}
+
 func monitorRect(index int) (x, y, w, h int, err error) {
+	// index < 0 means the full virtual desktop (Windows "Extend these displays").
+	if index < 0 {
+		x, y, w, h = virtualScreenRect()
+		if w <= 0 || h <= 0 {
+			return 0, 0, 0, 0, fmt.Errorf("virtual screen size is 0 — no displays")
+		}
+		return x, y, w, h, nil
+	}
 	mons := listMonitors()
 	if len(mons) == 0 {
 		return 0, 0, 0, 0, fmt.Errorf("no monitors detected")
 	}
-	if index < 0 || index >= len(mons) {
+	if index >= len(mons) {
 		index = 0
 		for i, m := range mons {
 			if m.Primary {
@@ -156,7 +172,8 @@ func monitorRect(index int) (x, y, w, h int, err error) {
 	return m.X, m.Y, m.Width, m.Height, nil
 }
 
-// captureScreenRegion captures one monitor (or primary if index is out of range).
+// captureScreenRegion captures one monitor, or the full virtual desktop when
+// monitorIndex < 0 (Windows extended-desktop mode).
 func captureScreenRegion(monitorIndex int) (image.Image, error) {
 	// Attach to the interactive user desktop so Session 0 / service agents
 	// can BitBlt the console session instead of a blank Session 0 surface.
@@ -187,15 +204,21 @@ func captureRect(srcX, srcY, w, h int) (image.Image, error) {
 		return nil, err
 	}
 
-	desktop, _, _ := procGetDesktopWindow.Call()
-	hdcScreen, _, _ := procGetDC.Call(desktop)
+	// GetDC(NULL) is a screen DC for the entire virtual desktop (all extended
+	// monitors, including negative coords left of primary). GetDC(desktop HWND)
+	// is often clipped to the primary display only — that is why "Extend these
+	// displays" previously showed one screen or a black second monitor.
+	hdcScreen, _, _ := procGetDC.Call(0)
+	releaseHWND := uintptr(0)
 	if hdcScreen == 0 {
-		hdcScreen, _, _ = procGetDC.Call(0)
+		desktop, _, _ := procGetDesktopWindow.Call()
+		hdcScreen, _, _ = procGetDC.Call(desktop)
+		releaseHWND = desktop
 	}
 	if hdcScreen == 0 {
 		return nil, fmt.Errorf("GetDC failed — agent must run in an interactive user desktop (not Session 0 / pure service); %s", desktopStatusNote())
 	}
-	defer procReleaseDC.Call(desktop, hdcScreen)
+	defer procReleaseDC.Call(releaseHWND, hdcScreen)
 
 	hdcMem, _, _ := procCreateCompatibleDC.Call(hdcScreen)
 	if hdcMem == 0 {

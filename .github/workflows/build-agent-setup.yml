@@ -19,7 +19,7 @@ permissions:
   contents: read
 
 env:
-  AGENT_VERSION: "2.2.10"
+  AGENT_VERSION: "2.2.11"
 
 jobs:
   build:
@@ -111,17 +111,17 @@ jobs:
           tag_name: agent-native-latest
           name: Bhudi Native Agent (no Python)
           body: |
-            ## Standalone agents **2.2.10**
+            ## Standalone agents **2.2.11**
 
             | File | Notes |
             |------|-------|
-            | `BhudiAgent-Setup.exe` | Windows installer v2.2.10 — LockOSThread + Winlogon login-screen attach + tray |
+            | `BhudiAgent-Setup.exe` | Windows installer v2.2.11 — LockOSThread + Winlogon login-screen attach + tray |
             | `bhudi-agent-setup.msi` | Intune/GPO |
             | `bhudi-agent.exe` / `bhudi-support.exe` | Binaries |
 
             Portal download embeds enrollment automatically.
 
-            After install: `bhudi-agent.exe version` must print **2.2.10**.
+            After install: `bhudi-agent.exe version` must print **2.2.11**.
           files: |
             agent/native/dist/BhudiAgent-Setup.exe
             agent/native/dist/bhudi-agent.exe

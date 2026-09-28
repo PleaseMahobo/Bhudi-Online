@@ -49,7 +49,7 @@ class CommandResult(BaseModel):
     exit_code: int = 0; stdout: str = ""; stderr: str = ""
 class CommandAck(BaseModel): status: str = "running"
 class RemoteDesktopBody(BaseModel):
-    agent_id: str; session_mode: str = "control"; display_protocol: str = "native"; monitor_index: int = 0
+    agent_id: str; session_mode: str = "control"; display_protocol: str = "native"; monitor_index: int = -1
 class RemoteTerminalBody(BaseModel): agent_id: str; shell: str = "powershell"
 def _platform_metadata(platform: str | None) -> dict[str, str]:
     normalized=(platform or "windows").strip().lower()
