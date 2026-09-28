@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useEffect, useRef, useState, ReactNode } from "react";
 import { getCurrentUser } from "@/lib/api";
+import { startProactiveSessionRefresh, stopProactiveSessionRefresh } from "@/lib/session-refresh";
 import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
 
 type User = { id: string; email: string; firstName: string; lastName: string; role: string; active: boolean; tenant_id: string | null; mfa_enabled: boolean };
@@ -105,6 +106,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const current = normalizeUser(await getCurrentUser());
       if (!current) throw new Error("Unable to resolve Bhudi user after authentication");
       setUser(current);
+      startProactiveSessionRefresh({
+        onFailure: () => {
+          setUser(null);
+          stopProactiveSessionRefresh();
+        },
+      });
       return true;
     } finally {
       loginInProgress.current = false;
@@ -113,6 +120,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   async function logout(): Promise<void> {
     loginInProgress.current = false;
+    stopProactiveSessionRefresh();
     try {
       await clearSupabaseSession();
       await getSupabaseBrowserClient().auth.signOut();
@@ -125,22 +133,56 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let active = true;
     const supabase = getSupabaseBrowserClient();
-    const { data: listener } = supabase.auth.onAuthStateChange(async (_event) => {
+    const { data: listener } = supabase.auth.onAuthStateChange(async (event) => {
       if (!active || loginInProgress.current) return;
+      // Supabase TOKEN_REFRESHED does not renew Bhudi cookies; avoid extra /me
+      // calls that can clear the UI user when only Supabase rotated.
+      if (event === "TOKEN_REFRESHED") return;
+      if (event === "SIGNED_OUT") {
+        stopProactiveSessionRefresh();
+        if (active) setUser(null);
+        if (active) setLoading(false);
+        return;
+      }
       try {
         await refreshUser();
+        if (active) {
+          startProactiveSessionRefresh({
+            onFailure: () => {
+              if (active) {
+                setUser(null);
+                stopProactiveSessionRefresh();
+              }
+            },
+          });
+        }
       } catch {
+        stopProactiveSessionRefresh();
         if (active) setUser(null);
       }
       if (active) setLoading(false);
     });
 
-    refreshUser().catch(() => undefined).finally(() => {
-      if (active) setLoading(false);
-    });
+    refreshUser()
+      .then(() => {
+        if (!active) return;
+        startProactiveSessionRefresh({
+          onFailure: () => {
+            if (active) {
+              setUser(null);
+              stopProactiveSessionRefresh();
+            }
+          },
+        });
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        if (active) setLoading(false);
+      });
 
     return () => {
       active = false;
+      stopProactiveSessionRefresh();
       listener.subscription.unsubscribe();
     };
   }, []);
