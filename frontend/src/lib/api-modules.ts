@@ -25,6 +25,16 @@ function qs(params?: Record<string, string | number | boolean | undefined | null
   return value ? `?${value}` : "";
 }
 
+// ─── Administrator Portal ──────────────────────────────────────────────
+export async function getAdminOverview() { return request<any>(`/api/v1/admin/overview`); }
+export async function getAdminUsers() { return request<any>(`/api/v1/admin/users`); }
+export async function getAdminTenants() { return request<any>(`/api/v1/admin/tenants`); }
+export async function getAdminRoles() { return request<any>(`/api/v1/admin/roles`); }
+export async function getAdminPermissions() { return request<any>(`/api/v1/admin/permissions`); }
+export async function updateAdminUser(userId: string, data: { role?: string; tenant_id?: string | null; active?: boolean }) {
+  return request<any>(`/api/v1/admin/users/${userId}`, { method: "PATCH", body: JSON.stringify(data) });
+}
+
 // ─── MSP ───────────────────────────────────────────────────────────────
 export async function listOrganizations(params?: { org_type?: string; status?: string; parent_id?: string; tenant_id?: string }) { return request<any[]>(`/api/v1/msp/organizations${qs(params)}`); }
 export async function createOrganization(data: Record<string, unknown>) { return request<any>(`/api/v1/msp/organizations`, { method: "POST", body: JSON.stringify(data) }); }
