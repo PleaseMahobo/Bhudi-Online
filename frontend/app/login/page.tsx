@@ -1,9 +1,9 @@
 'use client';
 
 import BhudiLogo from '@/shared/components/BhudiLogo';
-import { Suspense, useState } from 'react';
+import { useState } from 'react';
 import Link from 'next/link';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import { useAuth } from '@/shared/auth/AuthContext';
 
 function safeNextPath(raw: string | null): string {
@@ -14,9 +14,18 @@ function safeNextPath(raw: string | null): string {
   return raw;
 }
 
-function LoginForm() {
+function readNextFromLocation(): string {
+  if (typeof window === 'undefined') return '/dashboard';
+  try {
+    const params = new URLSearchParams(window.location.search);
+    return safeNextPath(params.get('next'));
+  } catch {
+    return '/dashboard';
+  }
+}
+
+export default function LoginPage() {
   const router = useRouter();
-  const searchParams = useSearchParams();
   const auth = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -35,7 +44,7 @@ function LoginForm() {
         setError('Sign in failed. Check your email and password.');
         return;
       }
-      const dest = safeNextPath(searchParams.get('next'));
+      const dest = readNextFromLocation();
       router.replace(dest);
     } catch (err: any) {
       const msg = String(err?.message || '').trim();
@@ -129,19 +138,5 @@ function LoginForm() {
         </p>
       </div>
     </div>
-  );
-}
-
-export default function LoginPage() {
-  return (
-    <Suspense
-      fallback={
-        <div className="flex min-h-screen items-center justify-center bg-[#0F172A] text-sm text-slate-400">
-          Loading sign-in…
-        </div>
-      }
-    >
-      <LoginForm />
-    </Suspense>
   );
 }
