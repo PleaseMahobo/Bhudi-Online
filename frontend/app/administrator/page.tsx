@@ -163,7 +163,13 @@ export default function AdministratorPage() {
                 {filteredUsers.map((u) => (
                   <tr key={u.id} className="border-b border-slate-100">
                     <td className="px-3 py-3"><div className="font-medium text-slate-900">{u.first_name || u.last_name ? [u.first_name, u.last_name].filter(Boolean).join(' ') : u.email}</div><div className="text-xs text-slate-500">{u.email}</div></td>
-                    <td className="px-3 py-3"><div className="font-medium">{u.tenant_name || 'No tenant'}</div><div className="text-[10px] text-slate-400">{u.tenant_id || '—'}</div></td>
+                    <td className="px-3 py-3">
+                      <select className="max-w-[12rem] rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs" value={u.tenant_id || ''} onChange={(e) => void updateUser(u.id, { tenant_id: e.target.value || null })}>
+                        <option value="">No tenant</option>
+                        {tenants.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                      </select>
+                      <div className="mt-1 text-[10px] text-slate-400">{u.tenant_id || '—'}</div>
+                    </td>
                     <td className="px-3 py-3">
                       <select className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs" value={u.role} onChange={(e) => void updateUser(u.id, { role: e.target.value })}>
                         {roles.map((r) => <option key={r.id} value={r.name}>{r.name}</option>)}
