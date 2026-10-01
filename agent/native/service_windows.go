@@ -4,6 +4,8 @@ package main
 
 import (
 	"fmt"
+	"os/exec"
+	"strings"
 	"time"
 
 	"golang.org/x/sys/windows/svc"
@@ -17,13 +19,11 @@ func (s *bhudiWindowsService) Execute(_ []string, req <-chan svc.ChangeRequest, 
 	const accepted = svc.AcceptStop | svc.AcceptShutdown
 	status <- svc.Status{State: svc.StartPending}
 
-	// The management agent runs as LocalSystem, so start the optional support
-	// tray explicitly inside the active user's WinSta0/default session. This
-	// repairs endpoints installed before the tray startup changes and avoids
-	// depending solely on a stale per-user Run key/task.
-	if err := startSupportIfPresentFromService(); err != nil {
-		fmt.Println("[support-client] startup deferred:", err)
-	}
+	// The service can start before a user logs on. Keep tray startup separate
+	// from the heartbeat/command loop and retry until an interactive session is
+	// available. startSupportIfPresent uses the active user's WinSta0/default
+	// session, so the tray is visible to the logged-on user instead of Session 0.
+	go ensureSupportTrayFromService()
 
 	go runAgent(runConfig{Server: s.server, Interval: 10})
 	status <- svc.Status{State: svc.Running, Accepts: accepted}
@@ -40,12 +40,34 @@ func (s *bhudiWindowsService) Execute(_ []string, req <-chan svc.ChangeRequest, 
 	return false, 0
 }
 
+func ensureSupportTrayFromService() {
+	const retryInterval = 5 * time.Second
+	for {
+		if supportProcessRunning() {
+			return
+		}
+		if err := startSupportIfPresentFromService(); err != nil {
+			fmt.Println("[support-client] startup deferred:", err)
+		}
+		time.Sleep(retryInterval)
+	}
+}
+
+func supportProcessRunning() bool {
+	out, err := exec.Command("tasklist", "/FI", "IMAGENAME eq "+supportExeName, "/FO", "CSV", "/NH").CombinedOutput()
+	if err != nil {
+		return false
+	}
+	text := strings.TrimSpace(string(out))
+	return text != "" && !strings.Contains(strings.ToLower(text), "no tasks are running")
+}
+
 func startSupportIfPresentFromService() error {
 	if err := startSupportIfPresent(serviceSupportDirectory()); err != nil {
 		return err
 	}
-	// Give the interactive process a moment to initialize; no dependency is
-	// introduced into the agent heartbeat/command loop.
+	// Do not block the agent loop; the child runs independently in the user's
+	// interactive session.
 	time.Sleep(250 * time.Millisecond)
 	return nil
 }
