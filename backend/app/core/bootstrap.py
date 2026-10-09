@@ -228,6 +228,15 @@ def _seed_billing_plans(db: Session) -> list[str]:
 
 
 def initialize_database() -> dict[str, Any]:
+    # PostgreSQL production schema is owned by the dedicated Alembic
+    # migration service.  Never run create_all() or runtime ALTER TABLE
+    # statements from the API startup path: those DDL operations can acquire
+    # locks on hot tables and block agent heartbeats/authentication for tens
+    # of seconds.  SQLite/local development still gets the bootstrap path.
+    if engine.dialect.name != "sqlite" and os.getenv("BHUDI_RUN_POSTGRES_BOOTSTRAP", "0").strip().lower() not in ("1", "true", "yes"):
+        print("[startup] PostgreSQL bootstrap skipped; schema is owned by Alembic")
+        return {"status": "skipped", "reason": "postgres_schema_owned_by_alembic"}
+
     try:
         _bootstrap_metadata_for_engine().create_all(bind=engine)
         ensure_alert_engine_schema()
