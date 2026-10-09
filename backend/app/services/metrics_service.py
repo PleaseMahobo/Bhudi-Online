@@ -88,6 +88,7 @@ def record_heartbeat_metrics(
             ip_address=ip_address,
             status=status or "online",
             recorded_at=ts,
+            db_session=db_session,
         )
     except Exception as exc:
         print(f"[metrics] db persist failed: {exc}")
@@ -114,12 +115,19 @@ def _persist_db(
     ip_address: str | None,
     status: str,
     recorded_at: datetime,
+    db_session=None,
 ) -> None:
     from sqlalchemy import text
     from app.database.session import SessionLocal
 
-    if SessionLocal is None:
-        return
+    if db_session is not None:
+        session = db_session
+        owns_session = False
+    else:
+        if SessionLocal is None:
+            return
+        session = SessionLocal()
+        owns_session = True
 
     try:
         device_uuid = uuid.UUID(str(agent_id))
@@ -179,12 +187,16 @@ def _persist_db(
                 "recorded_at": recorded_at,
             },
         )
-        session.commit()
+        if owns_session:
+            session.commit()
+        else:
+            session.flush()
     except Exception:
         session.rollback()
         raise
     finally:
-        session.close()
+        if owns_session:
+            session.close()
 
 
 def get_metrics(
