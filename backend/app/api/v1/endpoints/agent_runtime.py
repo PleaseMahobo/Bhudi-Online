@@ -159,7 +159,19 @@ def enroll(req: EnrollRequest, db: Session=Depends(get_db)):
     _persist_agents(); return EnrollResponse(agent_id=agent_id, agent_token=token)
 @router.post("/heartbeat")
 def heartbeat(req: HeartbeatRequest, db: Session=Depends(get_db)):
-    agent=_require_agent_token(req.agent_id, req.agent_token); agent["status"]=req.status; agent["last_seen"]=datetime.now(timezone.utc).isoformat()
+    """Accept a heartbeat without running heavyweight DB work inline.
+
+    Heartbeats are high-frequency and can overlap while an agent retries.  The
+    previous path performed metrics persistence, health scoring, alert
+    evaluation and enterprise/device synchronization inside the same request
+    transaction.  A slow Supabase row lock could therefore hold a connection
+    for 30-90 seconds and starve authentication.  Keep the hot path in memory
+    and persist only the canonical agent/device projection in one short
+    transaction.
+    """
+    agent=_require_agent_token(req.agent_id, req.agent_token)
+    agent["status"]=req.status
+    agent["last_seen"]=datetime.now(timezone.utc).isoformat()
     for field in ("cpu_percent","memory_percent","disk_percent","ip_address","hostname","temperature_c","smart_status"):
         value=getattr(req,field)
         if value is not None: agent[field]=value
@@ -168,18 +180,17 @@ def heartbeat(req: HeartbeatRequest, db: Session=Depends(get_db)):
     if req.agent_id in device_state.devices:
         if req.hostname: device_state.devices[req.agent_id]["hostname"]=req.hostname
         if req.ip_address: device_state.devices[req.agent_id]["ip_address"]=req.ip_address
+
+    # One short persistence transaction.  Metrics/health are kept in memory
+    # for the runtime APIs and must not block the authentication DB pool.
     try:
-        from app.services.metrics_service import record_heartbeat_metrics
-        record_heartbeat_metrics(agent_id=req.agent_id,hostname=req.hostname or agent.get("hostname"),cpu_percent=req.cpu_percent,memory_percent=req.memory_percent,disk_percent=req.disk_percent,ip_address=req.ip_address or agent.get("ip_address"),status=req.status,db_session=db)
-    except Exception as exc: print(f"[runtime] metrics persist skipped: {exc}")
-    health_info: dict[str,Any]={}
-    try:
-        from app.services.device_health_service import DeviceHealthService
-        health_info=DeviceHealthService(db).on_heartbeat(agent_id=req.agent_id,hostname=req.hostname or agent.get("hostname"),cpu_percent=req.cpu_percent,memory_percent=req.memory_percent,disk_percent=req.disk_percent,temperature_c=req.temperature_c,smart_status=req.smart_status,smart_details=req.smart_details,ip_address=req.ip_address or agent.get("ip_address"),status=req.status,raise_alerts=True)
-        if health_info.get("health_score") is not None: agent["health_score"]=health_info["health_score"]
-    except Exception as exc: print(f"[runtime] health scoring skipped: {exc}")
-    _sync_enterprise_agent(agent, db); pending=sum(1 for c in _commands.get(req.agent_id,[]) if c.get("status") in ("pending","dispatched")); _persist_agents()
-    return {"ok":True,"pending_commands":pending,"heartbeat_interval":30,"cpu_percent":agent.get("cpu_percent"),"memory_percent":agent.get("memory_percent"),"disk_percent":agent.get("disk_percent"),"temperature_c":agent.get("temperature_c"),"smart_status":agent.get("smart_status"),"health_score":agent.get("health_score"),"health_grade":health_info.get("grade"),"alerts_raised":len(health_info.get("alerts") or [])}
+        _sync_enterprise_agent(agent, db)
+    except Exception as exc:
+        print(f"[runtime] heartbeat persistence skipped: {exc}")
+
+    pending=sum(1 for c in _commands.get(req.agent_id,[]) if c.get("status") in ("pending","dispatched"))
+    _persist_agents()
+    return {"ok":True,"pending_commands":pending,"heartbeat_interval":30,"cpu_percent":agent.get("cpu_percent"),"memory_percent":agent.get("memory_percent"),"disk_percent":agent.get("disk_percent"),"temperature_c":agent.get("temperature_c"),"smart_status":agent.get("smart_status"),"health_score":agent.get("health_score"),"health_grade":None,"alerts_raised":0}
 @router.get("/agents")
 def list_runtime_agents(): return {"agents":list(_agents.values()),"count":len(_agents)}
 @router.get("/agents/{agent_id}")
