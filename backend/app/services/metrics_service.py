@@ -31,6 +31,7 @@ def record_heartbeat_metrics(
     status: str | None = None,
     health_score: float | None = None,
     missed_heartbeats: int | None = None,
+    db_session=None,
 ) -> None:
     """Record one sample. Always writes memory; best-effort DB + Prometheus."""
     if not agent_id or (
