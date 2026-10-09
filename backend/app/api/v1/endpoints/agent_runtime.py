@@ -170,7 +170,7 @@ def heartbeat(req: HeartbeatRequest, db: Session=Depends(get_db)):
         if req.ip_address: device_state.devices[req.agent_id]["ip_address"]=req.ip_address
     try:
         from app.services.metrics_service import record_heartbeat_metrics
-        record_heartbeat_metrics(agent_id=req.agent_id,hostname=req.hostname or agent.get("hostname"),cpu_percent=req.cpu_percent,memory_percent=req.memory_percent,disk_percent=req.disk_percent,ip_address=req.ip_address or agent.get("ip_address"),status=req.status)
+        record_heartbeat_metrics(agent_id=req.agent_id,hostname=req.hostname or agent.get("hostname"),cpu_percent=req.cpu_percent,memory_percent=req.memory_percent,disk_percent=req.disk_percent,ip_address=req.ip_address or agent.get("ip_address"),status=req.status,db_session=db)
     except Exception as exc: print(f"[runtime] metrics persist skipped: {exc}")
     health_info: dict[str,Any]={}
     try:
