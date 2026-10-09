@@ -135,7 +135,6 @@ def _persist_db(
     except Exception:
         device_uuid = uuid.uuid5(uuid.NAMESPACE_URL, f"bhudi-agent:{agent_id}")
 
-    session = SessionLocal()
     try:
         _ensure_table(session.connection())
         session.execute(
