@@ -15,7 +15,8 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.dependencies import get_current_user
-from app.core.supabase_auth import get_supabase_user
+from app.core.dependencies import get_access_token
+from app.services.supabase_identity import SupabaseIdentityError, resolve_supabase_user
 from app.database.session import get_db
 from app.models.user import User
 from app.schemas.auth import (
@@ -70,7 +71,6 @@ def login(
     response: Response,
     http_request: Request,
     db: Session = Depends(get_db),
-    user: User = Depends(get_supabase_user),
 ):
     """Promote a verified Supabase session into a Bhudi session after MFA.
 
@@ -79,6 +79,12 @@ def login(
     token proves password authentication; Bhudi then enforces its local MFA
     policy before issuing the application session cookies.
     """
+    token = get_access_token(http_request)
+    try:
+        user = resolve_supabase_user(db, token)
+    except SupabaseIdentityError as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
+
     service = AuthService(db)
     if bool(getattr(user, "mfa_enabled", False)):
         code = (request.mfa_code or "").strip()
