@@ -163,10 +163,11 @@ func runInstallWorker() {
 
 	fmt.Println("[4/4] Installing Bhudi Support Client...")
 	logInstaller("[4/4] Installing Support Client from %s", supportURL)
-	supportDir := filepath.Join(os.Getenv("ProgramFiles"), "Bhudi", "Support")
-	if supportDir == "" || os.Getenv("ProgramFiles") == "" {
-		supportDir = filepath.Join(os.Getenv("ProgramData"), "Bhudi", "Support")
-	}
+	// Keep the support client beside the agent. The agent service uses this
+	// location when it repairs/starts the tray in the active interactive
+	// session. A separate ProgramFiles\\Bhudi\\Support copy could be started
+	// by the elevated installer but would not be the copy used by the service.
+	supportDir := filepath.Join(os.Getenv("ProgramData"), "Bhudi", "Agent")
 	if err := os.MkdirAll(supportDir, 0755); err != nil {
 		fail("support directory: " + err.Error())
 	}
@@ -238,11 +239,36 @@ func installBundledSupportClient(dest string) error {
 }
 
 func startSupportClient(path string) error {
-	cmd := exec.Command(path)
-	if err := cmd.Start(); err != nil {
-		return err
+	// The installer may be elevated, so do not rely on directly starting the
+	// tray process or writing only an elevated HKCU Run key. Register the
+	// interactive-user logon task explicitly and trigger it once now.
+	_ = exec.Command("schtasks", "/Delete", "/TN", "BhudiSupport", "/F").Run()
+
+	create := exec.Command(
+		"schtasks",
+		"/Create",
+		"/TN", "BhudiSupport",
+		"/TR", fmt.Sprintf("\"%s\"", path),
+		"/SC", "ONLOGON",
+		"/RL", "LIMITED",
+		"/IT",
+		"/F",
+	)
+	if out, err := create.CombinedOutput(); err != nil {
+		logInstaller("support logon task creation failed: %v (%s)", err, strings.TrimSpace(string(out)))
+		// Fall back to the per-user Run key; this is only a fallback because
+		// the service-side active-session launcher is the authoritative repair.
+		if err := exec.Command("reg.exe", "ADD", `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`, "BhudiSupport", "/REG_SZ", path, "/F").Run(); err != nil {
+			return fmt.Errorf("register support startup: task=%v, run-key=%w", err, err)
+		}
+		return nil
 	}
-	_ = exec.Command("reg.exe", "ADD", `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`, "BhudiSupport", "/REG_SZ", path, "/F").Run()
+
+	// Trigger the task immediately so the tray appears without requiring a
+	// logout/login. The task itself is scoped to the interactive user session.
+	if out, err := exec.Command("schtasks", "/Run", "/TN", "BhudiSupport").CombinedOutput(); err != nil {
+		logInstaller("support task immediate run failed: %v (%s)", err, strings.TrimSpace(string(out)))
+	}
 	return nil
 }
 
