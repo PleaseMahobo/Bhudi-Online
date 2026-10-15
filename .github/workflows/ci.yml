@@ -8,32 +8,13 @@ on:
 
 permissions:
   contents: read
-  pull-requests: read
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  changes:
-    runs-on: ubuntu-latest
-    outputs:
-      backend: ${{ steps.changed.outputs.backend }}
-      frontend: ${{ steps.changed.outputs.frontend }}
-      agent: ${{ steps.changed.outputs.agent }}
-    steps:
-      # Avoid relying on pull-request file-list permissions in the path-filter action.
-      # Run the relevant CI suites on every PR until the filter can be safely restored.
-      - id: changed
-        shell: bash
-        run: |
-          echo "backend=true" >> "$GITHUB_OUTPUT"
-          echo "frontend=true" >> "$GITHUB_OUTPUT"
-          echo "agent=true" >> "$GITHUB_OUTPUT"
-
   backend-test:
-    needs: changes
-    if: needs.changes.outputs.backend == 'true' || needs.changes.outputs.agent == 'true' || github.event_name == 'push'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -54,11 +35,8 @@ jobs:
         run: pytest -q
 
   agent-e2e:
-    needs: [changes, backend-test]
-    if: |
-      always() &&
-      needs.backend-test.result == 'success' &&
-      (needs.changes.outputs.agent == 'true' || needs.changes.outputs.backend == 'true')
+    needs: [backend-test]
+    if: needs.backend-test.result == 'success'
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
@@ -78,8 +56,6 @@ jobs:
         run: python agent/test_real_agent_e2e.py
 
   frontend:
-    needs: changes
-    if: needs.changes.outputs.frontend == 'true' || github.event_name == 'push'
     runs-on: ubuntu-latest
     defaults:
       run:
