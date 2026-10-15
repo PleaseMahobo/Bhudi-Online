@@ -18,26 +18,18 @@ jobs:
   changes:
     runs-on: ubuntu-latest
     outputs:
-      backend: ${{ steps.filter.outputs.backend }}
-      frontend: ${{ steps.filter.outputs.frontend }}
-      agent: ${{ steps.filter.outputs.agent }}
+      backend: ${{ steps.changed.outputs.backend }}
+      frontend: ${{ steps.changed.outputs.frontend }}
+      agent: ${{ steps.changed.outputs.agent }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: dorny/paths-filter@v3
-        id: filter
-        with:
-          filters: |
-            backend:
-              - 'backend/**'
-              - '.github/workflows/ci.yml'
-            frontend:
-              - 'frontend/**'
-              - '.github/workflows/ci.yml'
-            agent:
-              - 'agent/**'
-              - '.github/workflows/ci.yml'
-              - '.github/workflows/build-agent-setup.yml'
-              - '.github/workflows/release-agent.yml'
+      # Avoid relying on pull-request file-list permissions in the path-filter action.
+      # Run the relevant CI suites on every PR until the filter can be safely restored.
+      - id: changed
+        shell: bash
+        run: |
+          echo "backend=true" >> "$GITHUB_OUTPUT"
+          echo "frontend=true" >> "$GITHUB_OUTPUT"
+          echo "agent=true" >> "$GITHUB_OUTPUT"
 
   backend-test:
     needs: changes
