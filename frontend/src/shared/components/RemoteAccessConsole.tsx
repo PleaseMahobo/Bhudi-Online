@@ -51,7 +51,7 @@ export default function RemoteAccessConsole() {
     const eventId = `input-${Date.now()}-${inputSeqRef.current + 1}`;
     inputSeqRef.current += 1;
     const browserSentAtMs = Date.now();
-    const message = { ...payload, event_id: eventId, browser_sent_at_ms: browserSentAtMs };
+    const message = { type: 'input', payload: { ...payload, event_id: eventId, browser_sent_at_ms: browserSentAtMs } };
     pendingInputsRef.current.set(eventId, { browserSentAtMs, ackAtMs: 0 });
     while (pendingInputsRef.current.size > MAX_PENDING_INPUTS) {
       const oldest = pendingInputsRef.current.keys().next().value;
