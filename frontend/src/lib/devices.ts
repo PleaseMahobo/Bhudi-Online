@@ -146,7 +146,7 @@ function normalizeDevice(raw: any): Device {
 }
 
 export async function listDevicesDetailed(): Promise<DevicesListResponse> {
-  const payload = await api<any>('/api/v1/devices/');
+  const payload = await api<any>('/api/tenant-context/devices');
   const list = Array.isArray(payload)
     ? payload
     : Array.isArray(payload?.devices)
@@ -162,7 +162,7 @@ export async function listDevicesDetailed(): Promise<DevicesListResponse> {
 
 export async function getDevice(id: string): Promise<Device> {
   return normalizeDevice(
-    await api<any>('/api/v1/devices/' + encodeURIComponent(id))
+    await api<any>('/api/tenant-context/devices/' + encodeURIComponent(id))
   );
 }
 
