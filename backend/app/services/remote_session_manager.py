@@ -236,8 +236,19 @@ class RemoteSessionManager:
         if state is None:
             return
 
-        if message.get("type") in _INPUT_EVENT_TYPES:
-            enriched = dict(message)
+        # Accept both the browser's explicit protocol envelope and legacy flat
+        # events. Normalize to one envelope before forwarding to the authenticated
+        # agent input WebSocket; never send input events over the video channel.
+        input_payload: dict[str, Any] | None = None
+        if message.get("type") == "input":
+            candidate = message.get("payload")
+            if isinstance(candidate, dict) and candidate.get("type") in _INPUT_EVENT_TYPES:
+                input_payload = candidate
+        elif message.get("type") in _INPUT_EVENT_TYPES:
+            input_payload = message
+
+        if input_payload is not None:
+            enriched = dict(input_payload)
             enriched["backend_received_at_ms"] = _now_ms()
             envelope = {"type": "input", "payload": enriched}
             if state.agent_input_connection is None:
