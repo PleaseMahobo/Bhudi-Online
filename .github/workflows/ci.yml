@@ -30,9 +30,9 @@ jobs:
         run: |
           pip install -U pip
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-          pip install pytest
+          pip install pytest pytest-timeout
       - name: Unit tests
-        run: pytest -vv -ra --durations=20
+        run: pytest -vv -ra --durations=20 --timeout=60
 
   agent-e2e:
     needs: [backend-test]
