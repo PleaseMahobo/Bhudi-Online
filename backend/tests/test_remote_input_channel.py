@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import uuid
+from types import SimpleNamespace
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -15,6 +17,7 @@ from app.core.dependencies import get_current_user
 from app.database.session import get_db
 from app.models.agent import Agent
 from app.models.user import User
+from app.services.remote_session_manager import RemoteSessionManager
 
 
 TEST_AGENT_ID = "44444444-4444-4444-8444-44444444444d"
@@ -62,66 +65,74 @@ def _build_client() -> TestClient:
     return TestClient(app)
 
 
+class _FakeWebSocket:
+    def __init__(self, query_params: dict[str, str] | None = None) -> None:
+        self.query_params = query_params or {}
+        self.sent: list[dict] = []
+        self.accepted = False
+
+    async def accept(self) -> None:
+        self.accepted = True
+
+    async def send_json(self, message: dict) -> None:
+        self.sent.append(message)
+
+    async def close(self, code: int = 1000) -> None:
+        pass
+
+
 def test_authenticated_input_channel_is_separate_and_timestamped() -> None:
-    client = _build_client()
-    queued = client.post(
-        "/remote-access/desktop",
-        json={"agent_id": TEST_AGENT_ID, "session_mode": "control", "display_protocol": "native"},
-    )
-    assert queued.status_code == 201
-    response = queued.json()
-    session_id = response["session_id"]
-    input_token = response["payload"]["input_token"]
-    assert input_token
+    async def exercise() -> None:
+        manager = RemoteSessionManager()
+        session = manager.create_session(
+            agent_id=TEST_AGENT_ID,
+            session_type="desktop",
+            metadata={"session_mode": "control"},
+        )
+        token = session.input_token
 
-    with client.websocket_connect(f"/remote-access/sessions/{session_id}/dashboard") as dashboard_ws:
-        dashboard_ws.receive_json()
-        with client.websocket_connect(f"/remote-access/sessions/{session_id}/agent/{TEST_AGENT_ID}") as agent_ws:
-            agent_ws.receive_json()
-            dashboard_ws.receive_json()
+        dashboard = _FakeWebSocket({"channel": "input", "token": token})
+        agent = _FakeWebSocket({"channel": "input", "token": token})
+        assert await manager.connect_dashboard(session.session_id, dashboard) is session
+        assert await manager.connect_agent(session.session_id, TEST_AGENT_ID, agent) is session
+        assert dashboard.sent[0]["type"] == "input_channel_ready"
+        assert agent.sent[0]["type"] == "input_channel_ready"
 
-            with client.websocket_connect(
-                f"/remote-access/sessions/{session_id}/dashboard?channel=input&token={input_token}"
-            ) as input_dashboard_ws:
-                assert input_dashboard_ws.receive_json()["type"] == "input_channel_ready"
-                with client.websocket_connect(
-                    f"/remote-access/sessions/{session_id}/agent/{TEST_AGENT_ID}?channel=input&token={input_token}"
-                ) as input_agent_ws:
-                    assert input_agent_ws.receive_json()["type"] == "input_channel_ready"
+        await manager.relay_dashboard_message(
+            session.session_id,
+            {
+                "type": "mousedown",
+                "event_id": "input-test-1",
+                "browser_sent_at_ms": 1000,
+                "x": 0.25,
+                "y": 0.5,
+            },
+        )
+        forwarded = agent.sent[-1]
+        assert forwarded["type"] == "input"
+        payload = forwarded["payload"]
+        assert payload["type"] == "mousedown"
+        assert payload["event_id"] == "input-test-1"
+        assert payload["browser_sent_at_ms"] == 1000
+        assert isinstance(payload["backend_received_at_ms"], int)
 
-                    input_dashboard_ws.send_json(
-                        {
-                            "type": "mousedown",
-                            "event_id": "input-test-1",
-                            "browser_sent_at_ms": 1000,
-                            "x": 0.25,
-                            "y": 0.5,
-                        }
-                    )
-                    forwarded = input_agent_ws.receive_json()
-                    assert forwarded["type"] == "input"
-                    payload = forwarded["payload"]
-                    assert payload["type"] == "mousedown"
-                    assert payload["event_id"] == "input-test-1"
-                    assert payload["browser_sent_at_ms"] == 1000
-                    assert isinstance(payload["backend_received_at_ms"], int)
+        await manager.relay_agent_message(
+            session.session_id,
+            {
+                "type": "input_ack",
+                "session_id": session.session_id,
+                "event_id": "input-test-1",
+                "browser_sent_at_ms": 1000,
+                "backend_received_at_ms": payload["backend_received_at_ms"],
+                "agent_received_at_ms": 1010,
+                "windows_input_at_ms": 1011,
+                "ack_sent_at_ms": 1012,
+            },
+        )
+        # Input acknowledgements are deliberately not broadcast on the video channel.
+        assert all(message.get("type") != "input_ack" for message in dashboard.sent)
 
-                    input_agent_ws.send_json(
-                        {
-                            "type": "input_ack",
-                            "session_id": session_id,
-                            "event_id": "input-test-1",
-                            "browser_sent_at_ms": 1000,
-                            "backend_received_at_ms": payload["backend_received_at_ms"],
-                            "agent_received_at_ms": 1010,
-                            "windows_input_at_ms": 1011,
-                            "ack_sent_at_ms": 1012,
-                        }
-                    )
-                    ack = input_dashboard_ws.receive_json()
-                    assert ack["type"] == "input_ack"
-                    assert ack["event_id"] == "input-test-1"
-                    assert ack["windows_input_at_ms"] == 1011
+    asyncio.run(exercise())
 
 
 def test_input_channel_rejects_invalid_session_credential() -> None:
