@@ -101,11 +101,14 @@ def test_authenticated_input_channel_is_separate_and_timestamped() -> None:
         await manager.relay_dashboard_message(
             session.session_id,
             {
-                "type": "mousedown",
-                "event_id": "input-test-1",
-                "browser_sent_at_ms": 1000,
-                "x": 0.25,
-                "y": 0.5,
+                "type": "input",
+                "payload": {
+                    "type": "mousedown",
+                    "event_id": "input-test-1",
+                    "browser_sent_at_ms": 1000,
+                    "x": 0.25,
+                    "y": 0.5,
+                },
             },
         )
         forwarded = agent.sent[-1]
