@@ -4,11 +4,14 @@ from __future__ import annotations
 import json
 import os
 import time
+import urllib.error
 import urllib.request
 from typing import Any
 
 
 class AssistantService:
+    """Chat assistant with a live OpenAI-compatible model and honest offline fallback."""
+
     def __init__(self) -> None:
         self.enabled = os.getenv("AI_ENABLED", "false").lower() in ("1", "true", "yes", "on")
         self.api_key = os.getenv("AI_API_KEY", "")
@@ -20,29 +23,20 @@ class AssistantService:
         message = (message or "").strip()
         if not message:
             return {
-                "reply": "Ask me about devices, patches, alerts, print queues, or MFA failures.",
+                "reply": "Ask a specific question about an IT issue, device, patch, alert, print queue, or MFA failure.",
                 "mode": "idle",
                 "suggestions": [
-                    "Why is DC01 showing high CPU?",
-                    "Show machines missing recent patches.",
-                    "Which users failed MFA today?",
+                    "How should I investigate a Windows device with high CPU?",
+                    "What evidence should I collect for failed patches?",
+                    "Help me troubleshoot repeated MFA failures.",
                 ],
                 "latency_ms": 0,
             }
 
-        hist = history or []
-        prior = ""
-        for turn in hist[-6:]:
-            prior += f"{turn.get('role', 'user')}: {turn.get('content', '')}\n"
-
-        live = self._live_chat(prior, message)
-        if live and not live.startswith(self._heuristic(message)[:40]):
-            # Prefer live when we got model text that is not only heuristic fallback
-            reply, mode = live, "live" if self.enabled and self.api_key else "heuristic"
-            if "Live model unavailable" in live:
-                mode = "heuristic"
-        elif live:
-            reply, mode = live, "heuristic" if "Live model unavailable" in live else "live"
+        turns = self._normalise_history(history or [])
+        live = self._live_chat(turns, message)
+        if live:
+            reply, mode = live, "live"
         else:
             reply, mode = self._heuristic(message), "heuristic"
 
@@ -53,23 +47,40 @@ class AssistantService:
             "suggestions": self._followups(message),
         }
 
-    def _live_chat(self, prior: str, message: str) -> str | None:
+    @staticmethod
+    def _normalise_history(history: list[dict[str, str]]) -> list[dict[str, str]]:
+        """Keep valid, bounded conversation turns instead of flattening them into one user prompt."""
+        turns: list[dict[str, str]] = []
+        for turn in history[-8:]:
+            if not isinstance(turn, dict):
+                continue
+            role = turn.get("role")
+            content = turn.get("content")
+            if role not in ("user", "assistant") or not isinstance(content, str):
+                continue
+            content = content.strip()
+            if content:
+                turns.append({"role": role, "content": content[:4000]})
+        return turns
+
+    def _live_chat(self, history: list[dict[str, str]], message: str) -> str | None:
         if not self.enabled or not self.api_key:
             return None
+
         system = (
-            "You are Bhudi AI, an MSP / IT operations copilot for the Bhudi RMM platform. "
-            "Answer clearly about monitoring, patching, remote access, print, security, and MFA. "
-            "Keep answers under 200 words unless asked for detail."
+            "You are Bhudi AI, a practical MSP and IT-operations copilot inside the Bhudi RMM portal. "
+            "Give direct, useful, context-aware answers rather than generic lists. First identify the likely "
+            "cause or next best diagnostic step, then give a short ordered plan, verification steps, and "
+            "risks where relevant. Ask one focused clarification when the request lacks the detail needed "
+            "to be accurate. Adapt to Windows, Microsoft 365/Entra, networking, endpoint security, patching, "
+            "remote access, printers, alerts, and MFA. Distinguish observed facts from hypotheses. You do not "
+            "have access to live tenant/device data unless it is explicitly included in the conversation; "
+            "never claim to have checked a device, alert, patch state, user, or tenant when you have not. "
+            "Never expose secrets or recommend destructive production changes without validation and approval. "
+            "Keep answers concise (normally under 200 words), and use numbered steps when useful."
         )
-        user = f"{prior}user: {message}" if prior else message
-        body = {
-            "model": self.model,
-            "messages": [
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
-            "temperature": 0.2,
-        }
+        messages = [{"role": "system", "content": system}, *history, {"role": "user", "content": message}]
+        body = {"model": self.model, "messages": messages, "temperature": 0.2}
         try:
             req = urllib.request.Request(
                 f"{self.base_url}/chat/completions",
@@ -80,73 +91,92 @@ class AssistantService:
                 },
                 method="POST",
             )
-            with urllib.request.urlopen(req, timeout=60) as resp:
+            with urllib.request.urlopen(req, timeout=25) as resp:
                 payload = json.loads(resp.read().decode("utf-8"))
-            return str(payload["choices"][0]["message"]["content"]).strip()
-        except Exception as exc:
-            return f"{self._heuristic(message)}\n\n_(Live model unavailable: {exc})_"
+            content = payload["choices"][0]["message"]["content"]
+            if isinstance(content, str) and content.strip():
+                return content.strip()
+        except (OSError, ValueError, KeyError, TypeError, urllib.error.URLError):
+            # Fall back cleanly; don't leak provider URLs, transport details, or configuration.
+            return None
+        except Exception:
+            # Provider SDK-compatible endpoints can return unexpected payload shapes.
+            return None
+        return None
 
     def _followups(self, message: str) -> list[str]:
         m = message.lower()
         if "cpu" in m or "performance" in m:
-            return ["Show top processes on that host", "Open device metrics for the last hour"]
+            return ["What process is consuming the CPU?", "How do I verify whether this is sustained load?"]
         if "patch" in m or "kb" in m:
-            return ["List devices missing critical patches", "Start a patch compliance report"]
+            return ["How do I validate the failed KB installation?", "What evidence belongs in a patch compliance report?"]
         if "mfa" in m or "login" in m:
-            return ["Who failed MFA in the last 24 hours?", "How do I reset a user's MFA?"]
-        if "print" in m:
-            return ["Show offline printers", "Restart Print Spooler on a site"]
+            return ["How do I distinguish clock drift from a bad MFA registration?", "What sign-in logs should I inspect?"]
+        if "print" in m or "spooler" in m:
+            return ["How do I isolate a stuck print job?", "How do I verify the spooler recovered?"]
+        if "offline" in m or "agent" in m:
+            return ["How do I check agent connectivity?", "What logs should I collect before re-enrolling?"]
         return [
-            "Summarize open critical alerts",
-            "Which agents are offline?",
-            "Draft a remediation plan for high disk usage",
+            "Help me build a step-by-step troubleshooting plan",
+            "What evidence should I collect before remediation?",
+            "How do I verify the fix without disrupting users?",
         ]
 
     def _heuristic(self, message: str) -> str:
         m = message.lower()
-        if "cpu" in m:
+        if "cpu" in m or "performance" in m:
             return (
-                "High CPU is often a runaway process, AV scan, backup job, or undersized host.\n\n"
-                "**In Bhudi**\n"
-                "1. **Devices** → host → **Processes**\n"
-                "2. Check **Metrics** for sustained vs spike CPU\n"
-                "3. **Remote** or queue a script if you need to stop the offender\n\n"
-                "Tell me the hostname for a tighter checklist."
+                "I’m in guided mode, so I can’t inspect your live device telemetry from this chat.\n\n"
+                "**Start with these checks**\n"
+                "1. In Bhudi, open the affected device and compare current CPU with its recent trend.\n"
+                "2. Identify the top process and correlate it with AV scans, backups, updates, or a recent change.\n"
+                "3. Check memory, disk queue, and event logs to distinguish CPU saturation from a wider bottleneck.\n"
+                "4. Before stopping a process, confirm its owner and business impact.\n\n"
+                "Share the hostname, CPU trend, and top process to narrow this down."
             )
         if "patch" in m or "kb" in m or "missing" in m:
             return (
-                "Patch gaps live under **Patching** / device compliance.\n\n"
-                "1. Open **Patching**, filter missing/critical\n"
-                "2. Open the device patch/software tab\n"
-                "3. Queue deploy from **Automation**\n\n"
-                "Paste a KB id for a more specific pattern."
+                "I’m in guided mode and can’t see your live patch inventory.\n\n"
+                "1. In Patching, identify the affected device, KB, installation result, and last scan time.\n"
+                "2. Check OS/build compatibility, pending reboot, free disk space, and Windows Update error code.\n"
+                "3. Retry on one representative device first, then verify the installed KB and compliance rescan.\n\n"
+                "Send the KB ID and error code for a targeted troubleshooting path."
             )
         if "print" in m or "spooler" in m:
             return (
-                "Use **Print Management** for queues, drivers, and offline printers.\n\n"
-                "1. Offline devices / failed jobs on the print dashboard\n"
-                "2. Restart Print Spooler via **Scripts** or remote command\n"
-                "3. Verify driver versions and toner/paper levels"
+                "I’m in guided mode and can’t query your live print queues.\n\n"
+                "1. Identify whether the queue, print server, or only one endpoint is affected.\n"
+                "2. Capture the failed job, printer/driver, and relevant PrintService logs.\n"
+                "3. Clear only the confirmed stuck job; restart the spooler only after checking impact.\n"
+                "4. Submit a small test page and confirm the queue remains healthy."
             )
-        if "mfa" in m:
+        if "mfa" in m or "login" in m:
             return (
-                "MFA issues are usually wrong TOTP, clock skew, or an old secret after QR rotation.\n\n"
-                "1. Login only needs the **current 6-digit** code after enrollment\n"
-                "2. Reset MFA only if the authenticator was lost\n"
-                "3. Avoid scanning multiple QR codes for the same account"
-            )
-        if "compliance" in m or "report" in m:
-            return (
-                "Build monthly packs from **Reports** / **Compliance**: "
-                "patch %, offline agents, critical alerts, MFA enrollment, backup success."
+                "I’m in guided mode and can’t inspect live sign-in logs.\n\n"
+                "1. Capture the user, timestamp, app, correlation/request ID, and Entra sign-in error.\n"
+                "2. Check Conditional Access result, authentication method, device time, and recent MFA changes.\n"
+                "3. Reset MFA only after verifying identity and confirming the authenticator is lost or compromised.\n\n"
+                "Share the error code (not passwords, tokens, or MFA codes) for a more specific diagnosis."
             )
         if "offline" in m or "agent" in m:
             return (
-                "Offline agents: **Devices** → status offline. Confirm the agent service can reach the API. "
-                "Invalid credentials → delete agent_identity.json and re-enroll."
+                "I’m in guided mode and can’t confirm which tenant agents are currently offline.\n\n"
+                "1. Check the device’s last heartbeat and reported agent version in Bhudi.\n"
+                "2. Verify the service is running and the endpoint can reach the configured API over HTTPS.\n"
+                "3. Review agent logs for authentication, TLS, DNS, or repeated retry errors.\n"
+                "4. Re-enrol only after preserving logs and confirming the tenant/device identity."
+            )
+        if "compliance" in m or "report" in m:
+            return (
+                "For a useful monthly operations report, include patch compliance, offline agents, critical alerts, "
+                "backup outcomes, MFA/sign-in risks, reporting period, and affected-device counts. State the data "
+                "source and timestamp for each metric. I can help structure the report, but I can’t claim live "
+                "tenant counts unless those results are supplied to this chat."
             )
         return (
-            "I can help with devices, patches, alerts, print, remote access, and MFA.\n\n"
-            "Try: *Why is DC01 showing high CPU?* or *Show machines missing patches.*\n\n"
-            "For live LLM answers set `AI_ENABLED=true` and `AI_API_KEY` on the API service."
+            "I’m currently in guided mode, not connected to a live model or live tenant telemetry. "
+            "I can help plan troubleshooting for Windows endpoints, patching, alerts, printing, remote access, "
+            "Microsoft 365/Entra, endpoint security, and MFA. Tell me the symptom, affected scope, and any error "
+            "code, and I’ll give you a focused diagnostic plan.\n\n"
+            "To enable model-generated answers, configure AI_ENABLED=true and AI_API_KEY on the backend service."
         )
