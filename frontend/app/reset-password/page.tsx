@@ -21,18 +21,6 @@ function ResetPasswordForm() {
     let active = true;
     const supabase = getSupabaseBrowserClient();
 
-    async function checkRecoverySession() {
-      const { data, error: sessionError } = await supabase.auth.getSession();
-      if (!active) return;
-      if (sessionError || !data.session) {
-        setError('This reset link is invalid or has expired. Please request a new one.');
-      } else {
-        setReady(true);
-      }
-      setCheckingSession(false);
-    }
-
-    checkRecoverySession();
     const { data: listener } = supabase.auth.onAuthStateChange((event, session) => {
       if (!active) return;
       if (event === 'PASSWORD_RECOVERY' && session) {
@@ -41,6 +29,22 @@ function ResetPasswordForm() {
         setCheckingSession(false);
       }
     });
+
+    async function checkRecoverySession() {
+      const { data, error: sessionError } = await supabase.auth.getSession();
+      if (!active) return;
+      if (sessionError) {
+        setError('We could not validate this reset link. Please request a new one.');
+      } else if (data.session) {
+        setReady(true);
+        setError('');
+      } else {
+        setError('This reset link is invalid or has expired. Please request a new one.');
+      }
+      setCheckingSession(false);
+    }
+
+    void checkRecoverySession();
 
     return () => {
       active = false;
