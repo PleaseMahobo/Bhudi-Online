@@ -36,7 +36,7 @@ def test_guided_cpu_response_is_specific_and_honest(monkeypatch):
     result = service.chat("High CPU performance issue")
 
     assert result["mode"] == "heuristic"
-    assert "can't inspect your live device telemetry" in result["reply"]
+    assert "can't inspect your live device telemetry" in result["reply"].replace("’", "'")
     assert "top process" in result["reply"]
     assert "Live model unavailable" not in result["reply"]
 
