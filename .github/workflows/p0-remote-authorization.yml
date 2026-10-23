@@ -9,6 +9,7 @@ on:
   push:
     branches:
       - "security/p0-remote-access-authorization"
+      - "ci/p0-auth-workflow-diagnostics"
     paths:
       - "backend/**"
       - ".github/workflows/p0-remote-authorization.yml"
@@ -17,14 +18,16 @@ on:
 permissions:
   contents: read
 
+# Keep diagnostic runs alive; do not cancel an in-flight run for a new commit.
 concurrency:
   group: p0-remote-auth-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   backend-regression:
     name: Backend regression suite (blocking)
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: backend
@@ -41,14 +44,43 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           if [ -f requirements.txt ]; then python -m pip install -r requirements.txt; fi
-          python -m pip install pytest
-      - name: Run complete backend test suite
-        run: python -m pytest -q --junitxml=test-results-p0.xml
-      - name: Upload test report
+          python -m pip install pytest pytest-timeout
+      - name: Run complete backend test suite (verbose, bounded)
+        shell: bash
+        run: |
+          set +e
+          python -m pytest -vv -rA --timeout=180 --timeout-method=thread --junitxml=test-results-p0.xml 2>&1 \
+            | python -u -c 'import sys,datetime; log=open("pytest-p0.log","a",encoding="utf-8");
+          for line in sys.stdin:
+            record=f"[{datetime.datetime.now(datetime.timezone.utc).isoformat()}] {line}"
+            sys.stdout.write(record); sys.stdout.flush(); log.write(record); log.flush()
+          log.close()'
+          test_status=${PIPESTATUS[0]}
+          echo "pytest exit code: ${test_status}"
+          exit "${test_status}"
+      - name: Capture runner diagnostics
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "Captured at (UTC): $(date -u --iso-8601=seconds)"
+            echo "Runner: $(uname -a)"
+            echo "Python: $(python --version 2>&1)"
+            echo "Disk:"
+            df -h
+            echo "Memory:"
+            free -h || true
+            echo "Processes:"
+            ps -eo pid,ppid,stat,etime,%cpu,%mem,cmd --sort=-%cpu | head -n 30
+          } > runner-diagnostics-p0.txt
+      - name: Upload test report and diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: p0-remote-authorization-pytest-${{ github.run_id }}
-          path: backend/test-results-p0.xml
-          if-no-files-found: ignore
+          name: p0-remote-authorization-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            backend/test-results-p0.xml
+            backend/pytest-p0.log
+            backend/runner-diagnostics-p0.txt
+          if-no-files-found: warn
           retention-days: 14
