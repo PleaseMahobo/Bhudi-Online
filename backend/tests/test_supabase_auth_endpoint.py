@@ -29,16 +29,19 @@ def test_supabase_me_returns_bhudi_identity(monkeypatch):
 def test_login_uses_supabase_identity_and_requires_mfa(monkeypatch):
     user = User(id=uuid4(), email="user@example.com", password_hash="not-the-supabase-password", role="admin", active=True, mfa_enabled=True)
 
-    def override():
-        return user
-
     def fail_if_local_password_is_used(*args, **kwargs):
         raise AssertionError("Bhudi local password authentication must not run")
 
-    app.dependency_overrides[get_supabase_user] = override
+    # /auth/login verifies the presented bearer token through its imported
+    # resolver; overriding get_supabase_user does not affect this code path.
+    monkeypatch.setattr("app.api.v1.endpoints.auth.resolve_supabase_user", lambda db, token: user)
     monkeypatch.setattr(AuthService, "authenticate", fail_if_local_password_is_used)
     try:
-        response = TestClient(app).post("/api/v1/auth/login", json={})
+        response = TestClient(app).post(
+            "/api/v1/auth/login",
+            headers={"Authorization": "Bearer supabase-test-token"},
+            json={},
+        )
         assert response.status_code == 403
         assert response.json()["detail"] == "mfa_required"
     finally:
@@ -47,9 +50,6 @@ def test_login_uses_supabase_identity_and_requires_mfa(monkeypatch):
 
 def test_login_promotes_supabase_session_after_valid_mfa(monkeypatch):
     user = User(id=uuid4(), email="user@example.com", password_hash="legacy", role="admin", active=True, mfa_enabled=True)
-
-    def override():
-        return user
 
     def fake_login(self, user, **kwargs):
         return {
@@ -76,11 +76,15 @@ def test_login_promotes_supabase_session_after_valid_mfa(monkeypatch):
         def verify_code(self, user, code):
             return code == "123456"
 
-    app.dependency_overrides[get_supabase_user] = override
+    monkeypatch.setattr("app.api.v1.endpoints.auth.resolve_supabase_user", lambda db, token: user)
     monkeypatch.setattr(AuthService, "login", fake_login)
     monkeypatch.setattr("app.services.mfa_service.MfaService", FakeMfaService)
     try:
-        response = TestClient(app).post("/api/v1/auth/login", json={"mfa_code": "123456"})
+        response = TestClient(app).post(
+            "/api/v1/auth/login",
+            headers={"Authorization": "Bearer supabase-test-token"},
+            json={"mfa_code": "123456"},
+        )
         assert response.status_code == 200
         assert response.json()["access_token"] == "bhudi-access"
         assert "access_token=bhudi-access" in response.headers.get("set-cookie", "")
