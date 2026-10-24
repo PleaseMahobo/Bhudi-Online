@@ -268,6 +268,14 @@ class RemoteSessionManager:
         elif event_type == "session_closed":
             state.status = "closed"
         if event_type.startswith("input_") or event_type == "input_channel_ready":
+            # Input-channel acknowledgements must return only to the dashboard
+            # input sockets. The general dashboard stream is a separate channel.
+            if event_type == "input_ack":
+                for websocket in list(state.dashboard_input_connections):
+                    try:
+                        await websocket.send_json(message)
+                    except Exception:
+                        state.dashboard_input_connections.remove(websocket)
             return
         await self._broadcast_to_dashboards(state, message)
 
