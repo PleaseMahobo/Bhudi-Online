@@ -232,8 +232,6 @@ def open_remote_desktop(
         agent_id=payload.agent_id,
         tenant_id=get_user_tenant_id(user),
         requested_by=user.id,
-        tenant_id=get_user_tenant_id(user),
-        requested_by=user.id,
         operation="remote_desktop",
         payload={
             **payload.model_dump(exclude={"agent_id"}),
