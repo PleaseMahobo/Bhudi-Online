@@ -232,6 +232,8 @@ def open_remote_desktop(
         agent_id=payload.agent_id,
         tenant_id=get_user_tenant_id(user),
         requested_by=user.id,
+        tenant_id=get_user_tenant_id(user),
+        requested_by=user.id,
         operation="remote_desktop",
         payload={
             **payload.model_dump(exclude={"agent_id"}),
@@ -266,6 +268,8 @@ def open_remote_terminal(
         }
     command = service.queue_operation(
         agent_id=payload.agent_id,
+        tenant_id=get_user_tenant_id(user),
+        requested_by=user.id,
         operation="remote_terminal",
         payload=request_payload,
         priority=80,
@@ -284,6 +288,8 @@ def queue_file_browser_operation(
 ) -> RemoteAccessQueuedResponse:
     command = service.queue_operation(
         agent_id=payload.agent_id,
+        tenant_id=get_user_tenant_id(user),
+        requested_by=user.id,
         operation="file_browser",
         payload=payload.model_dump(exclude={"agent_id"}, exclude_none=True),
         priority=70,
@@ -300,6 +306,8 @@ def queue_registry_operation(
 ) -> RemoteAccessQueuedResponse:
     command = service.queue_operation(
         agent_id=payload.agent_id,
+        tenant_id=get_user_tenant_id(user),
+        requested_by=user.id,
         operation="registry_editor",
         payload=payload.model_dump(exclude={"agent_id"}, exclude_none=True),
         priority=75,
@@ -316,6 +324,8 @@ def queue_task_manager_operation(
 ) -> RemoteAccessQueuedResponse:
     command = service.queue_operation(
         agent_id=payload.agent_id,
+        tenant_id=get_user_tenant_id(user),
+        requested_by=user.id,
         operation="task_manager",
         payload=payload.model_dump(exclude={"agent_id"}, exclude_none=True),
         priority=70,
@@ -332,6 +342,8 @@ def run_remote_powershell(
 ) -> RemoteAccessQueuedResponse:
     command = service.queue_operation(
         agent_id=payload.agent_id,
+        tenant_id=get_user_tenant_id(user),
+        requested_by=user.id,
         operation="remote_powershell",
         payload={**payload.model_dump(exclude={"agent_id"}), "shell": "powershell"},
         priority=80,
@@ -348,6 +360,8 @@ def run_remote_cmd(
 ) -> RemoteAccessQueuedResponse:
     command = service.queue_operation(
         agent_id=payload.agent_id,
+        tenant_id=get_user_tenant_id(user),
+        requested_by=user.id,
         operation="remote_cmd",
         payload={**payload.model_dump(exclude={"agent_id"}), "shell": "cmd"},
         priority=80,
@@ -364,6 +378,8 @@ def queue_event_viewer_query(
 ) -> RemoteAccessQueuedResponse:
     command = service.queue_operation(
         agent_id=payload.agent_id,
+        tenant_id=get_user_tenant_id(user),
+        requested_by=user.id,
         operation="remote_event_viewer",
         payload=payload.model_dump(exclude={"agent_id"}, exclude_none=True),
         priority=60,
@@ -380,6 +396,8 @@ def queue_wake_on_lan(
 ) -> RemoteAccessQueuedResponse:
     command = service.queue_operation(
         agent_id=payload.agent_id,
+        tenant_id=get_user_tenant_id(user),
+        requested_by=user.id,
         operation="wake_on_lan",
         payload=payload.model_dump(exclude={"agent_id"}),
         priority=100,
@@ -396,6 +414,8 @@ def queue_reboot(
 ) -> RemoteAccessQueuedResponse:
     command = service.queue_operation(
         agent_id=payload.agent_id,
+        tenant_id=get_user_tenant_id(user),
+        requested_by=user.id,
         operation="remote_reboot",
         payload=payload.model_dump(exclude={"agent_id"}, exclude_none=True),
         priority=100,
@@ -413,6 +433,8 @@ def queue_safe_mode_reboot(
 ) -> RemoteAccessQueuedResponse:
     command = service.queue_operation(
         agent_id=payload.agent_id,
+        tenant_id=get_user_tenant_id(user),
+        requested_by=user.id,
         operation="safe_mode_reboot",
         payload=payload.model_dump(exclude={"agent_id"}, exclude_none=True),
         priority=100,
