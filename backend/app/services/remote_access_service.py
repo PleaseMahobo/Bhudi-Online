@@ -132,6 +132,7 @@ class RemoteAccessService:
         priority: int,
         timeout_seconds: int | None = None,
         requested_by: uuid.UUID | None = None,
+        tenant_id: uuid.UUID | None = None,
         requires_reboot: bool = False,
     ) -> AgentCommand:
         command_type = REMOTE_ACCESS_COMMAND_TYPES[operation]
@@ -146,6 +147,7 @@ class RemoteAccessService:
             command_type=command_type,
             payload=enriched_payload,
             requested_by=requested_by,
+            tenant_id=tenant_id,
             priority=priority,
             timeout_seconds=timeout_seconds,
             requires_reboot=requires_reboot,

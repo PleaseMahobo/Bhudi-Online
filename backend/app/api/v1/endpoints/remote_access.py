@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy.orm import Session
 
 from app.core.access_tiers import require_mfa_for_actions
-from app.core.dependencies import get_current_user
+from app.core.dependencies import get_current_user, get_user_tenant_id, authorization_error
 from app.database.session import get_db
 from app.models.user import User
 from app.services.remote_access_service import RemoteAccessService
@@ -170,6 +170,13 @@ def _service(db: Session = Depends(get_db)) -> RemoteAccessService:
     return RemoteAccessService(db)
 
 
+def _remote_user(user: User = Depends(require_mfa_for_actions)) -> User:
+    # Tenant scope is server-resolved; client-supplied scope is never trusted.
+    if get_user_tenant_id(user) is None:
+        raise authorization_error("Tenant association required for remote access")
+    return user
+
+
 def _session_response(session: Any) -> RemoteSessionResponse:
     snapshot = session.snapshot()
     return RemoteSessionResponse(**snapshot)
@@ -214,7 +221,7 @@ def list_capabilities(
 def open_remote_desktop(
     payload: RemoteDesktopRequest,
     service: RemoteAccessService = Depends(_service),
-    _user: User = Depends(require_mfa_for_actions),
+    user: User = Depends(_remote_user),
 ) -> RemoteAccessQueuedResponse:
     session = service.create_interactive_session(
         agent_id=payload.agent_id,
@@ -223,6 +230,8 @@ def open_remote_desktop(
     )
     command = service.queue_operation(
         agent_id=payload.agent_id,
+        tenant_id=get_user_tenant_id(user),
+        requested_by=user.id,
         operation="remote_desktop",
         payload={
             **payload.model_dump(exclude={"agent_id"}),
