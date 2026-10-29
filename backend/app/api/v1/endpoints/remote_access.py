@@ -223,6 +223,7 @@ def open_remote_desktop(
     service: RemoteAccessService = Depends(_service),
     user: User = Depends(_remote_user),
 ) -> RemoteAccessQueuedResponse:
+    service.validate_agent_scope(payload.agent_id, get_user_tenant_id(user))
     session = service.create_interactive_session(
         agent_id=payload.agent_id,
         session_type="desktop",
@@ -254,6 +255,7 @@ def open_remote_terminal(
     session = None
     request_payload = payload.model_dump(exclude={"agent_id"}, exclude_none=True)
     if payload.interactive:
+        service.validate_agent_scope(payload.agent_id, get_user_tenant_id(user))
         session = service.create_interactive_session(
             agent_id=payload.agent_id,
             session_type="terminal",
