@@ -249,7 +249,7 @@ def open_remote_desktop(
 def open_remote_terminal(
     payload: RemoteTerminalRequest,
     service: RemoteAccessService = Depends(_service),
-    _user: User = Depends(require_mfa_for_actions),
+    user: User = Depends(_remote_user),
 ) -> RemoteAccessQueuedResponse:
     session = None
     request_payload = payload.model_dump(exclude={"agent_id"}, exclude_none=True)
@@ -282,7 +282,7 @@ def open_remote_terminal(
 def queue_file_browser_operation(
     payload: FileBrowserRequest,
     service: RemoteAccessService = Depends(_service),
-    _user: User = Depends(require_mfa_for_actions),
+    user: User = Depends(_remote_user),
 ) -> RemoteAccessQueuedResponse:
     command = service.queue_operation(
         agent_id=payload.agent_id,
@@ -300,7 +300,7 @@ def queue_file_browser_operation(
 def queue_registry_operation(
     payload: RegistryEditorRequest,
     service: RemoteAccessService = Depends(_service),
-    _user: User = Depends(require_mfa_for_actions),
+    user: User = Depends(_remote_user),
 ) -> RemoteAccessQueuedResponse:
     command = service.queue_operation(
         agent_id=payload.agent_id,
@@ -318,7 +318,7 @@ def queue_registry_operation(
 def queue_task_manager_operation(
     payload: TaskManagerRequest,
     service: RemoteAccessService = Depends(_service),
-    _user: User = Depends(require_mfa_for_actions),
+    user: User = Depends(_remote_user),
 ) -> RemoteAccessQueuedResponse:
     command = service.queue_operation(
         agent_id=payload.agent_id,
@@ -336,7 +336,7 @@ def queue_task_manager_operation(
 def run_remote_powershell(
     payload: ShellExecutionRequest,
     service: RemoteAccessService = Depends(_service),
-    _user: User = Depends(require_mfa_for_actions),
+    user: User = Depends(_remote_user),
 ) -> RemoteAccessQueuedResponse:
     command = service.queue_operation(
         agent_id=payload.agent_id,
@@ -354,7 +354,7 @@ def run_remote_powershell(
 def run_remote_cmd(
     payload: ShellExecutionRequest,
     service: RemoteAccessService = Depends(_service),
-    _user: User = Depends(require_mfa_for_actions),
+    user: User = Depends(_remote_user),
 ) -> RemoteAccessQueuedResponse:
     command = service.queue_operation(
         agent_id=payload.agent_id,
@@ -372,7 +372,7 @@ def run_remote_cmd(
 def queue_event_viewer_query(
     payload: EventViewerRequest,
     service: RemoteAccessService = Depends(_service),
-    _user: User = Depends(require_mfa_for_actions),
+    user: User = Depends(_remote_user),
 ) -> RemoteAccessQueuedResponse:
     command = service.queue_operation(
         agent_id=payload.agent_id,
@@ -390,7 +390,7 @@ def queue_event_viewer_query(
 def queue_wake_on_lan(
     payload: WakeOnLanRequest,
     service: RemoteAccessService = Depends(_service),
-    _user: User = Depends(require_mfa_for_actions),
+    user: User = Depends(_remote_user),
 ) -> RemoteAccessQueuedResponse:
     command = service.queue_operation(
         agent_id=payload.agent_id,
@@ -408,7 +408,7 @@ def queue_wake_on_lan(
 def queue_reboot(
     payload: RebootRequest,
     service: RemoteAccessService = Depends(_service),
-    _user: User = Depends(require_mfa_for_actions),
+    user: User = Depends(_remote_user),
 ) -> RemoteAccessQueuedResponse:
     command = service.queue_operation(
         agent_id=payload.agent_id,
@@ -427,7 +427,7 @@ def queue_reboot(
 def queue_safe_mode_reboot(
     payload: SafeModeRebootRequest,
     service: RemoteAccessService = Depends(_service),
-    _user: User = Depends(require_mfa_for_actions),
+    user: User = Depends(_remote_user),
 ) -> RemoteAccessQueuedResponse:
     command = service.queue_operation(
         agent_id=payload.agent_id,
