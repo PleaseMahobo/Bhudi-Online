@@ -17,6 +17,8 @@ from app.core.access_tiers import require_mfa_for_actions
 from app.models.user import User
 from app.models.agent import Agent
 from app.models.tenant import Tenant
+from app.models.agent_command import AgentCommand
+from app.services.remote_session_manager import remote_session_manager
 
 
 TEST_AGENT_ID = "11111111-1111-4111-8111-11111111111a"
@@ -185,3 +187,32 @@ def test_remote_access_file_browser_upload_requires_content() -> None:
     payload = valid_upload_response.json()
     assert payload["command_type"] == "remote.file_browser"
     assert payload["payload"]["operation"] == "upload"
+
+def test_remote_access_rejects_cross_tenant_dispatch_without_side_effects() -> None:
+    client = _build_client()
+    other_tenant_user = User(
+        id=uuid.uuid4(),
+        tenant_id=uuid.uuid4(),
+        email="other-tenant@example.com",
+        active=True,
+        mfa_enabled=True,
+    )
+    client.app.dependency_overrides[require_mfa_for_actions] = lambda: other_tenant_user
+
+    existing_session_ids = set(remote_session_manager._sessions)
+    db = bootstrap.SessionLocal()
+    try:
+        commands_before = db.query(AgentCommand).count()
+    finally:
+        db.close()
+
+    response = client.post("/remote-access/desktop", json={"agent_id": TEST_AGENT_ID})
+
+    assert response.status_code == 403
+    assert "authorized tenant" in response.json()["detail"].lower()
+    assert set(remote_session_manager._sessions) == existing_session_ids
+    db = bootstrap.SessionLocal()
+    try:
+        assert db.query(AgentCommand).count() == commands_before
+    finally:
+        db.close()
