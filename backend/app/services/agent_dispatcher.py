@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -10,6 +11,8 @@ from app.models.agent import Agent
 from app.models.agent_command import AgentCommand
 from app.repositories.agent_repository import AgentRepository
 from app.repositories.agent_command_repository import AgentCommandRepository
+
+logger = logging.getLogger(__name__)
 
 
 class AgentDispatcher:
@@ -23,18 +26,62 @@ class AgentDispatcher:
     def _authorized_agent(self, agent_id: uuid.UUID, tenant_id: uuid.UUID | None) -> Agent:
         # Missing tenant context must fail closed; unscoped repository lookup is forbidden.
         if tenant_id is None:
+            logger.warning(
+                "remote_dispatch.authorization_decision",
+                extra={"reason_code": "missing_tenant_scope", "agent_id": str(agent_id),
+                       "tenant_scope_present": False, "allowed": False},
+            )
             raise PermissionError("Trusted tenant scope is required for command dispatch.")
+
         agent = self.agent_repo.get(agent_id, tenant_id=tenant_id)
         if agent is None:
+            # Deliberately do not distinguish nonexistent IDs from cross-tenant ownership.
+            logger.warning(
+                "remote_dispatch.authorization_decision",
+                extra={"reason_code": "agent_not_found_or_wrong_tenant", "agent_id": str(agent_id),
+                       "tenant_id": str(tenant_id), "tenant_scope_present": True, "allowed": False},
+            )
             raise PermissionError("Agent is not owned by the authorized tenant.")
+
+        # Snapshot only authorization facts. Never log credentials, payloads, or endpoint data.
+        state = {
+            "agent_id": str(agent_id),
+            "tenant_id": str(tenant_id),
+            "tenant_scope_present": True,
+            "enabled": bool(agent.enabled),
+            "revoked": bool(getattr(agent, "revoked", False)),
+            "quarantined": bool(getattr(agent, "quarantined", False)),
+            "registration_state": getattr(agent, "registration_state", None),
+        }
+        logger.info("remote_dispatch.authorization_snapshot", extra=state)
+
+        reason = None
         if not agent.enabled:
-            raise PermissionError("Agent disabled.")
-        if getattr(agent, "revoked", False):
-            raise PermissionError("Agent revoked.")
-        if getattr(agent, "quarantined", False):
-            raise PermissionError("Agent quarantined.")
-        if getattr(agent, "registration_state", None) != "approved":
+            reason = "agent_disabled"
+        elif getattr(agent, "revoked", False):
+            reason = "agent_revoked"
+        elif getattr(agent, "quarantined", False):
+            reason = "agent_quarantined"
+        elif getattr(agent, "registration_state", None) != "approved":
+            reason = "agent_not_approved"
+
+        if reason is not None:
+            logger.warning(
+                "remote_dispatch.authorization_decision",
+                extra={**state, "reason_code": reason, "allowed": False},
+            )
+            if reason == "agent_disabled":
+                raise PermissionError("Agent disabled.")
+            if reason == "agent_revoked":
+                raise PermissionError("Agent revoked.")
+            if reason == "agent_quarantined":
+                raise PermissionError("Agent quarantined.")
             raise PermissionError("Agent is not approved for command execution.")
+
+        logger.info(
+            "remote_dispatch.authorization_decision",
+            extra={**state, "reason_code": "all_authorization_checks_passed", "allowed": True},
+        )
         return agent
 
     def queue_command(
