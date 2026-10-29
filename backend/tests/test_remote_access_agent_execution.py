@@ -58,11 +58,24 @@ def _build_client() -> TestClient:
             registration_state="approved",
             approved=True,
             enabled=True,
+            revoked=False,
             command_timeout=300,
             enrollment_token=TEST_AGENT_TOKEN,
         )
     )
     session.commit()
+    # Verify the fixture's persisted authorization state before requests run.
+    persisted_agent = session.get(Agent, agent_id if "agent_id" in locals() else uuid.UUID(TEST_AGENT_ID))
+    assert persisted_agent is not None
+    session.refresh(persisted_agent)
+    assert persisted_agent.id == uuid.UUID(TEST_AGENT_ID)
+    assert persisted_agent.tenant_id == tenant.id
+    assert persisted_agent.revoked is False
+    assert persisted_agent.revoked_at is None
+    assert persisted_agent.revocation_reason is None
+    assert persisted_agent.enabled is True
+    assert persisted_agent.quarantined is False
+    assert persisted_agent.registration_state == "approved"
     session.close()
 
     def override_get_db():
