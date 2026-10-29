@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timezone
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -37,7 +38,7 @@ def _build_client() -> TestClient:
     agent_id = uuid.UUID(TEST_AGENT_ID)
 
     session = session_factory()
-    tenant = Tenant(name="Remote Access Test Tenant")
+    tenant = Tenant(id=uuid.uuid4(), name="Remote Access Test Tenant", created_at=datetime.now(timezone.utc))
     session.add(tenant)
     session.flush()
     session.add(
