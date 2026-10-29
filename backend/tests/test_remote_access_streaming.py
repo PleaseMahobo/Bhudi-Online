@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timezone
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -15,6 +16,7 @@ from app.core.dependencies import get_current_user
 from app.core.access_tiers import require_mfa_for_actions
 from app.models.user import User
 from app.models.agent import Agent
+from app.models.tenant import Tenant
 
 
 TEST_AGENT_ID = "33333333-3333-4333-8333-33333333333c"
@@ -34,11 +36,16 @@ def _build_client() -> TestClient:
     bootstrap._bootstrap_metadata_for_engine().create_all(bind=engine)
 
     session = session_factory()
+    tenant = Tenant(id=uuid.uuid4(), name="Remote Access Test Tenant", created_at=datetime.now(timezone.utc))
+    session.add(tenant)
+    session.flush()
     session.add(
         Agent(
             id=uuid.UUID(TEST_AGENT_ID),
+            tenant_id=tenant.id,
             hostname="stream-agent-01",
             platform="windows",
+            registration_state="approved",
             approved=True,
             enabled=True,
             command_timeout=300,
@@ -57,7 +64,7 @@ def _build_client() -> TestClient:
     app = FastAPI()
     app.include_router(remote_access.router)
     app.dependency_overrides[get_db] = override_get_db
-    test_user = User(id=uuid.uuid4(), email="test@example.com", active=True, mfa_enabled=True)
+    test_user = User(id=uuid.uuid4(), tenant_id=tenant.id, email="test@example.com", active=True, mfa_enabled=True)
     app.dependency_overrides[get_current_user] = lambda: test_user
     app.dependency_overrides[require_mfa_for_actions] = lambda: test_user
     return TestClient(app)
