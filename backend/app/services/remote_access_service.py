@@ -4,6 +4,7 @@ import uuid
 from typing import Any
 
 from sqlalchemy.orm import Session
+from fastapi import HTTPException, status
 
 from app.models.agent_command import AgentCommand
 from app.services.agent_dispatcher import AgentDispatcher
@@ -100,6 +101,12 @@ class RemoteAccessService:
             },
         ]
 
+    def validate_agent_scope(self, agent_id: uuid.UUID, tenant_id: uuid.UUID | None) -> None:
+        try:
+            self.dispatcher._authorized_agent(agent_id, tenant_id)
+        except PermissionError as exc:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+
     def create_interactive_session(
         self,
         *,
@@ -142,16 +149,19 @@ class RemoteAccessService:
             input_token = remote_session_manager.get_input_token(session_id) if session_id else None
             if input_token:
                 enriched_payload["input_token"] = input_token
-        return self.dispatcher.queue_command(
-            agent_id=agent_id,
-            command_type=command_type,
-            payload=enriched_payload,
-            requested_by=requested_by,
-            tenant_id=tenant_id,
-            priority=priority,
-            timeout_seconds=timeout_seconds,
-            requires_reboot=requires_reboot,
-        )
+        try:
+            return self.dispatcher.queue_command(
+                agent_id=agent_id,
+                command_type=command_type,
+                payload=enriched_payload,
+                requested_by=requested_by,
+                tenant_id=tenant_id,
+                priority=priority,
+                timeout_seconds=timeout_seconds,
+                requires_reboot=requires_reboot,
+            )
+        except PermissionError as exc:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
 
     def get_operation(self, command_id: uuid.UUID) -> AgentCommand | None:
         return self.db.get(AgentCommand, command_id)
