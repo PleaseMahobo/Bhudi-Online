@@ -93,7 +93,7 @@ def test_remote_access_capabilities_and_desktop_queue() -> None:
         },
     )
 
-    assert queue_response.status_code == 201
+    assert queue_response.status_code == 201, queue_response.text
     payload = queue_response.json()
     assert payload["operation"] == "remote_desktop"
     assert payload["command_type"] == "remote.desktop.start"
@@ -120,7 +120,7 @@ def test_remote_access_reboot_and_registry_validation() -> None:
         },
     )
 
-    assert reboot_response.status_code == 201
+    assert reboot_response.status_code == 201, reboot_response.text
     reboot_payload = reboot_response.json()
     assert reboot_payload["requires_reboot"] is True
     assert reboot_payload["payload"]["with_networking"] is True
@@ -183,7 +183,7 @@ def test_remote_access_file_browser_upload_requires_content() -> None:
         },
     )
 
-    assert valid_upload_response.status_code == 201
+    assert valid_upload_response.status_code == 201, valid_upload_response.text
     payload = valid_upload_response.json()
     assert payload["command_type"] == "remote.file_browser"
     assert payload["payload"]["operation"] == "upload"
