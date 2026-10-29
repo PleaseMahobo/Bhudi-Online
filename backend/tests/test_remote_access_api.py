@@ -15,6 +15,7 @@ from app.core.dependencies import get_current_user
 from app.core.access_tiers import require_mfa_for_actions
 from app.models.user import User
 from app.models.agent import Agent
+from app.models.tenant import Tenant
 
 
 TEST_AGENT_ID = "11111111-1111-4111-8111-11111111111a"
@@ -36,11 +37,16 @@ def _build_client() -> TestClient:
     agent_id = uuid.UUID(TEST_AGENT_ID)
 
     session = session_factory()
+    tenant = Tenant(name="Remote Access Test Tenant")
+    session.add(tenant)
+    session.flush()
     session.add(
         Agent(
             id=agent_id,
+            tenant_id=tenant.id,
             hostname="remote-agent-01",
             platform="windows",
+            registration_state="approved",
             approved=True,
             enabled=True,
             command_timeout=300,
@@ -59,7 +65,7 @@ def _build_client() -> TestClient:
     app = FastAPI()
     app.include_router(remote_access.router)
     app.dependency_overrides[get_db] = override_get_db
-    test_user = User(id=uuid.uuid4(), email="test@example.com", active=True, mfa_enabled=True)
+    test_user = User(id=uuid.uuid4(), tenant_id=tenant.id, email="test@example.com", active=True, mfa_enabled=True)
     app.dependency_overrides[get_current_user] = lambda: test_user
     app.dependency_overrides[require_mfa_for_actions] = lambda: test_user
     return TestClient(app)
@@ -128,6 +134,25 @@ def test_remote_access_reboot_and_registry_validation() -> None:
     )
 
     assert invalid_registry_response.status_code == 422
+
+
+def test_remote_access_rejects_authenticated_user_without_tenant() -> None:
+    client = _build_client()
+    unscoped_user = User(
+        id=uuid.uuid4(),
+        email="unscoped@example.com",
+        active=True,
+        mfa_enabled=True,
+    )
+    client.app.dependency_overrides[require_mfa_for_actions] = lambda: unscoped_user
+
+    response = client.post(
+        "/remote-access/desktop",
+        json={"agent_id": TEST_AGENT_ID},
+    )
+
+    assert response.status_code == 403
+    assert "Tenant association required" in response.json()["detail"]
 
 
 def test_remote_access_file_browser_upload_requires_content() -> None:
