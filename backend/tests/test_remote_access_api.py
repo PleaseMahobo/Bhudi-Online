@@ -53,6 +53,7 @@ def _build_client() -> TestClient:
             approved=True,
             enabled=True,
             revoked=False,
+            quarantined=False,
             command_timeout=300,
         )
     )
