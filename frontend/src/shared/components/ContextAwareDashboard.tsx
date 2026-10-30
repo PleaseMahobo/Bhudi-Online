@@ -44,12 +44,22 @@ function matchesScope(
   row: Row,
   organizationId: string | null,
   siteId: string | null,
-  tenantId?: string
+  tenantId?: string | null
 ) {
+  const tenantCandidates = [row.tenant_id, row.tenantId].filter(Boolean).map(String);
+
+  // Always enforce tenant isolation when the user has a tenant_id.
+  if (tenantId && tenantCandidates.length > 0 && !tenantCandidates.includes(String(tenantId))) {
+    return false;
+  }
+  // Records with no tenant_id are excluded from tenant-scoped customer views.
+  if (tenantId && tenantCandidates.length === 0) {
+    return false;
+  }
+
   if (!organizationId && !siteId) return true;
   const organizationCandidates = [row.organization_id, row.organizationId].filter(Boolean).map(String);
   const siteCandidates = [row.site_id, row.siteId].filter(Boolean).map(String);
-  const tenantCandidates = [row.tenant_id, row.tenantId].filter(Boolean).map(String);
   if (siteId) return siteCandidates.includes(String(siteId));
   return (
     organizationCandidates.includes(String(organizationId)) ||
@@ -86,6 +96,8 @@ export default function ContextAwareDashboard() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const tenantId = user?.tenant_id ?? null;
+
   const load = useCallback(async () => {
     try {
       setBusy(true);
@@ -111,12 +123,12 @@ export default function ContextAwareDashboard() {
   }, [authLoading, user, load]);
 
   const scopedDevices = useMemo(
-    () => devices.filter((d) => matchesScope(d, organizationId, siteId)),
-    [devices, organizationId, siteId]
+    () => devices.filter((d) => matchesScope(d, organizationId, siteId, tenantId)),
+    [devices, organizationId, siteId, tenantId]
   );
   const scopedTickets = useMemo(
-    () => tickets.filter((t) => matchesScope(t as Row, organizationId, siteId)),
-    [tickets, organizationId, siteId]
+    () => tickets.filter((t) => matchesScope(t as Row, organizationId, siteId, tenantId)),
+    [tickets, organizationId, siteId, tenantId]
   );
 
   const online = scopedDevices.filter((d) =>
@@ -182,6 +194,7 @@ export default function ContextAwareDashboard() {
             <p className="mt-1 text-sm text-slate-500">
               {workspaceLoading ? 'Loading workspace…' : 'Live operations overview'}
               {isConnected ? ' · Live' : ''}
+              {tenantId ? ' · Tenant scoped' : ''}
             </p>
           </div>
           <button
@@ -310,8 +323,9 @@ export default function ContextAwareDashboard() {
             <div>
               <p className="text-sm font-semibold">Workspace isolation</p>
               <p className="text-xs text-slate-500">
-                Changing the customer or site selector changes this dashboard scope. Records without
-                tenant context are intentionally excluded from customer views.
+                Data is scoped to your tenant{tenantId ? ` (${tenantId.slice(0, 8)}…)` : ''}. Changing
+                the customer or site selector further narrows this view. Records without tenant
+                context are excluded.
               </p>
             </div>
           </div>
