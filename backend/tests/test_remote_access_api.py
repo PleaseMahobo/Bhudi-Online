@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timezone
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -15,6 +16,9 @@ from app.core.dependencies import get_current_user
 from app.core.access_tiers import require_mfa_for_actions
 from app.models.user import User
 from app.models.agent import Agent
+from app.models.tenant import Tenant
+from app.models.agent_command import AgentCommand
+from app.services.remote_session_manager import remote_session_manager
 
 
 TEST_AGENT_ID = "11111111-1111-4111-8111-11111111111a"
@@ -36,17 +40,36 @@ def _build_client() -> TestClient:
     agent_id = uuid.UUID(TEST_AGENT_ID)
 
     session = session_factory()
+    tenant = Tenant(id=uuid.uuid4(), name="Remote Access Test Tenant", created_at=datetime.now(timezone.utc))
+    session.add(tenant)
+    session.flush()
     session.add(
         Agent(
             id=agent_id,
+            tenant_id=tenant.id,
             hostname="remote-agent-01",
             platform="windows",
+            registration_state="approved",
             approved=True,
             enabled=True,
+            revoked=False,
+            quarantined=False,
             command_timeout=300,
         )
     )
     session.commit()
+    # Verify the fixture's persisted authorization state before requests run.
+    persisted_agent = session.get(Agent, agent_id if "agent_id" in locals() else uuid.UUID(TEST_AGENT_ID))
+    assert persisted_agent is not None
+    session.refresh(persisted_agent)
+    assert persisted_agent.id == uuid.UUID(TEST_AGENT_ID)
+    assert persisted_agent.tenant_id == tenant.id
+    assert persisted_agent.revoked is False
+    assert persisted_agent.revoked_at is None
+    assert persisted_agent.revocation_reason is None
+    assert persisted_agent.enabled is True
+    assert persisted_agent.quarantined is False
+    assert persisted_agent.registration_state == "approved"
     session.close()
 
     def override_get_db():
@@ -59,7 +82,7 @@ def _build_client() -> TestClient:
     app = FastAPI()
     app.include_router(remote_access.router)
     app.dependency_overrides[get_db] = override_get_db
-    test_user = User(id=uuid.uuid4(), email="test@example.com", active=True, mfa_enabled=True)
+    test_user = User(id=uuid.uuid4(), tenant_id=tenant.id, email="test@example.com", active=True, mfa_enabled=True)
     app.dependency_overrides[get_current_user] = lambda: test_user
     app.dependency_overrides[require_mfa_for_actions] = lambda: test_user
     return TestClient(app)
@@ -84,7 +107,7 @@ def test_remote_access_capabilities_and_desktop_queue() -> None:
         },
     )
 
-    assert queue_response.status_code == 201
+    assert queue_response.status_code == 201, queue_response.text
     payload = queue_response.json()
     assert payload["operation"] == "remote_desktop"
     assert payload["command_type"] == "remote.desktop.start"
@@ -111,7 +134,7 @@ def test_remote_access_reboot_and_registry_validation() -> None:
         },
     )
 
-    assert reboot_response.status_code == 201
+    assert reboot_response.status_code == 201, reboot_response.text
     reboot_payload = reboot_response.json()
     assert reboot_payload["requires_reboot"] is True
     assert reboot_payload["payload"]["with_networking"] is True
@@ -128,6 +151,25 @@ def test_remote_access_reboot_and_registry_validation() -> None:
     )
 
     assert invalid_registry_response.status_code == 422
+
+
+def test_remote_access_rejects_authenticated_user_without_tenant() -> None:
+    client = _build_client()
+    unscoped_user = User(
+        id=uuid.uuid4(),
+        email="unscoped@example.com",
+        active=True,
+        mfa_enabled=True,
+    )
+    client.app.dependency_overrides[require_mfa_for_actions] = lambda: unscoped_user
+
+    response = client.post(
+        "/remote-access/desktop",
+        json={"agent_id": TEST_AGENT_ID},
+    )
+
+    assert response.status_code == 403
+    assert "Tenant association required" in response.json()["detail"]
 
 
 def test_remote_access_file_browser_upload_requires_content() -> None:
@@ -155,7 +197,36 @@ def test_remote_access_file_browser_upload_requires_content() -> None:
         },
     )
 
-    assert valid_upload_response.status_code == 201
+    assert valid_upload_response.status_code == 201, valid_upload_response.text
     payload = valid_upload_response.json()
     assert payload["command_type"] == "remote.file_browser"
     assert payload["payload"]["operation"] == "upload"
+
+def test_remote_access_rejects_cross_tenant_dispatch_without_side_effects() -> None:
+    client = _build_client()
+    other_tenant_user = User(
+        id=uuid.uuid4(),
+        tenant_id=uuid.uuid4(),
+        email="other-tenant@example.com",
+        active=True,
+        mfa_enabled=True,
+    )
+    client.app.dependency_overrides[require_mfa_for_actions] = lambda: other_tenant_user
+
+    existing_session_ids = set(remote_session_manager._sessions)
+    db = bootstrap.SessionLocal()
+    try:
+        commands_before = db.query(AgentCommand).count()
+    finally:
+        db.close()
+
+    response = client.post("/remote-access/desktop", json={"agent_id": TEST_AGENT_ID})
+
+    assert response.status_code == 403
+    assert "authorized tenant" in response.json()["detail"].lower()
+    assert set(remote_session_manager._sessions) == existing_session_ids
+    db = bootstrap.SessionLocal()
+    try:
+        assert db.query(AgentCommand).count() == commands_before
+    finally:
+        db.close()

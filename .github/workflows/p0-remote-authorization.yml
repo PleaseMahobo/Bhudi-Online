@@ -1,0 +1,63 @@
+name: P0 Remote Authorization Tests
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "backend/**"
+      - ".github/workflows/p0-remote-authorization.yml"
+  push:
+    branches:
+      - "security/p0-remote-access-authorization"
+    paths:
+      - "backend/**"
+      - ".github/workflows/p0-remote-authorization.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: p0-remote-auth-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend-regression:
+    name: Backend regression suite (blocking)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install backend dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then python -m pip install -r requirements.txt; fi
+          python -m pip install pytest pytest-timeout
+      - name: Run complete backend test suite
+        timeout-minutes: 50
+        env:
+          PYTHONFAULTHANDLER: "1"
+        run: |
+          set -o pipefail
+          python -m pytest tests/ -vv -s --tb=long --durations=30 \
+            --timeout=180 --timeout-method=thread \
+            --junitxml=test-results-p0.xml 2>&1 | tee pytest-p0.log
+      - name: Upload test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: p0-remote-authorization-pytest-${{ github.run_id }}
+          path: |
+            test-results-p0.xml
+            pytest-p0.log
+          if-no-files-found: ignore
+          retention-days: 14
