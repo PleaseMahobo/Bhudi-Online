@@ -418,6 +418,7 @@ class MonitoringService:
             "channel": "alerts",
             "alert": {
                 "id": str(alert.id),
+                "tenant_id": str(alert.tenant_id) if getattr(alert, "tenant_id", None) else None,
                 "check_id": str(alert.check_id) if alert.check_id else None,
                 "provider": alert.provider,
                 "alert_type": alert.alert_type,
