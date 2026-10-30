@@ -256,6 +256,32 @@ class RemoteSessionManager:
 
         await state.agent_connection.send_json(envelope)
 
+    async def relay_agent_input_message(
+        self,
+        session_id: UUID | str,
+        websocket: WebSocket,
+        message: dict[str, Any],
+    ) -> bool:
+        """Relay input acknowledgements only from the currently bound input-agent socket."""
+        state = self.get_session(session_id)
+        if state is None or state.agent_input_connection is not websocket:
+            return False
+        if message.get("type") != "input_ack":
+            return False
+        # Bind acknowledgements to this session; never trust a caller-supplied route id.
+        if str(message.get("session_id") or "") != state.session_id:
+            return False
+        event_id = message.get("event_id")
+        if not isinstance(event_id, str) or not event_id:
+            return False
+        for dashboard in list(state.dashboard_input_connections):
+            try:
+                await dashboard.send_json(message)
+            except Exception:
+                if dashboard in state.dashboard_input_connections:
+                    state.dashboard_input_connections.remove(dashboard)
+        return True
+
     async def relay_agent_message(self, session_id: UUID | str, message: dict[str, Any]) -> None:
         state = self.get_session(session_id)
         if state is None:
