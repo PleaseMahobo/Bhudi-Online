@@ -8,6 +8,7 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 
 from app.core.ws_manager import manager as ws_manager
+from app.models.agent import Agent
 from app.models.device_management import MaintenanceWindow
 from app.models.monitoring import MonitoringAlert, MonitoringCheck
 from app.services.alert_rule_service import AlertRuleService
@@ -17,6 +18,28 @@ class MonitoringService:
     def __init__(self, db: Session):
         self.db = db
         self.rule_service = AlertRuleService(db)
+
+    def _resolve_tenant_id(
+        self,
+        *,
+        tenant_id: UUID | None,
+        payload: dict[str, Any],
+    ) -> UUID:
+        """Prefer explicit tenant_id; else derive from payload agent_id."""
+        if tenant_id is not None:
+            return tenant_id
+        agent_id_raw = payload.get("agent_id")
+        if agent_id_raw:
+            try:
+                agent = self.db.get(Agent, UUID(str(agent_id_raw)))
+            except (ValueError, TypeError):
+                agent = None
+            if agent is not None and agent.tenant_id is not None:
+                return agent.tenant_id
+        raise ValueError(
+            "tenant_id is required for monitoring rows "
+            "(pass tenant_id= or include agent_id in payload that maps to an agent with tenant_id)"
+        )
 
     def record_check(
         self,
@@ -35,8 +58,11 @@ class MonitoringService:
         baseline_value: float | None = None,
         anomaly_score: float | None = None,
         auto_alert: bool = True,
+        tenant_id: UUID | None = None,
     ) -> MonitoringCheck:
+        resolved_tenant_id = self._resolve_tenant_id(tenant_id=tenant_id, payload=payload)
         check = MonitoringCheck(
+            tenant_id=resolved_tenant_id,
             provider=provider,
             check_type=check_type,
             target=target,
@@ -85,6 +111,7 @@ class MonitoringService:
         escalation_policy: dict[str, Any] | None = None,
         correlation_key: str | None = None,
         use_rules: bool = True,
+        tenant_id: UUID | None = None,
     ) -> tuple[MonitoringCheck, list[MonitoringAlert]]:
         matched_rules = []
         if use_rules:
@@ -253,6 +280,7 @@ class MonitoringService:
             baseline_value=baseline_value,
             anomaly_score=anomaly_score,
             auto_alert=False,
+            tenant_id=tenant_id,
         )
 
         alerts: list[MonitoringAlert] = []
@@ -304,6 +332,7 @@ class MonitoringService:
             severity=severity,
         )
         alert = MonitoringAlert(
+            tenant_id=check.tenant_id,
             check_id=check.id,
             provider=check.provider,
             alert_type=alert_type,
@@ -411,7 +440,6 @@ class MonitoringService:
         try:
             ws_manager.broadcast_sync(payload, channel="alerts")
         except Exception:
-            # Never break alert persistence because of WS failure
             pass
 
     def _fingerprint(
@@ -500,7 +528,7 @@ class MonitoringService:
             try:
                 start = datetime.fromisoformat(window.start.replace("Z", "+00:00"))
                 end = datetime.fromisoformat(window.end.replace("Z", "+00:00"))
-            except ValueError:
+            except Exception:
                 continue
             if start <= now <= end:
                 return True
@@ -517,7 +545,7 @@ class MonitoringService:
             )
             .count()
         )
-        return count + 1
+        return max(count + 1, 1)
 
     def _escalation_decision(
         self,
@@ -526,14 +554,24 @@ class MonitoringService:
         policy: dict[str, Any] | None,
         severity: str,
     ) -> dict[str, Any]:
-        policy_levels = (policy or {}).get("levels") or []
-        occurrence_count = self._correlated_count(correlation_key)
         applied_level = 0
         applied_severity = severity
-        for index, level in enumerate(
-            sorted(policy_levels, key=lambda item: int(item.get("repeat_count", 1)))
-        ):
-            if occurrence_count >= int(level.get("repeat_count", 1)):
-                applied_level = index + 1
+        if not policy or not correlation_key:
+            return {"level": applied_level, "severity": applied_severity}
+        levels = policy.get("levels") or []
+        if not levels:
+            return {"level": applied_level, "severity": applied_severity}
+        prior = (
+            self.db.query(MonitoringAlert)
+            .filter(
+                MonitoringAlert.correlation_key == correlation_key,
+                MonitoringAlert.resolved.is_(False),
+            )
+            .count()
+        )
+        for idx, level in enumerate(levels):
+            repeat_count = int(level.get("repeat_count") or 0)
+            if prior + 1 >= repeat_count:
+                applied_level = idx + 1
                 applied_severity = str(level.get("severity") or applied_severity)
         return {"level": applied_level, "severity": applied_severity}

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from uuid import UUID
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -13,6 +14,8 @@ from app.core.bootstrap import _bootstrap_metadata_for_engine
 from app.database.session import get_db
 from app.models.device_management import MaintenanceWindow
 from app.models.monitoring import MonitoringAlert, MonitoringCheck
+
+TEST_TENANT_ID = UUID("00000000-0000-4000-8000-000000000001")
 
 
 def _test_app():
@@ -43,27 +46,36 @@ def test_monitoring_checks_and_alerts_are_persisted() -> None:
     alerts = db.query(MonitoringAlert).all()
     db.close()
     assert len(checks) >= 1
+    assert all(c.tenant_id == TEST_TENANT_ID for c in checks)
     assert len(alerts) == 0
 
 
 def test_alert_engine_supports_threshold_state_anomaly_and_correlation() -> None:
     app, _ = _test_app()
     client = TestClient(app)
-    baseline_response = client.post("/monitoring/alerts/evaluate", json={
-        "provider": "infrastructure", "check_type": "cpu", "target": "server-01", "metric_name": "cpu_percent",
-        "metric_value": 22, "state_value": "up", "warning_threshold": 70, "critical_threshold": 90,
-        "anomaly_tolerance": 20, "correlation_key": "site-a/core",
+    common = {
+        "provider": "infrastructure",
+        "check_type": "cpu",
+        "target": "server-01",
+        "metric_name": "cpu_percent",
+        "warning_threshold": 70,
+        "critical_threshold": 90,
+        "anomaly_tolerance": 20,
+        "correlation_key": "site-a/core",
         "escalation_policy": {"levels": [{"repeat_count": 2, "severity": "critical"}]},
-    })
+        "tenant_id": str(TEST_TENANT_ID),
+    }
+    baseline_response = client.post(
+        "/monitoring/alerts/evaluate",
+        json={**common, "metric_value": 22, "state_value": "up"},
+    )
     assert baseline_response.status_code == 200
     assert baseline_response.json()["alert_count"] == 0
 
-    triggered_response = client.post("/monitoring/alerts/evaluate", json={
-        "provider": "infrastructure", "check_type": "cpu", "target": "server-01", "metric_name": "cpu_percent",
-        "metric_value": 96, "state_value": "down", "warning_threshold": 70, "critical_threshold": 90,
-        "anomaly_tolerance": 20, "correlation_key": "site-a/core",
-        "escalation_policy": {"levels": [{"repeat_count": 2, "severity": "critical"}]},
-    })
+    triggered_response = client.post(
+        "/monitoring/alerts/evaluate",
+        json={**common, "metric_value": 96, "state_value": "down"},
+    )
     assert triggered_response.status_code == 200
     payload = triggered_response.json()
     assert payload["status"] == "critical"
@@ -78,33 +90,58 @@ def test_alert_engine_supports_ai_and_maintenance_suppression() -> None:
     app, TestingSessionLocal = _test_app()
     now = datetime.now(timezone.utc)
     db = TestingSessionLocal()
-    db.add(MaintenanceWindow(name="patch-window", start=(now - timedelta(minutes=5)).isoformat(), end=(now + timedelta(minutes=5)).isoformat()))
+    db.add(
+        MaintenanceWindow(
+            name="patch-window",
+            start=(now - timedelta(minutes=5)).isoformat(),
+            end=(now + timedelta(minutes=5)).isoformat(),
+        )
+    )
     db.commit()
     db.close()
     client = TestClient(app)
-
-    first_response = client.post("/monitoring/alerts/evaluate", json={
-        "provider": "website", "check_type": "latency", "target": "https://example.com", "metric_name": "latency_ms",
-        "metric_value": 480, "warning_threshold": 300, "critical_threshold": 450, "ai_suppression_enabled": True,
+    base = {
+        "provider": "website",
+        "check_type": "latency",
+        "target": "https://example.com",
+        "metric_name": "latency_ms",
+        "warning_threshold": 300,
+        "critical_threshold": 450,
+        "ai_suppression_enabled": True,
         "correlation_key": "web/example",
-    })
+        "tenant_id": str(TEST_TENANT_ID),
+    }
+
+    first_response = client.post(
+        "/monitoring/alerts/evaluate",
+        json={**base, "metric_value": 480},
+    )
     assert first_response.status_code == 200
     assert first_response.json()["alerts"][0]["suppressed"] is False
 
-    suppressed_response = client.post("/monitoring/alerts/evaluate", json={
-        "provider": "website", "check_type": "latency", "target": "https://example.com", "metric_name": "latency_ms",
-        "metric_value": 490, "warning_threshold": 300, "critical_threshold": 450, "ai_suppression_enabled": True,
-        "correlation_key": "web/example",
-    })
+    suppressed_response = client.post(
+        "/monitoring/alerts/evaluate",
+        json={**base, "metric_value": 490},
+    )
     assert suppressed_response.status_code == 200
     suppressed_alert = suppressed_response.json()["alerts"][0]
     assert suppressed_alert["suppressed"] is True
     assert suppressed_alert["suppression_reason"] == "ai_similarity_suppression"
 
-    maintenance_response = client.post("/monitoring/alerts/evaluate", json={
-        "provider": "infrastructure", "check_type": "disk", "target": "server-02", "metric_name": "disk_percent",
-        "metric_value": 95, "warning_threshold": 80, "critical_threshold": 90, "maintenance_window_name": "patch-window",
-    })
+    maintenance_response = client.post(
+        "/monitoring/alerts/evaluate",
+        json={
+            "provider": "infrastructure",
+            "check_type": "disk",
+            "target": "server-02",
+            "metric_name": "disk_percent",
+            "metric_value": 95,
+            "warning_threshold": 80,
+            "critical_threshold": 90,
+            "maintenance_window_name": "patch-window",
+            "tenant_id": str(TEST_TENANT_ID),
+        },
+    )
     assert maintenance_response.status_code == 200
     maintenance_alert = maintenance_response.json()["alerts"][0]
     assert maintenance_alert["suppressed"] is True

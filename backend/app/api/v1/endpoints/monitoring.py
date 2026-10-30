@@ -12,6 +12,10 @@ from app.services.monitoring_service import MonitoringService
 
 router = APIRouter()
 
+# Used by catalog endpoints that do not carry agent_id in payload.
+# Prefer resolving from auth context in production; tests override via evaluate API.
+DEFAULT_MONITORING_TENANT_ID = UUID("00000000-0000-4000-8000-000000000001")
+
 
 class MonitoringResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -61,6 +65,7 @@ class AlertEvaluationRequest(BaseModel):
     maintenance_window_name: str | None = None
     escalation_policy: dict[str, Any] | None = None
     correlation_key: str | None = None
+    tenant_id: UUID | None = None
 
 
 class AlertEvaluationResponse(BaseModel):
@@ -186,7 +191,7 @@ class MonitoringCatalogMixin:
 def aws_monitoring(payload: AwsMonitoringRequest, service: MonitoringService = Depends(_service)) -> MonitoringResponse:
     resource_types = payload.resource_types or ["ec2", "s3", "rds", "lambda"]
     resources = [{"type": resource_type, "status": "ok", "health": "healthy"} for resource_type in resource_types]
-    service.record_check(provider="aws", check_type="resource_scan", target=payload.region, payload={"resource_types": resource_types}, status="healthy")
+    service.record_check(provider="aws", check_type="resource_scan", target=payload.region, payload={"resource_types": resource_types}, status="healthy", tenant_id=DEFAULT_MONITORING_TENANT_ID)
     return MonitoringCatalogMixin._build_response("aws", resources, extra={"region": payload.region or "default"})
 
 
@@ -194,7 +199,7 @@ def aws_monitoring(payload: AwsMonitoringRequest, service: MonitoringService = D
 def azure_monitoring(payload: AzureMonitoringRequest, service: MonitoringService = Depends(_service)) -> MonitoringResponse:
     resource_types = payload.resource_types or ["vm", "appservice", "sql"]
     resources = [{"type": resource_type, "status": "ok", "health": "healthy"} for resource_type in resource_types]
-    service.record_check(provider="azure", check_type="resource_scan", target=payload.subscription_id, payload={"resource_types": resource_types}, status="healthy")
+    service.record_check(provider="azure", check_type="resource_scan", target=payload.subscription_id, payload={"resource_types": resource_types}, status="healthy", tenant_id=DEFAULT_MONITORING_TENANT_ID)
     return MonitoringCatalogMixin._build_response("azure", resources, extra={"subscription_id": payload.subscription_id or "default"})
 
 
@@ -202,7 +207,7 @@ def azure_monitoring(payload: AzureMonitoringRequest, service: MonitoringService
 def vmware_monitoring(payload: VmwareMonitoringRequest, service: MonitoringService = Depends(_service)) -> MonitoringResponse:
     resource_types = payload.resource_types or ["vm", "datastore", "cluster"]
     resources = [{"type": resource_type, "status": "ok", "health": "healthy"} for resource_type in resource_types]
-    service.record_check(provider="vmware", check_type="resource_scan", target=payload.host, payload={"resource_types": resource_types}, status="healthy")
+    service.record_check(provider="vmware", check_type="resource_scan", target=payload.host, payload={"resource_types": resource_types}, status="healthy", tenant_id=DEFAULT_MONITORING_TENANT_ID)
     return MonitoringCatalogMixin._build_response("vmware", resources, extra={"host": payload.host or "default"})
 
 
@@ -210,7 +215,7 @@ def vmware_monitoring(payload: VmwareMonitoringRequest, service: MonitoringServi
 def hyperv_monitoring(payload: HyperVMonitoringRequest, service: MonitoringService = Depends(_service)) -> MonitoringResponse:
     resource_types = payload.resource_types or ["vm", "host"]
     resources = [{"type": resource_type, "status": "ok", "health": "healthy"} for resource_type in resource_types]
-    service.record_check(provider="hyperv", check_type="resource_scan", target=payload.host, payload={"resource_types": resource_types}, status="healthy")
+    service.record_check(provider="hyperv", check_type="resource_scan", target=payload.host, payload={"resource_types": resource_types}, status="healthy", tenant_id=DEFAULT_MONITORING_TENANT_ID)
     return MonitoringCatalogMixin._build_response("hyperv", resources, extra={"host": payload.host or "default"})
 
 
@@ -236,6 +241,7 @@ def dns_monitoring(payload: DnsMonitoringRequest, service: MonitoringService = D
         payload={"record_type": payload.record_type},
         status=status,
         details=details,
+        tenant_id=DEFAULT_MONITORING_TENANT_ID,
     )
     return MonitoringCatalogMixin._build_response("dns", resources, extra={"details": details})
 
@@ -243,14 +249,14 @@ def dns_monitoring(payload: DnsMonitoringRequest, service: MonitoringService = D
 @router.post("/ping", response_model=MonitoringResponse)
 def ping_monitoring(payload: PingMonitoringRequest, service: MonitoringService = Depends(_service)) -> MonitoringResponse:
     resources = [{"type": "ping", "status": "ok", "health": "healthy", "target": payload.target}]
-    service.record_check(provider="ping", check_type="ping", target=payload.target, payload={}, status="healthy")
+    service.record_check(provider="ping", check_type="ping", target=payload.target, payload={}, status="healthy", tenant_id=DEFAULT_MONITORING_TENANT_ID)
     return MonitoringCatalogMixin._build_response("ping", resources)
 
 
 @router.post("/snmp", response_model=MonitoringResponse)
 def snmp_monitoring(payload: SnmpMonitoringRequest, service: MonitoringService = Depends(_service)) -> MonitoringResponse:
     resources = [{"type": "snmp", "status": "ok", "health": "healthy", "host": payload.host, "community": payload.community}]
-    service.record_check(provider="snmp", check_type="snmp", target=payload.host, payload={"community": payload.community}, status="healthy")
+    service.record_check(provider="snmp", check_type="snmp", target=payload.host, payload={"community": payload.community}, status="healthy", tenant_id=DEFAULT_MONITORING_TENANT_ID)
     return MonitoringCatalogMixin._build_response("snmp", resources)
 
 
@@ -258,7 +264,7 @@ def snmp_monitoring(payload: SnmpMonitoringRequest, service: MonitoringService =
 def services_monitoring(payload: ServiceMonitoringRequest, service: MonitoringService = Depends(_service)) -> MonitoringResponse:
     services = payload.services or ["ssh", "nginx"]
     resources = [{"type": "service", "status": "ok", "health": "healthy", "name": service} for service in services]
-    service.record_check(provider="services", check_type="service", target=", ".join(services), payload={"services": services}, status="healthy")
+    service.record_check(provider="services", check_type="service", target=", ".join(services), payload={"services": services}, status="healthy", tenant_id=DEFAULT_MONITORING_TENANT_ID)
     return MonitoringCatalogMixin._build_response("services", resources)
 
 
@@ -266,7 +272,7 @@ def services_monitoring(payload: ServiceMonitoringRequest, service: MonitoringSe
 def processes_monitoring(payload: ProcessMonitoringRequest, service: MonitoringService = Depends(_service)) -> MonitoringResponse:
     processes = payload.processes or ["sshd", "nginx"]
     resources = [{"type": "process", "status": "ok", "health": "healthy", "name": process} for process in processes]
-    service.record_check(provider="processes", check_type="process", target=", ".join(processes), payload={"processes": processes}, status="healthy")
+    service.record_check(provider="processes", check_type="process", target=", ".join(processes), payload={"processes": processes}, status="healthy", tenant_id=DEFAULT_MONITORING_TENANT_ID)
     return MonitoringCatalogMixin._build_response("processes", resources)
 
 
@@ -274,7 +280,7 @@ def processes_monitoring(payload: ProcessMonitoringRequest, service: MonitoringS
 def ports_monitoring(payload: PortMonitoringRequest, service: MonitoringService = Depends(_service)) -> MonitoringResponse:
     ports = payload.ports or [22, 80, 443]
     resources = [{"type": "port", "status": "ok", "health": "healthy", "port": port} for port in ports]
-    service.record_check(provider="ports", check_type="port", target=", ".join(str(port) for port in ports), payload={"ports": ports}, status="healthy")
+    service.record_check(provider="ports", check_type="port", target=", ".join(str(port) for port in ports), payload={"ports": ports}, status="healthy", tenant_id=DEFAULT_MONITORING_TENANT_ID)
     return MonitoringCatalogMixin._build_response("ports", resources)
 
 
@@ -282,7 +288,7 @@ def ports_monitoring(payload: PortMonitoringRequest, service: MonitoringService 
 def smart_monitoring(payload: SmartMonitoringRequest, service: MonitoringService = Depends(_service)) -> MonitoringResponse:
     device = payload.device or "sda"
     resources = [{"type": "smart", "status": "ok", "health": "healthy", "device": device}]
-    service.record_check(provider="smart", check_type="smart", target=device, payload={}, status="healthy")
+    service.record_check(provider="smart", check_type="smart", target=device, payload={}, status="healthy", tenant_id=DEFAULT_MONITORING_TENANT_ID)
     return MonitoringCatalogMixin._build_response("smart", resources)
 
 
@@ -290,7 +296,7 @@ def smart_monitoring(payload: SmartMonitoringRequest, service: MonitoringService
 def temperature_monitoring(payload: TemperatureMonitoringRequest, service: MonitoringService = Depends(_service)) -> MonitoringResponse:
     sensors = payload.sensors or ["cpu", "gpu"]
     resources = [{"type": "temperature", "status": "ok", "health": "healthy", "sensor": sensor} for sensor in sensors]
-    service.record_check(provider="temperature", check_type="temperature", target=", ".join(sensors), payload={"sensors": sensors}, status="healthy")
+    service.record_check(provider="temperature", check_type="temperature", target=", ".join(sensors), payload={"sensors": sensors}, status="healthy", tenant_id=DEFAULT_MONITORING_TENANT_ID)
     return MonitoringCatalogMixin._build_response("temperature", resources)
 
 
@@ -298,7 +304,7 @@ def temperature_monitoring(payload: TemperatureMonitoringRequest, service: Monit
 def battery_monitoring(payload: BatteryMonitoringRequest, service: MonitoringService = Depends(_service)) -> MonitoringResponse:
     devices = payload.devices or ["laptop-battery"]
     resources = [{"type": "battery", "status": "ok", "health": "healthy", "device": device} for device in devices]
-    service.record_check(provider="battery", check_type="battery", target=", ".join(devices), payload={"devices": devices}, status="healthy")
+    service.record_check(provider="battery", check_type="battery", target=", ".join(devices), payload={"devices": devices}, status="healthy", tenant_id=DEFAULT_MONITORING_TENANT_ID)
     return MonitoringCatalogMixin._build_response("battery", resources)
 
 
@@ -306,7 +312,7 @@ def battery_monitoring(payload: BatteryMonitoringRequest, service: MonitoringSer
 def ups_monitoring(payload: UpsMonitoringRequest, service: MonitoringService = Depends(_service)) -> MonitoringResponse:
     device = payload.device or "ups-01"
     resources = [{"type": "ups", "status": "ok", "health": "healthy", "device": device}]
-    service.record_check(provider="ups", check_type="ups", target=device, payload={}, status="healthy")
+    service.record_check(provider="ups", check_type="ups", target=device, payload={}, status="healthy", tenant_id=DEFAULT_MONITORING_TENANT_ID)
     return MonitoringCatalogMixin._build_response("ups", resources)
 
 
@@ -314,7 +320,7 @@ def ups_monitoring(payload: UpsMonitoringRequest, service: MonitoringService = D
 def bandwidth_monitoring(payload: BandwidthMonitoringRequest, service: MonitoringService = Depends(_service)) -> MonitoringResponse:
     interfaces = payload.interfaces or ["eth0"]
     resources = [{"type": "bandwidth", "status": "ok", "health": "healthy", "interface": interface} for interface in interfaces]
-    service.record_check(provider="bandwidth", check_type="bandwidth", target=", ".join(interfaces), payload={"interfaces": interfaces}, status="healthy")
+    service.record_check(provider="bandwidth", check_type="bandwidth", target=", ".join(interfaces), payload={"interfaces": interfaces}, status="healthy", tenant_id=DEFAULT_MONITORING_TENANT_ID)
     return MonitoringCatalogMixin._build_response("bandwidth", resources)
 
 
@@ -322,7 +328,7 @@ def bandwidth_monitoring(payload: BandwidthMonitoringRequest, service: Monitorin
 def certificates_monitoring(payload: CertificateMonitoringRequest, service: MonitoringService = Depends(_service)) -> MonitoringResponse:
     hosts = payload.hosts or ["example.com"]
     resources = [{"type": "certificate", "status": "ok", "health": "healthy", "host": host} for host in hosts]
-    service.record_check(provider="certificates", check_type="certificate", target=", ".join(hosts), payload={"hosts": hosts}, status="healthy")
+    service.record_check(provider="certificates", check_type="certificate", target=", ".join(hosts), payload={"hosts": hosts}, status="healthy", tenant_id=DEFAULT_MONITORING_TENANT_ID)
     return MonitoringCatalogMixin._build_response("certificates", resources)
 
 
@@ -330,7 +336,7 @@ def certificates_monitoring(payload: CertificateMonitoringRequest, service: Moni
 def website_monitoring(payload: WebsiteMonitoringRequest, service: MonitoringService = Depends(_service)) -> MonitoringResponse:
     urls = payload.urls or ["https://example.com"]
     resources = [{"type": "website", "status": "ok", "health": "healthy", "url": url} for url in urls]
-    service.record_check(provider="website", check_type="website", target=", ".join(urls), payload={"urls": urls}, status="healthy")
+    service.record_check(provider="website", check_type="website", target=", ".join(urls), payload={"urls": urls}, status="healthy", tenant_id=DEFAULT_MONITORING_TENANT_ID)
     return MonitoringCatalogMixin._build_response("website", resources)
 
 
@@ -354,6 +360,7 @@ def evaluate_alert(payload: AlertEvaluationRequest, service: MonitoringService =
         maintenance_window_name=payload.maintenance_window_name,
         escalation_policy=payload.escalation_policy,
         correlation_key=payload.correlation_key,
+        tenant_id=payload.tenant_id,
     )
     return AlertEvaluationResponse(
         check_id=check.id,

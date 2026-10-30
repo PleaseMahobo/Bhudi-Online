@@ -15,6 +15,7 @@ class MonitoringCheck(Base):
     __tablename__ = "monitoring_checks"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
     provider: Mapped[str] = mapped_column(Text, nullable=False)
     check_type: Mapped[str] = mapped_column(Text, nullable=False)
     target: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -35,6 +36,7 @@ class MonitoringAlert(Base):
     __tablename__ = "monitoring_alerts"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
     check_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     provider: Mapped[str] = mapped_column(Text, nullable=False)
     alert_type: Mapped[str] = mapped_column(Text, nullable=False, default="state")
