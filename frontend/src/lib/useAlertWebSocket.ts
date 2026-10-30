@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 export interface LiveAlert {
   id: string;
+  tenant_id?: string | null;
   check_id?: string | null;
   provider: string;
   alert_type: string;
@@ -44,12 +45,18 @@ function buildWsUrl(): string {
 
 function applyEvent(
   data: AlertSocketEvent,
-  setAlerts: React.Dispatch<React.SetStateAction<LiveAlert[]>>
+  setAlerts: React.Dispatch<React.SetStateAction<LiveAlert[]>>,
+  tenantId?: string | null
 ) {
   if (data.type === 'alert.created' && data.alert) {
+    const alert = data.alert;
+    // Drop cross-tenant events when the viewer has a tenant_id.
+    if (tenantId && alert.tenant_id && String(alert.tenant_id) !== String(tenantId)) {
+      return;
+    }
     setAlerts((prev) => {
-      if (prev.some((a) => a.id === data.alert!.id)) return prev;
-      return [data.alert!, ...prev].slice(0, 100);
+      if (prev.some((a) => a.id === alert.id)) return prev;
+      return [alert, ...prev].slice(0, 100);
     });
   }
   if (data.type === 'alert.resolved' && data.alert) {
@@ -64,12 +71,14 @@ function applyEvent(
   }
 }
 
-export function useAlertWebSocket(enabled = true) {
+export function useAlertWebSocket(enabled = true, tenantId?: string | null) {
   const [alerts, setAlerts] = useState<LiveAlert[]>([]);
   const [isConnected, setIsConnected] = useState(false);
   const [lastEvent, setLastEvent] = useState<AlertSocketEvent | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const tenantRef = useRef(tenantId);
+  tenantRef.current = tenantId;
 
   const connect = useCallback(() => {
     if (!enabled) return;
@@ -86,9 +95,9 @@ export function useAlertWebSocket(enabled = true) {
         try {
           const data = JSON.parse(String(ev.data)) as AlertSocketEvent;
           setLastEvent(data);
-          applyEvent(data, setAlerts);
+          applyEvent(data, setAlerts, tenantRef.current);
           if (Array.isArray(data.events)) {
-            data.events.forEach((e) => applyEvent(e, setAlerts));
+            data.events.forEach((e) => applyEvent(e, setAlerts, tenantRef.current));
           }
         } catch {
           /* ignore */
@@ -107,6 +116,14 @@ export function useAlertWebSocket(enabled = true) {
       socketRef.current = null;
     };
   }, [connect]);
+
+  // Re-filter stored alerts when tenant changes (e.g. workspace switch).
+  useEffect(() => {
+    if (!tenantId) return;
+    setAlerts((prev) =>
+      prev.filter((a) => !a.tenant_id || String(a.tenant_id) === String(tenantId))
+    );
+  }, [tenantId]);
 
   const clearAlerts = () => setAlerts([]);
 

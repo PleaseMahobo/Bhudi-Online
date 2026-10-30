@@ -1,6 +1,7 @@
 'use client';
 
 import { useAlertWebSocket, type LiveAlert } from '@/lib/useAlertWebSocket';
+import { useAuth } from '@/shared/auth/AuthContext';
 import { Wifi, WifiOff, Bell } from 'lucide-react';
 
 function severityStyles(severity: string) {
@@ -64,7 +65,8 @@ function AlertCard({ alert }: { alert: LiveAlert }) {
 }
 
 export default function LiveAlertStream() {
-  const { alerts, isConnected, clearAlerts } = useAlertWebSocket(true);
+  const { user } = useAuth();
+  const { alerts, isConnected, clearAlerts } = useAlertWebSocket(true, user?.tenant_id);
 
   return (
     <div className="bg-zinc-900 border border-zinc-700 rounded-3xl p-6 h-full flex flex-col">
@@ -100,7 +102,7 @@ export default function LiveAlertStream() {
           <div className="text-sm text-zinc-500 py-8 text-center">
             Waiting for alerts…
             <br />
-            <span className="text-xs">Connected clients receive events instantly</span>
+            <span className="text-xs">Tenant-scoped events only</span>
           </div>
         )}
         {alerts.map((alert) => (
