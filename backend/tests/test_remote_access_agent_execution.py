@@ -178,3 +178,52 @@ def test_registry_editor_fails_cleanly_on_linux() -> None:
     assert response.status_code == 201
     _, status_payload = _execute_next_command(client, platform_name="linux")
     assert status_payload["status"] == "failed"
+
+
+def test_agent_command_poll_denies_quarantined_agent() -> None:
+    client = _build_client()
+    session = bootstrap.SessionLocal()
+    try:
+        agent = session.get(Agent, uuid.UUID(TEST_AGENT_ID))
+        assert agent is not None
+        agent.quarantined = True
+        session.commit()
+    finally:
+        session.close()
+
+    response = client.get(f"/agent/{TEST_AGENT_ID}/commands", params=_agent_params())
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Agent quarantined"
+
+
+def test_agent_command_poll_denies_revoked_agent() -> None:
+    client = _build_client()
+    session = bootstrap.SessionLocal()
+    try:
+        agent = session.get(Agent, uuid.UUID(TEST_AGENT_ID))
+        assert agent is not None
+        agent.revoked = True
+        session.commit()
+    finally:
+        session.close()
+
+    response = client.get(f"/agent/{TEST_AGENT_ID}/commands", params=_agent_params())
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Agent revoked"
+
+
+def test_agent_command_poll_denies_unapproved_agent() -> None:
+    client = _build_client()
+    session = bootstrap.SessionLocal()
+    try:
+        agent = session.get(Agent, uuid.UUID(TEST_AGENT_ID))
+        assert agent is not None
+        agent.registration_state = "pending"
+        agent.approved = False
+        session.commit()
+    finally:
+        session.close()
+
+    response = client.get(f"/agent/{TEST_AGENT_ID}/commands", params=_agent_params())
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Agent is not approved"
