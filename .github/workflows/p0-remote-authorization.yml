@@ -48,8 +48,8 @@ jobs:
           PYTHONFAULTHANDLER: "1"
         run: |
           set -o pipefail
-          python -m pytest tests/ -vv -s --tb=long --durations=30 \\
-            --timeout=180 --timeout-method=thread \\
+          python -m pytest tests/ -vv -s --tb=long --durations=30 \
+            --timeout=180 --timeout-method=thread \
             --junitxml=test-results-p0.xml 2>&1 | tee pytest-p0.log
       - name: Upload test report
         if: always()
