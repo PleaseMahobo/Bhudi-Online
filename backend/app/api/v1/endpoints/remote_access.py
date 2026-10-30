@@ -487,10 +487,14 @@ async def dashboard_session_stream(websocket: WebSocket, session_id: str) -> Non
     session = await remote_session_manager.connect_dashboard(session_id, websocket)
     if session is None:
         return
+    input_channel = websocket.query_params.get("channel") == "input"
     try:
         while True:
             message = await websocket.receive_json()
-            await remote_session_manager.relay_dashboard_message(session_id, message)
+            if input_channel:
+                await remote_session_manager.relay_dashboard_input_message(session_id, websocket, message)
+            else:
+                await remote_session_manager.relay_dashboard_message(session_id, message)
     except WebSocketDisconnect:
         await remote_session_manager.disconnect_dashboard(session_id, websocket)
 
@@ -500,9 +504,13 @@ async def agent_session_stream(websocket: WebSocket, session_id: str, agent_id: 
     session = await remote_session_manager.connect_agent(session_id, agent_id, websocket)
     if session is None:
         return
+    input_channel = websocket.query_params.get("channel") == "input"
     try:
         while True:
             message = await websocket.receive_json()
-            await remote_session_manager.relay_agent_message(session_id, message)
+            if input_channel:
+                await remote_session_manager.relay_agent_input_message(session_id, websocket, message)
+            else:
+                await remote_session_manager.relay_agent_message(session_id, message)
     except WebSocketDisconnect:
         await remote_session_manager.disconnect_agent(session_id, websocket)
