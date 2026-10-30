@@ -57,7 +57,7 @@ jobs:
         with:
           name: p0-remote-authorization-pytest-${{ github.run_id }}
           path: |
-            backend/test-results-p0.xml
-            backend/pytest-p0.log
+            test-results-p0.xml
+            pytest-p0.log
           if-no-files-found: ignore
           retention-days: 14
