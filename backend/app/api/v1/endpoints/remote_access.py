@@ -181,8 +181,6 @@ def _assert_session_owner(session: Any, user: User) -> None:
     # Authorization always uses tenant identity resolved from the authenticated user.
     if str(getattr(session, "tenant_id", "")) != str(get_user_tenant_id(user)):
         raise HTTPException(status_code=404, detail="remote session not found")
-    if str(getattr(session, "owner_user_id", "")) != str(user.id):
-        raise HTTPException(status_code=404, detail="remote session not found")
 
 
 def _session_response(session: Any) -> RemoteSessionResponse:
