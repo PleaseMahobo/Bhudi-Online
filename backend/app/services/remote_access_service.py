@@ -67,7 +67,7 @@ class RemoteAccessService:
                 "operation": "remote_powershell",
                 "command_type": REMOTE_ACCESS_COMMAND_TYPES["remote_powershell"],
                 "category": "shell",
-                "required_fields": ["command"],
+                "required_fields": ["script"],
             },
             {
                 "operation": "remote_cmd",
@@ -78,7 +78,7 @@ class RemoteAccessService:
             {
                 "operation": "remote_event_viewer",
                 "command_type": REMOTE_ACCESS_COMMAND_TYPES["remote_event_viewer"],
-                "category": "diagnostics",
+                "category": "system",
                 "required_fields": ["log_name"],
             },
             {
@@ -148,11 +148,17 @@ class RemoteAccessService:
     ) -> AgentCommand:
         command_type = REMOTE_ACCESS_COMMAND_TYPES[operation]
         enriched_payload = {"operation": operation, **payload}
-        if operation == "remote_desktop":
-            session_id = enriched_payload.get("session_id")
-            input_token = remote_session_manager.get_input_token(session_id) if session_id else None
-            if input_token:
-                enriched_payload["input_token"] = input_token
+        session_id = enriched_payload.get("session_id")
+        if session_id and operation in {"remote_desktop", "remote_terminal"}:
+            tickets = remote_session_manager.get_session_tickets(session_id)
+            if tickets.get("input_token"):
+                enriched_payload["input_token"] = tickets["input_token"]
+            if tickets.get("input"):
+                enriched_payload["input_ticket"] = tickets["input"]
+            if tickets.get("agent"):
+                enriched_payload["agent_ticket"] = tickets["agent"]
+            if tickets.get("dashboard"):
+                enriched_payload["dashboard_ticket"] = tickets["dashboard"]
         try:
             return self.dispatcher.queue_command(
                 agent_id=agent_id,
