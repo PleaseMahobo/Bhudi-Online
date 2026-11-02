@@ -32,6 +32,9 @@ class RemoteAccessQueuedResponse(BaseModel):
     session_id: str | None = None
     session_status: str | None = None
     stream_path: str | None = None
+    dashboard_ticket: str | None = None
+    input_ticket: str | None = None
+    agent_ticket: str | None = None
     result: dict[str, Any] | None = None
     stdout: str | None = None
     stderr: str | None = None
@@ -164,6 +167,9 @@ class RemoteSessionResponse(BaseModel):
     agent_connected: bool
     dashboard_count: int
     transcript_length: int
+    dashboard_ticket: str | None = None
+    input_ticket: str | None = None
+    agent_ticket: str | None = None
 
 
 def _service(db: Session = Depends(get_db)) -> RemoteAccessService:
@@ -184,17 +190,26 @@ def _assert_session_owner(session: Any, user: User) -> None:
 
 
 def _session_response(session: Any) -> RemoteSessionResponse:
-    snapshot = session.snapshot()
-    return RemoteSessionResponse(**snapshot)
+    # Owner-facing responses include short-lived channel tickets.
+    snapshot = session.snapshot(include_tickets=True)
+    return RemoteSessionResponse(**{k: v for k, v in snapshot.items() if k in RemoteSessionResponse.model_fields})
 
 
 def _queued_response(command: Any, operation: str, service: RemoteAccessService | None = None) -> RemoteAccessQueuedResponse:
     payload = command.payload if isinstance(command.payload, dict) else {}
     session_id = payload.get("session_id") if isinstance(payload, dict) else None
     session_status = None
+    dashboard_ticket = payload.get("dashboard_ticket") if isinstance(payload, dict) else None
+    input_ticket = (payload.get("input_ticket") or payload.get("input_token")) if isinstance(payload, dict) else None
+    agent_ticket = payload.get("agent_ticket") if isinstance(payload, dict) else None
     if session_id and service is not None:
         session = service.get_session(session_id)
         session_status = session.status if session is not None else None
+        if session is not None:
+            tickets = session.snapshot(include_tickets=True)
+            dashboard_ticket = dashboard_ticket or tickets.get("dashboard_ticket")
+            input_ticket = input_ticket or tickets.get("input_ticket")
+            agent_ticket = agent_ticket or tickets.get("agent_ticket")
     return RemoteAccessQueuedResponse(
         command_id=command.id,
         agent_id=command.agent_id,
@@ -208,6 +223,9 @@ def _queued_response(command: Any, operation: str, service: RemoteAccessService 
         session_id=session_id,
         session_status=session_status,
         stream_path=f"/api/v1/remote-access/sessions/{session_id}/dashboard" if session_id else None,
+        dashboard_ticket=dashboard_ticket,
+        input_ticket=input_ticket,
+        agent_ticket=agent_ticket,
         result=command.result,
         stdout=command.stdout,
         stderr=command.stderr,
