@@ -16,8 +16,21 @@ router = APIRouter(prefix="/agent", tags=["Agent Commands"])
 def _require_agent(agent_id: uuid.UUID, agent_token: str | None, db: Session) -> Agent:
     agent = db.get(Agent, agent_id)
     stored = agent.enrollment_token if agent else None
-    if not agent or not agent.enabled or not agent_token or not stored or not secrets.compare_digest(agent_token, stored):
+    if not agent or not agent_token or not stored or not secrets.compare_digest(agent_token, stored):
         raise HTTPException(status_code=401, detail="Invalid agent credentials")
+
+    # Authenticate first, then enforce the same enrollment/security state as dispatch.
+    # Do not allow a valid enrollment token to bypass quarantine or revocation.
+    if not agent.enabled:
+        raise HTTPException(status_code=403, detail="Agent disabled")
+    if getattr(agent, "revoked", False):
+        raise HTTPException(status_code=403, detail="Agent revoked")
+    if getattr(agent, "quarantined", False):
+        raise HTTPException(status_code=403, detail="Agent quarantined")
+    if getattr(agent, "registration_state", None) != "approved":
+        raise HTTPException(status_code=403, detail="Agent is not approved")
+    if agent.tenant_id is None:
+        raise HTTPException(status_code=403, detail="Agent tenant scope is required")
     return agent
 
 
@@ -35,9 +48,9 @@ def get_commands(
     agent_token: str | None = None,
     db: Session = Depends(get_db),
 ):
-    _require_agent(agent_id, agent_token, db)
+    agent = _require_agent(agent_id, agent_token, db)
     dispatcher = AgentDispatcher(db)
-    commands = dispatcher.get_pending_commands(agent_id)
+    commands = dispatcher.get_pending_commands(agent_id, tenant_id=agent.tenant_id)
     return [
         {
             "id": str(command.id),
@@ -61,9 +74,9 @@ def mark_sent(
     agent_token: str | None = None,
     db: Session = Depends(get_db),
 ):
-    _require_agent(agent_id, agent_token, db)
+    agent = _require_agent(agent_id, agent_token, db)
     _require_command_agent(agent_id, command_id, db)
-    AgentDispatcher(db).mark_sent(command_id)
+    AgentDispatcher(db).mark_sent(command_id, agent_id=agent.id, tenant_id=agent.tenant_id)
     return {"status": "ok"}
 
 
@@ -75,9 +88,11 @@ def mark_completed(
     agent_token: str | None = None,
     db: Session = Depends(get_db),
 ):
-    _require_agent(agent_id, agent_token, db)
+    agent = _require_agent(agent_id, agent_token, db)
     _require_command_agent(agent_id, command_id, db)
-    AgentDispatcher(db).mark_completed(command_id, result)
+    AgentDispatcher(db).mark_completed(
+        command_id, result, agent_id=agent.id, tenant_id=agent.tenant_id
+    )
     return {"status": "ok"}
 
 
@@ -89,7 +104,12 @@ def mark_failed(
     agent_token: str | None = None,
     db: Session = Depends(get_db),
 ):
-    _require_agent(agent_id, agent_token, db)
+    agent = _require_agent(agent_id, agent_token, db)
     _require_command_agent(agent_id, command_id, db)
-    AgentDispatcher(db).mark_failed(command_id, error.get("message", "Unknown error"))
+    AgentDispatcher(db).mark_failed(
+        command_id,
+        error.get("message", "Unknown error"),
+        agent_id=agent.id,
+        tenant_id=agent.tenant_id,
+    )
     return {"status": "ok"}

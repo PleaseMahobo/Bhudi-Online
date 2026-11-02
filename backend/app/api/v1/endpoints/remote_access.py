@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy.orm import Session
 
 from app.core.access_tiers import require_mfa_for_actions
-from app.core.dependencies import get_current_user
+from app.core.dependencies import get_current_user, get_user_tenant_id, authorization_error
 from app.database.session import get_db
 from app.models.user import User
 from app.services.remote_access_service import RemoteAccessService
@@ -170,6 +170,19 @@ def _service(db: Session = Depends(get_db)) -> RemoteAccessService:
     return RemoteAccessService(db)
 
 
+def _remote_user(user: User = Depends(require_mfa_for_actions)) -> User:
+    # Tenant scope is server-resolved; client-supplied scope is never trusted.
+    if get_user_tenant_id(user) is None:
+        raise authorization_error("Tenant association required for remote access")
+    return user
+
+
+def _assert_session_owner(session: Any, user: User) -> None:
+    # Authorization always uses tenant identity resolved from the authenticated user.
+    if str(getattr(session, "tenant_id", "")) != str(get_user_tenant_id(user)):
+        raise HTTPException(status_code=404, detail="remote session not found")
+
+
 def _session_response(session: Any) -> RemoteSessionResponse:
     snapshot = session.snapshot()
     return RemoteSessionResponse(**snapshot)
@@ -214,15 +227,20 @@ def list_capabilities(
 def open_remote_desktop(
     payload: RemoteDesktopRequest,
     service: RemoteAccessService = Depends(_service),
-    _user: User = Depends(require_mfa_for_actions),
+    user: User = Depends(_remote_user),
 ) -> RemoteAccessQueuedResponse:
+    service.validate_agent_scope(payload.agent_id, get_user_tenant_id(user))
     session = service.create_interactive_session(
         agent_id=payload.agent_id,
+        tenant_id=get_user_tenant_id(user),
+        owner_user_id=user.id,
         session_type="desktop",
         metadata=payload.model_dump(exclude={"agent_id"}),
     )
     command = service.queue_operation(
         agent_id=payload.agent_id,
+        tenant_id=get_user_tenant_id(user),
+        requested_by=user.id,
         operation="remote_desktop",
         payload={
             **payload.model_dump(exclude={"agent_id"}),
@@ -240,13 +258,16 @@ def open_remote_desktop(
 def open_remote_terminal(
     payload: RemoteTerminalRequest,
     service: RemoteAccessService = Depends(_service),
-    _user: User = Depends(require_mfa_for_actions),
+    user: User = Depends(_remote_user),
 ) -> RemoteAccessQueuedResponse:
     session = None
     request_payload = payload.model_dump(exclude={"agent_id"}, exclude_none=True)
     if payload.interactive:
+        service.validate_agent_scope(payload.agent_id, get_user_tenant_id(user))
         session = service.create_interactive_session(
             agent_id=payload.agent_id,
+            tenant_id=get_user_tenant_id(user),
+            owner_user_id=user.id,
             session_type="terminal",
             metadata=request_payload,
         )
@@ -257,6 +278,8 @@ def open_remote_terminal(
         }
     command = service.queue_operation(
         agent_id=payload.agent_id,
+        tenant_id=get_user_tenant_id(user),
+        requested_by=user.id,
         operation="remote_terminal",
         payload=request_payload,
         priority=80,
@@ -271,10 +294,12 @@ def open_remote_terminal(
 def queue_file_browser_operation(
     payload: FileBrowserRequest,
     service: RemoteAccessService = Depends(_service),
-    _user: User = Depends(require_mfa_for_actions),
+    user: User = Depends(_remote_user),
 ) -> RemoteAccessQueuedResponse:
     command = service.queue_operation(
         agent_id=payload.agent_id,
+        tenant_id=get_user_tenant_id(user),
+        requested_by=user.id,
         operation="file_browser",
         payload=payload.model_dump(exclude={"agent_id"}, exclude_none=True),
         priority=70,
@@ -287,10 +312,12 @@ def queue_file_browser_operation(
 def queue_registry_operation(
     payload: RegistryEditorRequest,
     service: RemoteAccessService = Depends(_service),
-    _user: User = Depends(require_mfa_for_actions),
+    user: User = Depends(_remote_user),
 ) -> RemoteAccessQueuedResponse:
     command = service.queue_operation(
         agent_id=payload.agent_id,
+        tenant_id=get_user_tenant_id(user),
+        requested_by=user.id,
         operation="registry_editor",
         payload=payload.model_dump(exclude={"agent_id"}, exclude_none=True),
         priority=75,
@@ -303,10 +330,12 @@ def queue_registry_operation(
 def queue_task_manager_operation(
     payload: TaskManagerRequest,
     service: RemoteAccessService = Depends(_service),
-    _user: User = Depends(require_mfa_for_actions),
+    user: User = Depends(_remote_user),
 ) -> RemoteAccessQueuedResponse:
     command = service.queue_operation(
         agent_id=payload.agent_id,
+        tenant_id=get_user_tenant_id(user),
+        requested_by=user.id,
         operation="task_manager",
         payload=payload.model_dump(exclude={"agent_id"}, exclude_none=True),
         priority=70,
@@ -319,10 +348,12 @@ def queue_task_manager_operation(
 def run_remote_powershell(
     payload: ShellExecutionRequest,
     service: RemoteAccessService = Depends(_service),
-    _user: User = Depends(require_mfa_for_actions),
+    user: User = Depends(_remote_user),
 ) -> RemoteAccessQueuedResponse:
     command = service.queue_operation(
         agent_id=payload.agent_id,
+        tenant_id=get_user_tenant_id(user),
+        requested_by=user.id,
         operation="remote_powershell",
         payload={**payload.model_dump(exclude={"agent_id"}), "shell": "powershell"},
         priority=80,
@@ -335,10 +366,12 @@ def run_remote_powershell(
 def run_remote_cmd(
     payload: ShellExecutionRequest,
     service: RemoteAccessService = Depends(_service),
-    _user: User = Depends(require_mfa_for_actions),
+    user: User = Depends(_remote_user),
 ) -> RemoteAccessQueuedResponse:
     command = service.queue_operation(
         agent_id=payload.agent_id,
+        tenant_id=get_user_tenant_id(user),
+        requested_by=user.id,
         operation="remote_cmd",
         payload={**payload.model_dump(exclude={"agent_id"}), "shell": "cmd"},
         priority=80,
@@ -351,10 +384,12 @@ def run_remote_cmd(
 def queue_event_viewer_query(
     payload: EventViewerRequest,
     service: RemoteAccessService = Depends(_service),
-    _user: User = Depends(require_mfa_for_actions),
+    user: User = Depends(_remote_user),
 ) -> RemoteAccessQueuedResponse:
     command = service.queue_operation(
         agent_id=payload.agent_id,
+        tenant_id=get_user_tenant_id(user),
+        requested_by=user.id,
         operation="remote_event_viewer",
         payload=payload.model_dump(exclude={"agent_id"}, exclude_none=True),
         priority=60,
@@ -367,10 +402,12 @@ def queue_event_viewer_query(
 def queue_wake_on_lan(
     payload: WakeOnLanRequest,
     service: RemoteAccessService = Depends(_service),
-    _user: User = Depends(require_mfa_for_actions),
+    user: User = Depends(_remote_user),
 ) -> RemoteAccessQueuedResponse:
     command = service.queue_operation(
         agent_id=payload.agent_id,
+        tenant_id=get_user_tenant_id(user),
+        requested_by=user.id,
         operation="wake_on_lan",
         payload=payload.model_dump(exclude={"agent_id"}),
         priority=100,
@@ -383,10 +420,12 @@ def queue_wake_on_lan(
 def queue_reboot(
     payload: RebootRequest,
     service: RemoteAccessService = Depends(_service),
-    _user: User = Depends(require_mfa_for_actions),
+    user: User = Depends(_remote_user),
 ) -> RemoteAccessQueuedResponse:
     command = service.queue_operation(
         agent_id=payload.agent_id,
+        tenant_id=get_user_tenant_id(user),
+        requested_by=user.id,
         operation="remote_reboot",
         payload=payload.model_dump(exclude={"agent_id"}, exclude_none=True),
         priority=100,
@@ -400,10 +439,12 @@ def queue_reboot(
 def queue_safe_mode_reboot(
     payload: SafeModeRebootRequest,
     service: RemoteAccessService = Depends(_service),
-    _user: User = Depends(require_mfa_for_actions),
+    user: User = Depends(_remote_user),
 ) -> RemoteAccessQueuedResponse:
     command = service.queue_operation(
         agent_id=payload.agent_id,
+        tenant_id=get_user_tenant_id(user),
+        requested_by=user.id,
         operation="safe_mode_reboot",
         payload=payload.model_dump(exclude={"agent_id"}, exclude_none=True),
         priority=100,
@@ -431,11 +472,12 @@ def get_remote_access_operation(
 def get_remote_session(
     session_id: str,
     service: RemoteAccessService = Depends(_service),
-    _user: User = Depends(get_current_user),
+    user: User = Depends(_remote_user),
 ) -> RemoteSessionResponse:
     session = service.get_session(session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="remote session not found")
+    _assert_session_owner(session, user)
     return _session_response(session)
 
 
@@ -443,11 +485,13 @@ def get_remote_session(
 async def close_remote_session(
     session_id: str,
     service: RemoteAccessService = Depends(_service),
-    _user: User = Depends(require_mfa_for_actions),
+    user: User = Depends(_remote_user),
 ) -> RemoteSessionResponse:
-    session = await remote_session_manager.close_session(session_id)
+    session = remote_session_manager.get_session(session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="remote session not found")
+    _assert_session_owner(session, user)
+    session = await remote_session_manager.close_session(session_id)
     return _session_response(session)
 
 
@@ -456,10 +500,14 @@ async def dashboard_session_stream(websocket: WebSocket, session_id: str) -> Non
     session = await remote_session_manager.connect_dashboard(session_id, websocket)
     if session is None:
         return
+    input_channel = websocket.query_params.get("channel") == "input"
     try:
         while True:
             message = await websocket.receive_json()
-            await remote_session_manager.relay_dashboard_message(session_id, message)
+            if input_channel:
+                await remote_session_manager.relay_dashboard_input_message(session_id, websocket, message)
+            else:
+                await remote_session_manager.relay_dashboard_message(session_id, message)
     except WebSocketDisconnect:
         await remote_session_manager.disconnect_dashboard(session_id, websocket)
 
@@ -469,9 +517,13 @@ async def agent_session_stream(websocket: WebSocket, session_id: str, agent_id: 
     session = await remote_session_manager.connect_agent(session_id, agent_id, websocket)
     if session is None:
         return
+    input_channel = websocket.query_params.get("channel") == "input"
     try:
         while True:
             message = await websocket.receive_json()
-            await remote_session_manager.relay_agent_message(session_id, message)
+            if input_channel:
+                await remote_session_manager.relay_agent_input_message(session_id, websocket, message)
+            else:
+                await remote_session_manager.relay_agent_message(session_id, message)
     except WebSocketDisconnect:
         await remote_session_manager.disconnect_agent(session_id, websocket)

@@ -4,6 +4,7 @@ import os
 import sys
 import tempfile
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -24,6 +25,7 @@ from app.core.dependencies import get_current_user
 from app.core.access_tiers import require_mfa_for_actions
 from app.models.user import User
 from app.models.agent import Agent
+from app.models.tenant import Tenant
 
 
 TEST_AGENT_ID = "22222222-2222-4222-8222-22222222222b"
@@ -44,18 +46,37 @@ def _build_client() -> TestClient:
     bootstrap._bootstrap_metadata_for_engine().create_all(bind=engine)
 
     session = session_factory()
+    tenant = Tenant(id=uuid.uuid4(), name="Remote Execution Test Tenant", created_at=datetime.now(timezone.utc))
+    session.add(tenant)
+    session.flush()
     session.add(
         Agent(
             id=uuid.UUID(TEST_AGENT_ID),
+            tenant_id=tenant.id,
             hostname="remote-agent-02",
             platform="windows",
+            registration_state="approved",
             approved=True,
             enabled=True,
+            revoked=False,
+            quarantined=False,
             command_timeout=300,
             enrollment_token=TEST_AGENT_TOKEN,
         )
     )
     session.commit()
+    # Verify the fixture's persisted authorization state before requests run.
+    persisted_agent = session.get(Agent, agent_id if "agent_id" in locals() else uuid.UUID(TEST_AGENT_ID))
+    assert persisted_agent is not None
+    session.refresh(persisted_agent)
+    assert persisted_agent.id == uuid.UUID(TEST_AGENT_ID)
+    assert persisted_agent.tenant_id == tenant.id
+    assert persisted_agent.revoked is False
+    assert persisted_agent.revoked_at is None
+    assert persisted_agent.revocation_reason is None
+    assert persisted_agent.enabled is True
+    assert persisted_agent.quarantined is False
+    assert persisted_agent.registration_state == "approved"
     session.close()
 
     def override_get_db():
@@ -69,7 +90,7 @@ def _build_client() -> TestClient:
     app.include_router(remote_access.router)
     app.include_router(agent_commands.router)
     app.dependency_overrides[get_db] = override_get_db
-    test_user = User(id=uuid.uuid4(), email="test@example.com", active=True, mfa_enabled=True)
+    test_user = User(id=uuid.uuid4(), tenant_id=tenant.id, email="test@example.com", active=True, mfa_enabled=True)
     app.dependency_overrides[get_current_user] = lambda: test_user
     app.dependency_overrides[require_mfa_for_actions] = lambda: test_user
     return TestClient(app)
@@ -157,3 +178,52 @@ def test_registry_editor_fails_cleanly_on_linux() -> None:
     assert response.status_code == 201
     _, status_payload = _execute_next_command(client, platform_name="linux")
     assert status_payload["status"] == "failed"
+
+
+def test_agent_command_poll_denies_quarantined_agent() -> None:
+    client = _build_client()
+    session = bootstrap.SessionLocal()
+    try:
+        agent = session.get(Agent, uuid.UUID(TEST_AGENT_ID))
+        assert agent is not None
+        agent.quarantined = True
+        session.commit()
+    finally:
+        session.close()
+
+    response = client.get(f"/agent/{TEST_AGENT_ID}/commands", params=_agent_params())
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Agent quarantined"
+
+
+def test_agent_command_poll_denies_revoked_agent() -> None:
+    client = _build_client()
+    session = bootstrap.SessionLocal()
+    try:
+        agent = session.get(Agent, uuid.UUID(TEST_AGENT_ID))
+        assert agent is not None
+        agent.revoked = True
+        session.commit()
+    finally:
+        session.close()
+
+    response = client.get(f"/agent/{TEST_AGENT_ID}/commands", params=_agent_params())
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Agent revoked"
+
+
+def test_agent_command_poll_denies_unapproved_agent() -> None:
+    client = _build_client()
+    session = bootstrap.SessionLocal()
+    try:
+        agent = session.get(Agent, uuid.UUID(TEST_AGENT_ID))
+        assert agent is not None
+        agent.registration_state = "pending"
+        agent.approved = False
+        session.commit()
+    finally:
+        session.close()
+
+    response = client.get(f"/agent/{TEST_AGENT_ID}/commands", params=_agent_params())
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Agent is not approved"

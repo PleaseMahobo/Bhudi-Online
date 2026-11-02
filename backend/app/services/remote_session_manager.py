@@ -35,6 +35,8 @@ def _now_ms() -> int:
 class RemoteSessionState:
     session_id: str
     agent_id: str
+    tenant_id: str
+    owner_user_id: str
     session_type: str
     command_id: str | None = None
     status: str = "pending"
@@ -83,6 +85,8 @@ class RemoteSessionManager:
         *,
         agent_id: UUID | str,
         session_type: str,
+        tenant_id: UUID | str | None = None,
+        owner_user_id: UUID | str | None = None,
         metadata: dict[str, Any] | None = None,
         command_id: UUID | str | None = None,
         session_id: UUID | str | None = None,
@@ -91,6 +95,8 @@ class RemoteSessionManager:
         state = RemoteSessionState(
             session_id=resolved_session_id,
             agent_id=str(agent_id),
+            tenant_id=str(tenant_id) if tenant_id is not None else "",
+            owner_user_id=str(owner_user_id) if owner_user_id is not None else "",
             session_type=session_type,
             command_id=str(command_id) if command_id is not None else None,
             metadata=metadata or {},
@@ -231,19 +237,34 @@ class RemoteSessionManager:
             state.status = "waiting_for_agent"
         await self._broadcast_to_dashboards(state, {"type": "agent_disconnected", "session": state.snapshot()})
 
+    async def relay_dashboard_input_message(
+        self,
+        session_id: UUID | str,
+        websocket: WebSocket,
+        message: dict[str, Any],
+    ) -> bool:
+        """Forward input only from a dashboard socket authenticated for this channel."""
+        state = self.get_session(session_id)
+        if state is None or websocket not in state.dashboard_input_connections:
+            return False
+        if message.get("type") not in _INPUT_EVENT_TYPES:
+            return False
+        enriched = dict(message)
+        enriched["backend_received_at_ms"] = _now_ms()
+        envelope = {"type": "input", "payload": enriched}
+        if state.agent_input_connection is None:
+            state.pending_input_messages.append(envelope)
+        else:
+            await state.agent_input_connection.send_json(envelope)
+        return True
+
     async def relay_dashboard_message(self, session_id: UUID | str, message: dict[str, Any]) -> None:
         state = self.get_session(session_id)
         if state is None:
             return
 
+        # Input events are accepted only through the separately credentialed input channel.
         if message.get("type") in _INPUT_EVENT_TYPES:
-            enriched = dict(message)
-            enriched["backend_received_at_ms"] = _now_ms()
-            envelope = {"type": "input", "payload": enriched}
-            if state.agent_input_connection is None:
-                state.pending_input_messages.append(envelope)
-                return
-            await state.agent_input_connection.send_json(envelope)
             return
 
         envelope = {"type": "dashboard_message", "payload": message}
@@ -255,6 +276,32 @@ class RemoteSessionManager:
             return
 
         await state.agent_connection.send_json(envelope)
+
+    async def relay_agent_input_message(
+        self,
+        session_id: UUID | str,
+        websocket: WebSocket,
+        message: dict[str, Any],
+    ) -> bool:
+        """Relay input acknowledgements only from the currently bound input-agent socket."""
+        state = self.get_session(session_id)
+        if state is None or state.agent_input_connection is not websocket:
+            return False
+        if message.get("type") != "input_ack":
+            return False
+        # Bind acknowledgements to this session; never trust a caller-supplied route id.
+        if str(message.get("session_id") or "") != state.session_id:
+            return False
+        event_id = message.get("event_id")
+        if not isinstance(event_id, str) or not event_id:
+            return False
+        for dashboard in list(state.dashboard_input_connections):
+            try:
+                await dashboard.send_json(message)
+            except Exception:
+                if dashboard in state.dashboard_input_connections:
+                    state.dashboard_input_connections.remove(dashboard)
+        return True
 
     async def relay_agent_message(self, session_id: UUID | str, message: dict[str, Any]) -> None:
         state = self.get_session(session_id)
