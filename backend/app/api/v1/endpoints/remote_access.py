@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import secrets
 from typing import Any, Literal
 from uuid import UUID
 
@@ -10,7 +11,9 @@ from sqlalchemy.orm import Session
 from app.core.access_tiers import require_mfa_for_actions
 from app.core.dependencies import get_current_user, get_user_tenant_id, authorization_error
 from app.database.session import get_db
+from app.models.agent import Agent
 from app.models.user import User
+from app.database.session import SessionLocal
 from app.services.remote_access_service import RemoteAccessService
 from app.services.remote_session_manager import remote_session_manager
 
@@ -177,20 +180,58 @@ def _service(db: Session = Depends(get_db)) -> RemoteAccessService:
 
 
 def _remote_user(user: User = Depends(require_mfa_for_actions)) -> User:
-    # Tenant scope is server-resolved; client-supplied scope is never trusted.
     if get_user_tenant_id(user) is None:
         raise authorization_error("Tenant association required for remote access")
     return user
 
 
 def _assert_session_owner(session: Any, user: User) -> None:
-    # Authorization always uses tenant identity resolved from the authenticated user.
     if str(getattr(session, "tenant_id", "")) != str(get_user_tenant_id(user)):
         raise HTTPException(status_code=404, detail="remote session not found")
 
 
+def _verify_agent_session_binding(
+    *,
+    agent_id: str,
+    agent_token: str | None,
+    session_tenant_id: str,
+) -> tuple[bool, str]:
+    """Authenticate agent credential and bind to session tenant. Fail closed."""
+    if not agent_token:
+        return False, "Agent credentials required."
+    try:
+        agent_uuid = UUID(str(agent_id))
+    except (TypeError, ValueError):
+        return False, "Session not found or agent mismatch. Re-enroll agent and retry."
+
+    db = SessionLocal()
+    try:
+        agent = db.get(Agent, agent_uuid)
+        stored = getattr(agent, "enrollment_token", None) if agent is not None else None
+        if (
+            agent is None
+            or not stored
+            or not secrets.compare_digest(str(agent_token), str(stored))
+        ):
+            return False, "Invalid agent credentials."
+        if not agent.enabled:
+            return False, "Agent disabled."
+        if getattr(agent, "revoked", False):
+            return False, "Agent revoked."
+        if getattr(agent, "quarantined", False):
+            return False, "Agent quarantined."
+        if getattr(agent, "registration_state", None) != "approved":
+            return False, "Agent is not approved."
+        if agent.tenant_id is None:
+            return False, "Agent tenant scope is required."
+        if str(agent.tenant_id) != str(session_tenant_id):
+            return False, "Session not found or agent mismatch. Re-enroll agent and retry."
+        return True, ""
+    finally:
+        db.close()
+
+
 def _session_response(session: Any) -> RemoteSessionResponse:
-    # Owner-facing responses include short-lived channel tickets.
     snapshot = session.snapshot(include_tickets=True)
     return RemoteSessionResponse(**{k: v for k, v in snapshot.items() if k in RemoteSessionResponse.model_fields})
 
@@ -532,7 +573,36 @@ async def dashboard_session_stream(websocket: WebSocket, session_id: str) -> Non
 
 @router.websocket("/sessions/{session_id}/agent/{agent_id}")
 async def agent_session_stream(websocket: WebSocket, session_id: str, agent_id: str) -> None:
-    session = await remote_session_manager.connect_agent(session_id, agent_id, websocket)
+    state = remote_session_manager.get_session(session_id)
+    agent_token = websocket.query_params.get("agent_token")
+    verified = False
+    if state is not None and state.agent_id == str(agent_id):
+        verified, reject_message = _verify_agent_session_binding(
+            agent_id=agent_id,
+            agent_token=agent_token,
+            session_tenant_id=state.tenant_id,
+        )
+    else:
+        reject_message = "Session not found or agent mismatch. Re-enroll agent and retry."
+
+    if not verified:
+        await websocket.accept()
+        try:
+            await websocket.send_json({"type": "error", "message": reject_message})
+        except Exception:
+            pass
+        try:
+            await websocket.close(code=1008)
+        except Exception:
+            pass
+        return
+
+    session = await remote_session_manager.connect_agent(
+        session_id,
+        agent_id,
+        websocket,
+        agent_credential_verified=True,
+    )
     if session is None:
         return
     input_channel = websocket.query_params.get("channel") == "input"
