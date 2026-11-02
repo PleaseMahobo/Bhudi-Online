@@ -35,6 +35,8 @@ def _now_ms() -> int:
 class RemoteSessionState:
     session_id: str
     agent_id: str
+    tenant_id: str
+    owner_user_id: str
     session_type: str
     command_id: str | None = None
     status: str = "pending"
@@ -82,6 +84,8 @@ class RemoteSessionManager:
         self,
         *,
         agent_id: UUID | str,
+        tenant_id: UUID | str,
+        owner_user_id: UUID | str,
         session_type: str,
         metadata: dict[str, Any] | None = None,
         command_id: UUID | str | None = None,
@@ -91,6 +95,8 @@ class RemoteSessionManager:
         state = RemoteSessionState(
             session_id=resolved_session_id,
             agent_id=str(agent_id),
+            tenant_id=str(tenant_id),
+            owner_user_id=str(owner_user_id),
             session_type=session_type,
             command_id=str(command_id) if command_id is not None else None,
             metadata=metadata or {},
