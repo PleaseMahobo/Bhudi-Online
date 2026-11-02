@@ -489,18 +489,36 @@ class MonitoringService:
                 return "ai_similarity_suppression"
         return None
 
+    @staticmethod
+    def _parse_window_bound(value: Any) -> datetime | None:
+        """Normalize maintenance window bounds from str, datetime, or unix timestamp."""
+        if value is None:
+            return None
+        if isinstance(value, datetime):
+            return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+        if isinstance(value, (int, float)):
+            return datetime.fromtimestamp(float(value), tz=timezone.utc)
+        if isinstance(value, str):
+            try:
+                dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            except ValueError:
+                return None
+            return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+        return None
+
     def _maintenance_window_active(self, maintenance_window_name: str | None) -> bool:
         if not maintenance_window_name:
             return False
-        query = self.db.query(MaintenanceWindow)
-        query = query.filter(MaintenanceWindow.name == maintenance_window_name)
-        windows = query.all()
+        windows = (
+            self.db.query(MaintenanceWindow)
+            .filter(MaintenanceWindow.name == maintenance_window_name)
+            .all()
+        )
         now = datetime.now(timezone.utc)
         for window in windows:
-            try:
-                start = datetime.fromisoformat(window.start.replace("Z", "+00:00"))
-                end = datetime.fromisoformat(window.end.replace("Z", "+00:00"))
-            except ValueError:
+            start = self._parse_window_bound(getattr(window, "start", None))
+            end = self._parse_window_bound(getattr(window, "end", None))
+            if start is None or end is None:
                 continue
             if start <= now <= end:
                 return True
@@ -526,14 +544,24 @@ class MonitoringService:
         policy: dict[str, Any] | None,
         severity: str,
     ) -> dict[str, Any]:
-        policy_levels = (policy or {}).get("levels") or []
-        occurrence_count = self._correlated_count(correlation_key)
         applied_level = 0
         applied_severity = severity
-        for index, level in enumerate(
-            sorted(policy_levels, key=lambda item: int(item.get("repeat_count", 1)))
-        ):
-            if occurrence_count >= int(level.get("repeat_count", 1)):
-                applied_level = index + 1
+        if not policy or not correlation_key:
+            return {"level": applied_level, "severity": applied_severity}
+        levels = policy.get("levels") or []
+        if not levels:
+            return {"level": applied_level, "severity": applied_severity}
+        prior = (
+            self.db.query(MonitoringAlert)
+            .filter(
+                MonitoringAlert.correlation_key == correlation_key,
+                MonitoringAlert.resolved.is_(False),
+            )
+            .count()
+        )
+        for idx, level in enumerate(levels):
+            repeat_count = int(level.get("repeat_count") or 0)
+            if prior + 1 >= repeat_count:
+                applied_level = idx + 1
                 applied_severity = str(level.get("severity") or applied_severity)
         return {"level": applied_level, "severity": applied_severity}
