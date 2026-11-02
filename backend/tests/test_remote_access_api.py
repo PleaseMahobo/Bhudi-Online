@@ -230,3 +230,37 @@ def test_remote_access_rejects_cross_tenant_dispatch_without_side_effects() -> N
         assert db.query(AgentCommand).count() == commands_before
     finally:
         db.close()
+
+def test_remote_session_reads_and_close_are_tenant_scoped() -> None:
+    client = _build_client()
+    owner = client.app.dependency_overrides[require_mfa_for_actions]()
+    state = remote_session_manager.create_session(
+        agent_id=uuid.uuid4(),
+        tenant_id=owner.tenant_id,
+        owner_user_id=owner.id,
+        session_type="desktop",
+    )
+    own_response = client.get(f"/remote-access/sessions/{state.session_id}")
+    assert own_response.status_code == 200, own_response.text
+    assert own_response.json()["session_id"] == state.session_id
+
+    other_tenant_user = User(
+        id=uuid.uuid4(),
+        tenant_id=uuid.uuid4(),
+        email="cross-tenant-session@example.com",
+        active=True,
+        mfa_enabled=True,
+    )
+    client.app.dependency_overrides[require_mfa_for_actions] = lambda: other_tenant_user
+    denied_read = client.get(f"/remote-access/sessions/{state.session_id}")
+    assert denied_read.status_code == 404
+
+    # A rejected close must leave the session untouched.
+    denied_close = client.post(f"/remote-access/sessions/{state.session_id}/close")
+    assert denied_close.status_code == 404
+    assert remote_session_manager.get_session(state.session_id).status == "pending"
+
+    client.app.dependency_overrides[require_mfa_for_actions] = lambda: owner
+    own_close = client.post(f"/remote-access/sessions/{state.session_id}/close")
+    assert own_close.status_code == 200, own_close.text
+    assert remote_session_manager.get_session(state.session_id).status == "closed"
