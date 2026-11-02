@@ -111,6 +111,8 @@ class RemoteAccessService:
         self,
         *,
         agent_id: uuid.UUID,
+        tenant_id: uuid.UUID,
+        owner_user_id: uuid.UUID,
         session_type: str,
         metadata: dict[str, Any] | None = None,
         session_id: str | None = None,
@@ -118,6 +120,8 @@ class RemoteAccessService:
     ) -> RemoteSessionState:
         return remote_session_manager.create_session(
             agent_id=agent_id,
+            tenant_id=tenant_id,
+            owner_user_id=owner_user_id,
             session_type=session_type,
             metadata=metadata,
             session_id=session_id,
