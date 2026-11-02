@@ -53,7 +53,6 @@ def _build_client() -> TestClient:
         )
     )
     db.commit()
-    # Verify the fixture's persisted authorization state before requests run.
     persisted_agent = db.get(Agent, uuid.UUID(TEST_AGENT_ID))
     assert persisted_agent is not None
     db.refresh(persisted_agent)
@@ -77,7 +76,9 @@ def _build_client() -> TestClient:
     app = FastAPI()
     app.include_router(remote_access.router)
     app.dependency_overrides[get_db] = override_get_db
-    test_user = User(id=uuid.uuid4(), tenant_id=tenant.id, email="input@example.com", active=True, mfa_enabled=True)
+    test_user = User(
+        id=uuid.uuid4(), tenant_id=tenant.id, email="input@example.com", active=True, mfa_enabled=True
+    )
     app.dependency_overrides[get_current_user] = lambda: test_user
     app.dependency_overrides[require_mfa_for_actions] = lambda: test_user
     return TestClient(app)
@@ -93,14 +94,21 @@ def test_authenticated_input_channel_is_separate_and_timestamped() -> None:
     response = queued.json()
     session_id = response["session_id"]
     input_token = response["payload"]["input_token"]
+    dashboard_ticket = response["dashboard_ticket"]
+    agent_ticket = response["agent_ticket"]
     assert input_token
+    assert dashboard_ticket
+    assert agent_ticket
 
-    with client.websocket_connect(f"/remote-access/sessions/{session_id}/dashboard") as dashboard_ws:
+    with client.websocket_connect(
+        f"/remote-access/sessions/{session_id}/dashboard?ticket={dashboard_ticket}"
+    ) as dashboard_ws:
         dashboard_ws.receive_json()
-        with client.websocket_connect(f"/remote-access/sessions/{session_id}/agent/{TEST_AGENT_ID}") as agent_ws:
+        with client.websocket_connect(
+            f"/remote-access/sessions/{session_id}/agent/{TEST_AGENT_ID}?ticket={agent_ticket}"
+        ) as agent_ws:
             agent_ws.receive_json()
             dashboard_ws.receive_json()
-
             with client.websocket_connect(
                 f"/remote-access/sessions/{session_id}/dashboard?channel=input&token={input_token}"
             ) as input_dashboard_ws:

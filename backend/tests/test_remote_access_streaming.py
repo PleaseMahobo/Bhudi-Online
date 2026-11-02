@@ -54,8 +54,7 @@ def _build_client() -> TestClient:
         )
     )
     session.commit()
-    # Verify the fixture's persisted authorization state before requests run.
-    persisted_agent = session.get(Agent, agent_id if "agent_id" in locals() else uuid.UUID(TEST_AGENT_ID))
+    persisted_agent = session.get(Agent, uuid.UUID(TEST_AGENT_ID))
     assert persisted_agent is not None
     session.refresh(persisted_agent)
     assert persisted_agent.id == uuid.UUID(TEST_AGENT_ID)
@@ -91,18 +90,24 @@ def test_terminal_session_relays_dashboard_input_and_agent_output() -> None:
         json={
             "agent_id": TEST_AGENT_ID,
             "shell": "powershell",
-            "interactive": True,
         },
     )
-    assert queue_response.status_code == 201
+    assert queue_response.status_code == 201, queue_response.text
     payload = queue_response.json()
     session_id = payload["session_id"]
+    dashboard_ticket = payload["dashboard_ticket"]
+    agent_ticket = payload["agent_ticket"]
+    assert dashboard_ticket
+    assert agent_ticket
 
-    with client.websocket_connect(f"/remote-access/sessions/{session_id}/dashboard") as dashboard_ws:
-        initial = dashboard_ws.receive_json()
-        assert initial["type"] == "session_state"
-
-        with client.websocket_connect(f"/remote-access/sessions/{session_id}/agent/{TEST_AGENT_ID}") as agent_ws:
+    with client.websocket_connect(
+        f"/remote-access/sessions/{session_id}/dashboard?ticket={dashboard_ticket}"
+    ) as dashboard_ws:
+        state_msg = dashboard_ws.receive_json()
+        assert state_msg["type"] == "session_state"
+        with client.websocket_connect(
+            f"/remote-access/sessions/{session_id}/agent/{TEST_AGENT_ID}?ticket={agent_ticket}"
+        ) as agent_ws:
             attached = agent_ws.receive_json()
             assert attached["type"] == "session_attached"
 
@@ -140,10 +145,16 @@ def test_desktop_session_relays_control_events_and_close() -> None:
     assert queue_response.status_code == 201
     payload = queue_response.json()
     session_id = payload["session_id"]
+    dashboard_ticket = payload["dashboard_ticket"]
+    agent_ticket = payload["agent_ticket"]
 
-    with client.websocket_connect(f"/remote-access/sessions/{session_id}/dashboard") as dashboard_ws:
+    with client.websocket_connect(
+        f"/remote-access/sessions/{session_id}/dashboard?ticket={dashboard_ticket}"
+    ) as dashboard_ws:
         dashboard_ws.receive_json()
-        with client.websocket_connect(f"/remote-access/sessions/{session_id}/agent/{TEST_AGENT_ID}") as agent_ws:
+        with client.websocket_connect(
+            f"/remote-access/sessions/{session_id}/agent/{TEST_AGENT_ID}?ticket={agent_ticket}"
+        ) as agent_ws:
             agent_ws.receive_json()
             dashboard_ws.receive_json()
 
@@ -152,7 +163,14 @@ def test_desktop_session_relays_control_events_and_close() -> None:
             assert control_message["type"] == "dashboard_message"
             assert control_message["payload"]["type"] == "pointer"
 
-            agent_ws.send_json({"type": "desktop_event_ack", "session_id": session_id, "event": "pointer", "payload": {"x": 100, "y": 50}})
+            agent_ws.send_json(
+                {
+                    "type": "desktop_event_ack",
+                    "session_id": session_id,
+                    "event": "pointer",
+                    "payload": {"x": 100, "y": 50},
+                }
+            )
             acknowledged = dashboard_ws.receive_json()
             assert acknowledged["type"] == "desktop_event_ack"
             assert acknowledged["event"] == "pointer"
@@ -160,3 +178,17 @@ def test_desktop_session_relays_control_events_and_close() -> None:
     close_response = client.post(f"/remote-access/sessions/{session_id}/close")
     assert close_response.status_code == 200
     assert close_response.json()["status"] == "closed"
+
+
+def test_dashboard_stream_rejects_missing_ticket() -> None:
+    client = _build_client()
+    queue_response = client.post(
+        "/remote-access/desktop",
+        json={"agent_id": TEST_AGENT_ID, "session_mode": "control", "display_protocol": "native"},
+    )
+    session_id = queue_response.json()["session_id"]
+
+    with client.websocket_connect(f"/remote-access/sessions/{session_id}/dashboard") as ws:
+        msg = ws.receive_json()
+        assert msg["type"] == "error"
+        assert "ticket" in msg["message"].lower() or "invalid" in msg["message"].lower()
