@@ -11,9 +11,9 @@ from sqlalchemy.orm import Session
 from app.core.access_tiers import require_mfa_for_actions
 from app.core.dependencies import get_current_user, get_user_tenant_id, authorization_error
 from app.database.session import get_db
+import app.database.session as db_session
 from app.models.agent import Agent
 from app.models.user import User
-from app.database.session import SessionLocal
 from app.services.remote_access_service import RemoteAccessService
 from app.services.remote_session_manager import remote_session_manager
 
@@ -204,7 +204,8 @@ def _verify_agent_session_binding(
     except (TypeError, ValueError):
         return False, "Session not found or agent mismatch. Re-enroll agent and retry."
 
-    db = SessionLocal()
+    # Resolve SessionLocal dynamically so tests can patch app.database.session.SessionLocal.
+    db = db_session.SessionLocal()
     try:
         agent = db.get(Agent, agent_uuid)
         stored = getattr(agent, "enrollment_token", None) if agent is not None else None
