@@ -134,18 +134,15 @@ def test_agent_stream_accepts_bound_credential() -> None:
 
 
 def test_quarantined_agent_cannot_bind_session() -> None:
+    """Quarantined agents must be rejected before a remote session is issued."""
     client = _build_client(quarantined=True)
-    payload = _queue(client)
-    session_id = payload["session_id"]
-    agent_ticket = payload["agent_ticket"]
-
-    with client.websocket_connect(
-        f"/remote-access/sessions/{session_id}/agent/{TEST_AGENT_ID}"
-        f"?ticket={agent_ticket}&agent_token={TEST_AGENT_TOKEN}"
-    ) as ws:
-        msg = ws.receive_json()
-        assert msg["type"] == "error"
-        assert "quarantine" in msg["message"].lower()
+    response = client.post(
+        "/remote-access/desktop",
+        json={"agent_id": TEST_AGENT_ID, "session_mode": "control", "display_protocol": "native"},
+    )
+    assert response.status_code == 403, response.text
+    detail = response.json().get("detail", "")
+    assert "quarantine" in str(detail).lower()
 
 
 def test_agent_message_with_foreign_session_id_is_dropped() -> None:
