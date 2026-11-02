@@ -177,6 +177,14 @@ def _remote_user(user: User = Depends(require_mfa_for_actions)) -> User:
     return user
 
 
+def _assert_session_owner(session: Any, user: User) -> None:
+    # Authorization always uses tenant identity resolved from the authenticated user.
+    if str(getattr(session, "tenant_id", "")) != str(get_user_tenant_id(user)):
+        raise HTTPException(status_code=404, detail="remote session not found")
+    if str(getattr(session, "owner_user_id", "")) != str(user.id):
+        raise HTTPException(status_code=404, detail="remote session not found")
+
+
 def _session_response(session: Any) -> RemoteSessionResponse:
     snapshot = session.snapshot()
     return RemoteSessionResponse(**snapshot)
@@ -226,6 +234,8 @@ def open_remote_desktop(
     service.validate_agent_scope(payload.agent_id, get_user_tenant_id(user))
     session = service.create_interactive_session(
         agent_id=payload.agent_id,
+        tenant_id=get_user_tenant_id(user),
+        owner_user_id=user.id,
         session_type="desktop",
         metadata=payload.model_dump(exclude={"agent_id"}),
     )
@@ -258,6 +268,8 @@ def open_remote_terminal(
         service.validate_agent_scope(payload.agent_id, get_user_tenant_id(user))
         session = service.create_interactive_session(
             agent_id=payload.agent_id,
+            tenant_id=get_user_tenant_id(user),
+            owner_user_id=user.id,
             session_type="terminal",
             metadata=request_payload,
         )
@@ -462,11 +474,12 @@ def get_remote_access_operation(
 def get_remote_session(
     session_id: str,
     service: RemoteAccessService = Depends(_service),
-    _user: User = Depends(get_current_user),
+    user: User = Depends(_remote_user),
 ) -> RemoteSessionResponse:
     session = service.get_session(session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="remote session not found")
+    _assert_session_owner(session, user)
     return _session_response(session)
 
 
@@ -474,11 +487,13 @@ def get_remote_session(
 async def close_remote_session(
     session_id: str,
     service: RemoteAccessService = Depends(_service),
-    _user: User = Depends(require_mfa_for_actions),
+    user: User = Depends(_remote_user),
 ) -> RemoteSessionResponse:
-    session = await remote_session_manager.close_session(session_id)
+    session = remote_session_manager.get_session(session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="remote session not found")
+    _assert_session_owner(session, user)
+    session = await remote_session_manager.close_session(session_id)
     return _session_response(session)
 
 
