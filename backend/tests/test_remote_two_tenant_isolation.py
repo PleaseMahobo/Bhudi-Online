@@ -27,8 +27,13 @@ AGENT_A_TOKEN = "tenant-a-agent-token"
 AGENT_B_TOKEN = "tenant-b-agent-token"
 
 
+def _reset_sessions() -> None:
+    remote_session_manager._sessions.clear()
+
+
 def _build_two_tenant_client() -> tuple[TestClient, User, User, uuid.UUID, uuid.UUID]:
     """Shared in-memory DB with two tenants, two agents, and two users."""
+    _reset_sessions()
     engine = create_engine(
         "sqlite:///:memory:",
         future=True,
@@ -100,7 +105,6 @@ def _build_two_tenant_client() -> tuple[TestClient, User, User, uuid.UUID, uuid.
     app = FastAPI()
     app.include_router(remote_access.router)
     app.dependency_overrides[get_db] = override_get_db
-    # Default identity is tenant A; tests swap as needed.
     app.dependency_overrides[get_current_user] = lambda: user_a
     app.dependency_overrides[require_mfa_for_actions] = lambda: user_a
     return TestClient(app), user_a, user_b, tenant_a.id, tenant_b.id
@@ -126,211 +130,204 @@ def _queue_desktop(client: TestClient, agent_id: str) -> dict:
 
 def test_tenant_b_cannot_read_or_close_tenant_a_session() -> None:
     client, user_a, user_b, _tenant_a, _tenant_b = _build_two_tenant_client()
-    _as_user(client, user_a)
-    payload = _queue_desktop(client, TENANT_A_AGENT_ID)
-    session_id = payload["session_id"]
+    try:
+        _as_user(client, user_a)
+        payload = _queue_desktop(client, TENANT_A_AGENT_ID)
+        session_id = payload["session_id"]
 
-    own = client.get(f"/remote-access/sessions/{session_id}")
-    assert own.status_code == 200
-    assert own.json()["session_id"] == session_id
-    assert own.json().get("dashboard_ticket")
+        own = client.get(f"/remote-access/sessions/{session_id}")
+        assert own.status_code == 200
+        assert own.json()["session_id"] == session_id
+        assert own.json().get("dashboard_ticket")
 
-    _as_user(client, user_b)
-    denied_get = client.get(f"/remote-access/sessions/{session_id}")
-    assert denied_get.status_code == 404
+        _as_user(client, user_b)
+        denied_get = client.get(f"/remote-access/sessions/{session_id}")
+        assert denied_get.status_code == 404
 
-    denied_close = client.post(f"/remote-access/sessions/{session_id}/close")
-    assert denied_close.status_code == 404
+        denied_close = client.post(f"/remote-access/sessions/{session_id}/close")
+        assert denied_close.status_code == 404
 
-    # Owner still sees an open session after the cross-tenant close attempt.
-    _as_user(client, user_a)
-    still_open = client.get(f"/remote-access/sessions/{session_id}")
-    assert still_open.status_code == 200
-    assert still_open.json()["status"] != "closed"
+        _as_user(client, user_a)
+        still_open = client.get(f"/remote-access/sessions/{session_id}")
+        assert still_open.status_code == 200
+        assert still_open.json()["status"] != "closed"
+    finally:
+        _reset_sessions()
 
 
 def test_tenant_b_cannot_dispatch_to_tenant_a_agent() -> None:
     client, user_a, user_b, _tenant_a, _tenant_b = _build_two_tenant_client()
-    sessions_before = set(remote_session_manager._sessions)
-    db = bootstrap.SessionLocal()
     try:
-        commands_before = db.query(AgentCommand).count()
-    finally:
-        db.close()
+        sessions_before = set(remote_session_manager._sessions)
+        db = bootstrap.SessionLocal()
+        try:
+            commands_before = db.query(AgentCommand).count()
+        finally:
+            db.close()
 
-    _as_user(client, user_b)
-    response = client.post(
-        "/remote-access/desktop",
-        json={
-            "agent_id": TENANT_A_AGENT_ID,
-            "session_mode": "control",
-            "display_protocol": "native",
-        },
-    )
-    assert response.status_code == 403
-    detail = response.json().get("detail", "").lower()
-    assert "tenant" in detail or "authorized" in detail or "not found" in detail
+        _as_user(client, user_b)
+        response = client.post(
+            "/remote-access/desktop",
+            json={
+                "agent_id": TENANT_A_AGENT_ID,
+                "session_mode": "control",
+                "display_protocol": "native",
+            },
+        )
+        assert response.status_code == 403
+        detail = response.json().get("detail", "").lower()
+        assert "tenant" in detail or "authorized" in detail or "not found" in detail
 
-    assert set(remote_session_manager._sessions) == sessions_before
-    db = bootstrap.SessionLocal()
-    try:
-        assert db.query(AgentCommand).count() == commands_before
+        assert set(remote_session_manager._sessions) == sessions_before
+        db = bootstrap.SessionLocal()
+        try:
+            assert db.query(AgentCommand).count() == commands_before
+        finally:
+            db.close()
     finally:
-        db.close()
+        _reset_sessions()
 
 
 def test_foreign_agent_cannot_bind_with_stolen_tickets() -> None:
     """Agent B must not attach to tenant A session even if tickets leak."""
     client, user_a, _user_b, _tenant_a, _tenant_b = _build_two_tenant_client()
-    _as_user(client, user_a)
-    payload = _queue_desktop(client, TENANT_A_AGENT_ID)
-    session_id = payload["session_id"]
-    agent_ticket = payload["agent_ticket"]
-    dashboard_ticket = payload["dashboard_ticket"]
+    try:
+        _as_user(client, user_a)
+        payload = _queue_desktop(client, TENANT_A_AGENT_ID)
+        session_id = payload["session_id"]
+        agent_ticket = payload["agent_ticket"]
+        dashboard_ticket = payload["dashboard_ticket"]
 
-    # Wrong agent id path + B's real enrollment token.
-    with client.websocket_connect(
-        f"/remote-access/sessions/{session_id}/agent/{TENANT_B_AGENT_ID}"
-        f"?ticket={agent_ticket}&agent_token={AGENT_B_TOKEN}"
-    ) as ws:
-        msg = ws.receive_json()
-        assert msg["type"] == "error"
+        with client.websocket_connect(
+            f"/remote-access/sessions/{session_id}/agent/{TENANT_B_AGENT_ID}"
+            f"?ticket={agent_ticket}&agent_token={AGENT_B_TOKEN}"
+        ) as ws:
+            msg = ws.receive_json()
+            assert msg["type"] == "error"
 
-    # Correct agent id path but B's token (credential/tenant mismatch).
-    with client.websocket_connect(
-        f"/remote-access/sessions/{session_id}/agent/{TENANT_A_AGENT_ID}"
-        f"?ticket={agent_ticket}&agent_token={AGENT_B_TOKEN}"
-    ) as ws:
-        msg = ws.receive_json()
-        assert msg["type"] == "error"
-        assert any(
-            token in msg["message"].lower()
-            for token in ("invalid", "credential", "mismatch", "tenant", "quarantine", "revok")
-        )
-
-    # Legitimate bind still works for the owning agent.
-    with client.websocket_connect(
-        f"/remote-access/sessions/{session_id}/dashboard?ticket={dashboard_ticket}"
-    ) as dashboard_ws:
-        assert dashboard_ws.receive_json()["type"] == "session_state"
         with client.websocket_connect(
             f"/remote-access/sessions/{session_id}/agent/{TENANT_A_AGENT_ID}"
-            f"?ticket={agent_ticket}&agent_token={AGENT_A_TOKEN}"
-        ) as agent_ws:
-            attached = agent_ws.receive_json()
-            assert attached["type"] == "session_attached"
-            assert attached["session"]["agent_credential_bound"] is True
+            f"?ticket={agent_ticket}&agent_token={AGENT_B_TOKEN}"
+        ) as ws:
+            msg = ws.receive_json()
+            assert msg["type"] == "error"
+            assert any(
+                token in msg["message"].lower()
+                for token in ("invalid", "credential", "mismatch", "tenant", "quarantine", "revok")
+            )
+
+        with client.websocket_connect(
+            f"/remote-access/sessions/{session_id}/dashboard?ticket={dashboard_ticket}"
+        ) as dashboard_ws:
+            assert dashboard_ws.receive_json()["type"] == "session_state"
+            with client.websocket_connect(
+                f"/remote-access/sessions/{session_id}/agent/{TENANT_A_AGENT_ID}"
+                f"?ticket={agent_ticket}&agent_token={AGENT_A_TOKEN}"
+            ) as agent_ws:
+                attached = agent_ws.receive_json()
+                assert attached["type"] == "session_attached"
+                assert attached["session"]["agent_credential_bound"] is True
+    finally:
+        _reset_sessions()
 
 
 def test_parallel_tenant_sessions_do_not_cross_relay() -> None:
     """Two concurrent interactive sessions stay isolated on the wire."""
     client, user_a, user_b, _tenant_a, _tenant_b = _build_two_tenant_client()
+    try:
+        _as_user(client, user_a)
+        payload_a = _queue_desktop(client, TENANT_A_AGENT_ID)
+        session_a = payload_a["session_id"]
+        dash_a = payload_a["dashboard_ticket"]
+        agent_a = payload_a["agent_ticket"]
 
-    _as_user(client, user_a)
-    payload_a = _queue_desktop(client, TENANT_A_AGENT_ID)
-    session_a = payload_a["session_id"]
-    dash_a = payload_a["dashboard_ticket"]
-    agent_a = payload_a["agent_ticket"]
+        _as_user(client, user_b)
+        payload_b = _queue_desktop(client, TENANT_B_AGENT_ID)
+        session_b = payload_b["session_id"]
+        dash_b = payload_b["dashboard_ticket"]
+        agent_b = payload_b["agent_ticket"]
 
-    _as_user(client, user_b)
-    payload_b = _queue_desktop(client, TENANT_B_AGENT_ID)
-    session_b = payload_b["session_id"]
-    dash_b = payload_b["dashboard_ticket"]
-    agent_b = payload_b["agent_ticket"]
+        assert session_a != session_b
+        assert len({dash_a, agent_a, dash_b, agent_b}) == 4
 
-    assert session_a != session_b
-    assert len({dash_a, agent_a, dash_b, agent_b}) == 4
-
-    with client.websocket_connect(
-        f"/remote-access/sessions/{session_a}/dashboard?ticket={dash_a}"
-    ) as dash_ws_a:
-        assert dash_ws_a.receive_json()["type"] == "session_state"
+        # Exercise tenant A end-to-end, then tenant B, asserting foreign session_id drops.
         with client.websocket_connect(
-            f"/remote-access/sessions/{session_b}/dashboard?ticket={dash_b}"
-        ) as dash_ws_b:
-            assert dash_ws_b.receive_json()["type"] == "session_state"
+            f"/remote-access/sessions/{session_a}/dashboard?ticket={dash_a}"
+        ) as dash_ws_a:
+            assert dash_ws_a.receive_json()["type"] == "session_state"
             with client.websocket_connect(
                 f"/remote-access/sessions/{session_a}/agent/{TENANT_A_AGENT_ID}"
                 f"?ticket={agent_a}&agent_token={AGENT_A_TOKEN}"
             ) as agent_ws_a:
                 assert agent_ws_a.receive_json()["type"] == "session_attached"
                 assert dash_ws_a.receive_json()["type"] == "agent_connected"
-                with client.websocket_connect(
-                    f"/remote-access/sessions/{session_b}/agent/{TENANT_B_AGENT_ID}"
-                    f"?ticket={agent_b}&agent_token={AGENT_B_TOKEN}"
-                ) as agent_ws_b:
-                    assert agent_ws_b.receive_json()["type"] == "session_attached"
-                    assert dash_ws_b.receive_json()["type"] == "agent_connected"
 
-                    # Inject a foreign session_id; only the matching session should accept.
-                    agent_ws_a.send_json(
-                        {
-                            "type": "output",
-                            "session_id": session_b,
-                            "data": "leaked-from-a",
-                        }
-                    )
-                    agent_ws_a.send_json(
-                        {
-                            "type": "output",
-                            "session_id": session_a,
-                            "data": "ok-a",
-                        }
-                    )
-                    out_a = dash_ws_a.receive_json()
-                    assert out_a["type"] == "output"
-                    assert out_a["data"] == "ok-a"
+                agent_ws_a.send_json(
+                    {"type": "output", "session_id": session_b, "data": "leaked-from-a"}
+                )
+                agent_ws_a.send_json(
+                    {"type": "output", "session_id": session_a, "data": "ok-a"}
+                )
+                out_a = dash_ws_a.receive_json()
+                assert out_a["type"] == "output"
+                assert out_a["data"] == "ok-a"
 
-                    agent_ws_b.send_json(
-                        {
-                            "type": "output",
-                            "session_id": session_a,
-                            "data": "leaked-from-b",
-                        }
-                    )
-                    agent_ws_b.send_json(
-                        {
-                            "type": "output",
-                            "session_id": session_b,
-                            "data": "ok-b",
-                        }
-                    )
-                    out_b = dash_ws_b.receive_json()
-                    assert out_b["type"] == "output"
-                    assert out_b["data"] == "ok-b"
+        with client.websocket_connect(
+            f"/remote-access/sessions/{session_b}/dashboard?ticket={dash_b}"
+        ) as dash_ws_b:
+            assert dash_ws_b.receive_json()["type"] == "session_state"
+            with client.websocket_connect(
+                f"/remote-access/sessions/{session_b}/agent/{TENANT_B_AGENT_ID}"
+                f"?ticket={agent_b}&agent_token={AGENT_B_TOKEN}"
+            ) as agent_ws_b:
+                assert agent_ws_b.receive_json()["type"] == "session_attached"
+                assert dash_ws_b.receive_json()["type"] == "agent_connected"
+
+                agent_ws_b.send_json(
+                    {"type": "output", "session_id": session_a, "data": "leaked-from-b"}
+                )
+                agent_ws_b.send_json(
+                    {"type": "output", "session_id": session_b, "data": "ok-b"}
+                )
+                out_b = dash_ws_b.receive_json()
+                assert out_b["type"] == "output"
+                assert out_b["data"] == "ok-b"
+    finally:
+        _reset_sessions()
 
 
 def test_worker_restart_rejects_stale_session_tickets() -> None:
     """In-memory session manager loss (worker restart) must fail closed."""
     client, user_a, _user_b, _tenant_a, _tenant_b = _build_two_tenant_client()
-    _as_user(client, user_a)
-    payload = _queue_desktop(client, TENANT_A_AGENT_ID)
-    session_id = payload["session_id"]
-    dashboard_ticket = payload["dashboard_ticket"]
-    agent_ticket = payload["agent_ticket"]
+    try:
+        _as_user(client, user_a)
+        payload = _queue_desktop(client, TENANT_A_AGENT_ID)
+        session_id = payload["session_id"]
+        dashboard_ticket = payload["dashboard_ticket"]
+        agent_ticket = payload["agent_ticket"]
 
-    # Simulate process restart: drop all in-memory remote sessions.
-    remote_session_manager._sessions.clear()
+        remote_session_manager._sessions.clear()
 
-    assert remote_session_manager.get_session(session_id) is None
+        assert remote_session_manager.get_session(session_id) is None
 
-    with client.websocket_connect(
-        f"/remote-access/sessions/{session_id}/dashboard?ticket={dashboard_ticket}"
-    ) as ws:
-        msg = ws.receive_json()
-        assert msg["type"] == "error"
-        assert any(
-            token in msg["message"].lower()
-            for token in ("not found", "expired", "different", "instance", "start remote")
-        )
+        with client.websocket_connect(
+            f"/remote-access/sessions/{session_id}/dashboard?ticket={dashboard_ticket}"
+        ) as ws:
+            msg = ws.receive_json()
+            assert msg["type"] == "error"
+            assert any(
+                token in msg["message"].lower()
+                for token in ("not found", "expired", "different", "instance", "start remote")
+            )
 
-    with client.websocket_connect(
-        f"/remote-access/sessions/{session_id}/agent/{TENANT_A_AGENT_ID}"
-        f"?ticket={agent_ticket}&agent_token={AGENT_A_TOKEN}"
-    ) as ws:
-        msg = ws.receive_json()
-        assert msg["type"] == "error"
+        with client.websocket_connect(
+            f"/remote-access/sessions/{session_id}/agent/{TENANT_A_AGENT_ID}"
+            f"?ticket={agent_ticket}&agent_token={AGENT_A_TOKEN}"
+        ) as ws:
+            msg = ws.receive_json()
+            assert msg["type"] == "error"
 
-    # HTTP session read after restart is also a miss.
-    missing = client.get(f"/remote-access/sessions/{session_id}")
-    assert missing.status_code == 404
+        missing = client.get(f"/remote-access/sessions/{session_id}")
+        assert missing.status_code == 404
+    finally:
+        _reset_sessions()
