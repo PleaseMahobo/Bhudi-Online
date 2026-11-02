@@ -51,9 +51,12 @@ def _build_client() -> TestClient:
             revoked=False,
             quarantined=False,
             command_timeout=300,
+            enrollment_token="test-stream-agent-token",
         )
     )
     session.commit()
+    import app.database.session as db_session
+    db_session.SessionLocal = session_factory
     persisted_agent = session.get(Agent, uuid.UUID(TEST_AGENT_ID))
     assert persisted_agent is not None
     session.refresh(persisted_agent)
@@ -106,7 +109,7 @@ def test_terminal_session_relays_dashboard_input_and_agent_output() -> None:
         state_msg = dashboard_ws.receive_json()
         assert state_msg["type"] == "session_state"
         with client.websocket_connect(
-            f"/remote-access/sessions/{session_id}/agent/{TEST_AGENT_ID}?ticket={agent_ticket}"
+            f"/remote-access/sessions/{session_id}/agent/{TEST_AGENT_ID}?ticket={agent_ticket}&agent_token=test-stream-agent-token"
         ) as agent_ws:
             attached = agent_ws.receive_json()
             assert attached["type"] == "session_attached"
@@ -153,7 +156,7 @@ def test_desktop_session_relays_control_events_and_close() -> None:
     ) as dashboard_ws:
         dashboard_ws.receive_json()
         with client.websocket_connect(
-            f"/remote-access/sessions/{session_id}/agent/{TEST_AGENT_ID}?ticket={agent_ticket}"
+            f"/remote-access/sessions/{session_id}/agent/{TEST_AGENT_ID}?ticket={agent_ticket}&agent_token=test-stream-agent-token"
         ) as agent_ws:
             agent_ws.receive_json()
             dashboard_ws.receive_json()

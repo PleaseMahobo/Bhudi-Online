@@ -50,9 +50,12 @@ def _build_client() -> TestClient:
             revoked=False,
             quarantined=False,
             command_timeout=300,
+            enrollment_token="test-input-agent-token",
         )
     )
     db.commit()
+    import app.database.session as db_session
+    db_session.SessionLocal = session_factory
     persisted_agent = db.get(Agent, uuid.UUID(TEST_AGENT_ID))
     assert persisted_agent is not None
     db.refresh(persisted_agent)
@@ -105,7 +108,7 @@ def test_authenticated_input_channel_is_separate_and_timestamped() -> None:
     ) as dashboard_ws:
         dashboard_ws.receive_json()
         with client.websocket_connect(
-            f"/remote-access/sessions/{session_id}/agent/{TEST_AGENT_ID}?ticket={agent_ticket}"
+            f"/remote-access/sessions/{session_id}/agent/{TEST_AGENT_ID}?ticket={agent_ticket}&agent_token=test-input-agent-token"
         ) as agent_ws:
             agent_ws.receive_json()
             dashboard_ws.receive_json()
@@ -114,7 +117,7 @@ def test_authenticated_input_channel_is_separate_and_timestamped() -> None:
             ) as input_dashboard_ws:
                 assert input_dashboard_ws.receive_json()["type"] == "input_channel_ready"
                 with client.websocket_connect(
-                    f"/remote-access/sessions/{session_id}/agent/{TEST_AGENT_ID}?channel=input&token={input_token}"
+                    f"/remote-access/sessions/{session_id}/agent/{TEST_AGENT_ID}?channel=input&token={input_token}&agent_token=test-input-agent-token"
                 ) as input_agent_ws:
                     assert input_agent_ws.receive_json()["type"] == "input_channel_ready"
 

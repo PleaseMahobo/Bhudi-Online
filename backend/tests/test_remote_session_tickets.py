@@ -52,10 +52,13 @@ def _build_client() -> tuple[TestClient, User]:
             revoked=False,
             quarantined=False,
             command_timeout=300,
+            enrollment_token="test-ticket-agent-token",
         )
     )
     db.commit()
     db.close()
+    import app.database.session as db_session
+    db_session.SessionLocal = session_factory
 
     def override_get_db():
         session = session_factory()
@@ -94,7 +97,6 @@ def test_session_create_issues_purpose_scoped_tickets() -> None:
     assert payload["payload"]["input_token"] == payload["input_ticket"]
     assert payload["payload"]["agent_ticket"] == payload["agent_ticket"]
     assert payload["payload"]["dashboard_ticket"] == payload["dashboard_ticket"]
-    # Tickets must be distinct secrets.
     assert len({payload["dashboard_ticket"], payload["input_ticket"], payload["agent_ticket"]}) == 3
 
 
@@ -105,25 +107,22 @@ def test_dashboard_and_agent_require_matching_tickets() -> None:
     dashboard_ticket = payload["dashboard_ticket"]
     agent_ticket = payload["agent_ticket"]
 
-    # Wrong purpose: agent ticket on dashboard channel.
     with client.websocket_connect(
         f"/remote-access/sessions/{session_id}/dashboard?ticket={agent_ticket}"
     ) as ws:
         assert ws.receive_json()["type"] == "error"
 
-    # Wrong purpose: dashboard ticket on agent channel.
     with client.websocket_connect(
-        f"/remote-access/sessions/{session_id}/agent/{TEST_AGENT_ID}?ticket={dashboard_ticket}"
+        f"/remote-access/sessions/{session_id}/agent/{TEST_AGENT_ID}?ticket={dashboard_ticket}&agent_token=test-ticket-agent-token"
     ) as ws:
         assert ws.receive_json()["type"] == "error"
 
-    # Correct tickets succeed.
     with client.websocket_connect(
         f"/remote-access/sessions/{session_id}/dashboard?ticket={dashboard_ticket}"
     ) as ws:
         assert ws.receive_json()["type"] == "session_state"
     with client.websocket_connect(
-        f"/remote-access/sessions/{session_id}/agent/{TEST_AGENT_ID}?ticket={agent_ticket}"
+        f"/remote-access/sessions/{session_id}/agent/{TEST_AGENT_ID}?ticket={agent_ticket}&agent_token=test-ticket-agent-token"
     ) as ws:
         assert ws.receive_json()["type"] == "session_attached"
 
@@ -136,11 +135,11 @@ def test_agent_path_agent_id_mismatch_rejected() -> None:
     other_agent = "66666666-6666-4666-8666-66666666666f"
 
     with client.websocket_connect(
-        f"/remote-access/sessions/{session_id}/agent/{other_agent}?ticket={agent_ticket}"
+        f"/remote-access/sessions/{session_id}/agent/{other_agent}?ticket={agent_ticket}&agent_token=test-ticket-agent-token"
     ) as ws:
         msg = ws.receive_json()
         assert msg["type"] == "error"
-        assert "mismatch" in msg["message"].lower() or "not found" in msg["message"].lower()
+        assert "mismatch" in msg["message"].lower() or "not found" in msg["message"].lower() or "credential" in msg["message"].lower()
 
 
 def test_close_session_revokes_tickets() -> None:
@@ -160,7 +159,7 @@ def test_close_session_revokes_tickets() -> None:
     ) as ws:
         assert ws.receive_json()["type"] == "error"
     with client.websocket_connect(
-        f"/remote-access/sessions/{session_id}/agent/{TEST_AGENT_ID}?ticket={agent_ticket}"
+        f"/remote-access/sessions/{session_id}/agent/{TEST_AGENT_ID}?ticket={agent_ticket}&agent_token=test-ticket-agent-token"
     ) as ws:
         assert ws.receive_json()["type"] == "error"
     with client.websocket_connect(
@@ -171,7 +170,6 @@ def test_close_session_revokes_tickets() -> None:
 
 def test_expired_ticket_is_rejected() -> None:
     client, _ = _build_client()
-    # Issue a session with a 1-second TTL via manager for deterministic expiry.
     state = remote_session_manager.create_session(
         agent_id=TEST_AGENT_ID,
         session_type="desktop",
