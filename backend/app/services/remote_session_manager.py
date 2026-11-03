@@ -64,6 +64,35 @@ class SessionTicket:
     def revoke(self) -> None:
         self.revoked = True
 
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "token": self.token,
+            "purpose": self.purpose,
+            "expires_at": self.expires_at,
+            "revoked": self.revoked,
+            "bound_at": self.bound_at,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any] | None) -> SessionTicket | None:
+        if not data or not isinstance(data, dict):
+            return None
+        token = data.get("token")
+        purpose = data.get("purpose")
+        expires_at = data.get("expires_at")
+        if not token or purpose not in ("dashboard", "input", "agent") or expires_at is None:
+            return None
+        try:
+            return cls(
+                token=str(token),
+                purpose=purpose,  # type: ignore[arg-type]
+                expires_at=float(expires_at),
+                revoked=bool(data.get("revoked", False)),
+                bound_at=float(data["bound_at"]) if data.get("bound_at") is not None else None,
+            )
+        except (TypeError, ValueError):
+            return None
+
 
 @dataclass
 class RemoteSessionState:
@@ -79,6 +108,7 @@ class RemoteSessionState:
     dashboard_ticket: SessionTicket | None = None
     input_ticket: SessionTicket | None = None
     agent_ticket: SessionTicket | None = None
+    # Process-local only — never persisted.
     dashboard_connections: list[WebSocket] = field(default_factory=list)
     agent_connection: WebSocket | None = None
     dashboard_input_connections: list[WebSocket] = field(default_factory=list)
@@ -172,6 +202,91 @@ class RemoteSessionManager:
             expires_at=time.time() + max(1, int(ttl)),
         )
 
+    def _session_local(self):
+        """Resolve SessionLocal dynamically so tests can patch it."""
+        import app.database.session as db_session
+
+        return db_session.SessionLocal()
+
+    def _persist(self, state: RemoteSessionState) -> None:
+        """Write durable session fields to the database (best-effort)."""
+        try:
+            from app.models.remote_session import RemoteSessionRecord
+
+            db = self._session_local()
+        except Exception as exc:
+            print(f"[remote-session] persist skipped (no db): {exc}")
+            return
+        try:
+            row = db.get(RemoteSessionRecord, state.session_id)
+            if row is None:
+                row = RemoteSessionRecord(session_id=state.session_id)
+                db.add(row)
+            row.agent_id = state.agent_id
+            row.tenant_id = state.tenant_id
+            row.owner_user_id = state.owner_user_id
+            row.session_type = state.session_type
+            row.command_id = state.command_id
+            row.status = state.status
+            row.metadata_json = dict(state.metadata or {})
+            row.dashboard_ticket = state.dashboard_ticket.to_dict() if state.dashboard_ticket else None
+            row.input_ticket = state.input_ticket.to_dict() if state.input_ticket else None
+            row.agent_ticket = state.agent_ticket.to_dict() if state.agent_ticket else None
+            row.transcript = list(state.transcript)
+            row.created_at = state.created_at
+            db.commit()
+        except Exception as exc:
+            try:
+                db.rollback()
+            except Exception:
+                pass
+            print(f"[remote-session] persist failed session={state.session_id}: {exc}")
+        finally:
+            try:
+                db.close()
+            except Exception:
+                pass
+
+    def _hydrate(self, session_id: str) -> RemoteSessionState | None:
+        try:
+            from app.models.remote_session import RemoteSessionRecord
+
+            db = self._session_local()
+        except Exception:
+            return None
+        try:
+            row = db.get(RemoteSessionRecord, session_id)
+            if row is None:
+                return None
+            state = RemoteSessionState(
+                session_id=row.session_id,
+                agent_id=row.agent_id,
+                tenant_id=row.tenant_id or "",
+                owner_user_id=row.owner_user_id or "",
+                session_type=row.session_type,
+                command_id=row.command_id,
+                status=row.status or "pending",
+                metadata=dict(row.metadata_json or {}),
+                created_at=row.created_at or datetime.now(timezone.utc).isoformat(),
+                dashboard_ticket=SessionTicket.from_dict(row.dashboard_ticket),
+                input_ticket=SessionTicket.from_dict(row.input_ticket),
+                agent_ticket=SessionTicket.from_dict(row.agent_ticket),
+                # Connections and credential binding are process-local.
+                agent_credential_bound=False,
+            )
+            if row.transcript:
+                state.transcript.extend(row.transcript[-200:])
+            self._sessions[session_id] = state
+            return state
+        except Exception as exc:
+            print(f"[remote-session] hydrate failed session={session_id}: {exc}")
+            return None
+        finally:
+            try:
+                db.close()
+            except Exception:
+                pass
+
     def create_session(
         self,
         *,
@@ -198,10 +313,15 @@ class RemoteSessionManager:
             agent_ticket=self._issue_ticket("agent", ttl_seconds=ticket_ttl_seconds),
         )
         self._sessions[resolved_session_id] = state
+        self._persist(state)
         return state
 
     def get_session(self, session_id: UUID | str) -> RemoteSessionState | None:
-        return self._sessions.get(str(session_id))
+        key = str(session_id)
+        state = self._sessions.get(key)
+        if state is not None:
+            return state
+        return self._hydrate(key)
 
     def get_input_token(self, session_id: UUID | str) -> str | None:
         state = self.get_session(session_id)
@@ -234,6 +354,7 @@ class RemoteSessionManager:
         state.dashboard_ticket = self._issue_ticket("dashboard", ttl_seconds=ticket_ttl_seconds)
         state.input_ticket = self._issue_ticket("input", ttl_seconds=ticket_ttl_seconds)
         state.agent_ticket = self._issue_ticket("agent", ttl_seconds=ticket_ttl_seconds)
+        self._persist(state)
         return state
 
     def revoke_session_tickets(self, session_id: UUID | str) -> bool:
@@ -241,6 +362,7 @@ class RemoteSessionManager:
         if state is None:
             return False
         state.revoke_tickets()
+        self._persist(state)
         return True
 
     def attach_command(self, session_id: UUID | str, command_id: UUID | str) -> RemoteSessionState | None:
@@ -248,6 +370,7 @@ class RemoteSessionManager:
         if state is None:
             return None
         state.command_id = str(command_id)
+        self._persist(state)
         return state
 
     def _extract_ticket(self, websocket: WebSocket) -> str | None:
@@ -286,6 +409,8 @@ class RemoteSessionManager:
         if not state.bind_ticket(purpose, ticket_value):
             await self._reject(websocket, "Invalid or expired remote session ticket.")
             return None
+
+        self._persist(state)
 
         if is_input:
             state.dashboard_input_connections.append(websocket)
@@ -354,6 +479,7 @@ class RemoteSessionManager:
                 except Exception:
                     pass
             state.agent_input_connection = websocket
+            self._persist(state)
             await websocket.send_json(
                 {
                     "type": "input_channel_ready",
@@ -372,6 +498,7 @@ class RemoteSessionManager:
                 pass
         state.agent_connection = websocket
         state.status = "active"
+        self._persist(state)
         await websocket.send_json({"type": "session_attached", "session": state.snapshot()})
         await self._broadcast_to_dashboards(
             state, {"type": "agent_connected", "session": state.snapshot()}
@@ -393,6 +520,7 @@ class RemoteSessionManager:
             state.dashboard_connections.remove(websocket)
         if not was_input and not state.dashboard_connections and state.agent_connection is None:
             state.status = "idle"
+            self._persist(state)
 
     async def disconnect_agent(self, session_id: UUID | str, websocket: WebSocket | None = None) -> None:
         state = self.get_session(session_id)
@@ -410,6 +538,7 @@ class RemoteSessionManager:
             return
         if state.status != "closed":
             state.status = "waiting_for_agent"
+        self._persist(state)
         await self._broadcast_to_dashboards(
             state, {"type": "agent_disconnected", "session": state.snapshot()}
         )
@@ -459,6 +588,7 @@ class RemoteSessionManager:
         if message.get("type") == "close":
             state.status = "closed"
             state.revoke_tickets()
+            self._persist(state)
 
         if state.agent_connection is None:
             state.pending_dashboard_messages.append(envelope)
@@ -500,9 +630,11 @@ class RemoteSessionManager:
         event_type = str(message.get("type") or "")
         if event_type in {"ready", "desktop_ready"}:
             state.status = "active"
+            self._persist(state)
         elif event_type == "session_closed":
             state.status = "closed"
             state.revoke_tickets()
+            self._persist(state)
         if event_type.startswith("input_") or event_type == "input_channel_ready":
             return
         await self._broadcast_to_dashboards(state, message)
@@ -515,6 +647,7 @@ class RemoteSessionManager:
             return None
         state.status = "closed"
         state.revoke_tickets()
+        self._persist(state)
         message = {"type": "close", "reason": reason, "session_id": state.session_id}
         if state.agent_connection is not None:
             try:
