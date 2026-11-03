@@ -250,7 +250,6 @@ def test_parallel_tenant_sessions_do_not_cross_relay() -> None:
         assert session_a != session_b
         assert len({dash_a, agent_a, dash_b, agent_b}) == 4
 
-        # Exercise tenant A end-to-end, then tenant B, asserting foreign session_id drops.
         with client.websocket_connect(
             f"/remote-access/sessions/{session_a}/dashboard?ticket={dash_a}"
         ) as dash_ws_a:
@@ -296,8 +295,8 @@ def test_parallel_tenant_sessions_do_not_cross_relay() -> None:
         _reset_sessions()
 
 
-def test_worker_restart_rejects_stale_session_tickets() -> None:
-    """In-memory session manager loss (worker restart) must fail closed."""
+def test_worker_restart_rehydrates_session_from_db() -> None:
+    """Process memory loss rehydrates durable tickets; connections must re-bind."""
     client, user_a, _user_b, _tenant_a, _tenant_b = _build_two_tenant_client()
     try:
         _as_user(client, user_a)
@@ -308,26 +307,26 @@ def test_worker_restart_rejects_stale_session_tickets() -> None:
 
         remote_session_manager._sessions.clear()
 
-        assert remote_session_manager.get_session(session_id) is None
+        restored = remote_session_manager.get_session(session_id)
+        assert restored is not None
+        assert restored.agent_credential_bound is False
 
         with client.websocket_connect(
             f"/remote-access/sessions/{session_id}/dashboard?ticket={dashboard_ticket}"
         ) as ws:
             msg = ws.receive_json()
-            assert msg["type"] == "error"
-            assert any(
-                token in msg["message"].lower()
-                for token in ("not found", "expired", "different", "instance", "start remote")
-            )
+            assert msg["type"] == "session_state"
 
         with client.websocket_connect(
             f"/remote-access/sessions/{session_id}/agent/{TENANT_A_AGENT_ID}"
             f"?ticket={agent_ticket}&agent_token={AGENT_A_TOKEN}"
         ) as ws:
             msg = ws.receive_json()
-            assert msg["type"] == "error"
+            assert msg["type"] == "session_attached"
+            assert msg["session"]["agent_credential_bound"] is True
 
-        missing = client.get(f"/remote-access/sessions/{session_id}")
-        assert missing.status_code == 404
+        still = client.get(f"/remote-access/sessions/{session_id}")
+        assert still.status_code == 200
+        assert still.json()["session_id"] == session_id
     finally:
         _reset_sessions()
