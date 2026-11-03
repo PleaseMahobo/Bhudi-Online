@@ -41,6 +41,7 @@ from .msp import BillingPlan, Contact, Department, Organization, Site, Technicia
 from .notification import NotificationChannel, NotificationDelivery, NotificationTemplate
 from .password_reset_token import PasswordResetToken
 from .psa import PSAConnection, PSASyncEvent, PSATicketLink
+from .remote_session import RemoteSessionRecord
 from .stripe_webhook import StripeWebhookEvent
 from .profile import Profile
 from .refresh_token import RefreshToken
