@@ -36,6 +36,7 @@ from app.models.script import Script
 from app.models.script_task import ScriptTask
 from app.models.permission import Permission
 from app.models.refresh_token import RefreshToken
+from app.models.remote_session import RemoteSessionRecord
 from app.models.role import Role
 from app.models.role_permission import RolePermission
 from app.models.secret_entry import SecretEntry
@@ -84,6 +85,7 @@ def _bootstrap_metadata_for_engine() -> MetaData:
             Device,
             Agent,
             AgentCommand,
+            RemoteSessionRecord,
             Incident,
             Action,
             AutomationLog,
