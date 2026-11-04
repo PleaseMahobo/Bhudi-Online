@@ -57,6 +57,7 @@ export default function AdministratorPage() {
     } catch (e: any) {
       const message = e?.message || 'Administrator data could not be loaded';
       if (/403|forbidden|role rank/i.test(String(message))) setIsPlatformAdmin(false);
+      else if (isPlatformAdmin === null) setIsPlatformAdmin(true); // Show diagnostics instead of leaving the page stuck on authorization loading.
       setError(message);
     } finally {
       setBusy(false);
