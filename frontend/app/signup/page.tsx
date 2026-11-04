@@ -4,7 +4,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Sparkles } from 'lucide-react';
-import { loginUser, registerUser } from '@/lib/auth-client';
+import { registerUser } from '@/lib/auth-client';
 
 /**
  * Starter signup — create an account with profile details.
@@ -40,10 +40,7 @@ export default function SignupPage() {
         last_name: lastName.trim(),
         company: company.trim() || undefined,
       });
-      const tokens = await loginUser(email, password);
       if (typeof window !== 'undefined') {
-        localStorage.setItem('access_token', tokens.access_token);
-        if (tokens.refresh_token) localStorage.setItem('refresh_token', tokens.refresh_token);
         localStorage.setItem('bhudi_access_tier', 'starter');
         if (company.trim()) localStorage.setItem('bhudi_company', company.trim());
       }
