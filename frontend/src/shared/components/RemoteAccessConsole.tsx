@@ -38,12 +38,12 @@ export default function RemoteAccessConsole() {
   const [fitMode, setFitMode] = useState<'contain' | 'width'>('contain'); const [inputLatencyMs, setInputLatencyMs] = useState<number | null>(null);
   const selectedDevice = devices.find((d) => deviceAgentId(d) === agentId);
   const selectedAgentVersion = selectedDevice?.agent_version; const remoteDesktopCompatible = isVersionAtLeast(selectedAgentVersion);
-  const wsRef = useRef<WebSocket | null>(null); const inputWsRef = useRef<WebSocket | null>(null); const canvasRef = useRef<HTMLCanvasElement | null>(null); const frameSize = useRef({ w: 1280, h: 720 });
+  const wsRef = useRef<WebSocket | null>(null); const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null); const reconnectAttemptsRef = useRef(0); const inputWsRef = useRef<WebSocket | null>(null); const canvasRef = useRef<HTMLCanvasElement | null>(null); const frameSize = useRef({ w: 1280, h: 720 });
   const inputSeqRef = useRef(0); const pendingInputsRef = useRef(new Map<string, { browserSentAtMs: number; ackAtMs: number; windowsInputAtMs?: number }>());
   const loadDevices = useCallback(async () => { try { const rows = await getDevices().catch(() => []); setDevices(Array.isArray(rows) ? (rows as Device[]) : []); } catch { setDevices([]); } }, []);
   useEffect(() => { void loadDevices(); const id = setInterval(loadDevices, 15000); return () => clearInterval(id); }, [loadDevices]);
   useEffect(() => { const a = searchParams.get('agent') || searchParams.get('device') || ''; const m = searchParams.get('mode'); if (a) setAgentId(a); if (m === 'desktop' || m === 'terminal') setMode(m); }, [searchParams]);
-  useEffect(() => () => { inputWsRef.current?.close(); wsRef.current?.close(); }, []);
+  useEffect(() => () => { if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current); inputWsRef.current?.close(); wsRef.current?.close(); }, []);
   function deviceAgentId(d: Device): string { return String(d.agent_id || d.device_id || d.id || ''); }
   function sendInput(payload: Record<string, unknown>) {
     const ws = inputWsRef.current?.readyState === WebSocket.OPEN ? inputWsRef.current : wsRef.current?.readyState === WebSocket.OPEN ? wsRef.current : null;
@@ -89,9 +89,30 @@ export default function RemoteAccessConsole() {
       const data = await res.json().catch(() => ({}));
       if (!res.ok) { const detail = data.detail; const msg = (typeof detail === 'object' && detail?.message) || (typeof detail === 'string' && detail) || res.statusText || 'Failed to start'; if (res.status === 403 && (detail?.code === 'mfa_setup_required' || String(msg).toLowerCase().includes('mfa'))) throw new Error('Enable MFA at /mfa/setup before remote access.'); throw new Error(String(msg)); }
       const sid = data.session_id as string; if (!sid) throw new Error('No session_id returned'); setSessionId(sid); setStatus('Connecting…');
-      const streamUrl = `${wsBase()}/api/v1/remote-access/sessions/${sid}/dashboard`; const ws = new WebSocket(streamUrl); wsRef.current = ws;
-      ws.onopen = () => setStatus(mode === 'desktop' ? 'Video connected — waiting for agent' : 'Connected — waiting for agent'); ws.onerror = () => setError(`WebSocket error — check NEXT_PUBLIC_API_URL and agent online (stream: ${streamUrl})`); ws.onclose = () => { if (wsRef.current === ws) setStatus('Disconnected'); };
-      ws.onmessage = (ev) => { try { const msg = JSON.parse(String(ev.data)); const type = msg.type as string; if (type === 'desktop_ready') { setStatus('Desktop ready'); if (Array.isArray(msg.monitors)) setMonitors(msg.monitors); } else if (type === 'frame' || type === 'desktop_frame') { const b64 = msg.data || msg.frame || msg.image; if (typeof b64 === 'string') drawFrame(b64, msg.width, msg.height, msg.input_event_id); } else if (type === 'terminal_output' || type === 'stdout') { const chunk = String(msg.data || msg.output || msg.text || ''); if (chunk) setTermLog((prev) => (prev + chunk).slice(-20000)); } else if (type === 'error') setError(String(msg.message || msg.error || 'Remote session error')); else if (type === 'status') setStatus(String(msg.message || msg.status || 'Active')); } catch {} };
+      const dashboardTicket = data?.payload?.dashboard_ticket as string | undefined;
+      if (!dashboardTicket) throw new Error('Remote session did not return an authenticated dashboard credential.');
+      reconnectAttemptsRef.current = 0;
+      const connectDashboard = () => {
+        const streamUrl = wsBase() + '/api/v1/remote-access/sessions/' + sid + '/dashboard?ticket=' + encodeURIComponent(dashboardTicket);
+        const ws = new WebSocket(streamUrl); wsRef.current = ws;
+        ws.onopen = () => { reconnectAttemptsRef.current = 0; setStatus(mode === 'desktop' ? 'Video connected — waiting for agent' : 'Connected — waiting for agent'); setError(''); };
+        ws.onerror = () => setError('Remote desktop stream encountered a connection error; recovery will be attempted.');
+        ws.onclose = () => {
+          if (wsRef.current !== ws || !sessionId) return;
+          wsRef.current = null;
+          const attempt = reconnectAttemptsRef.current + 1;
+          if (attempt <= 5) {
+            reconnectAttemptsRef.current = attempt;
+            setStatus('Remote stream interrupted — reconnecting (' + attempt + '/5)…');
+            reconnectTimerRef.current = setTimeout(connectDashboard, Math.min(1000 * 2 ** (attempt - 1), 8000));
+          } else {
+            setStatus('Remote stream disconnected');
+            setError('Remote desktop stream could not be recovered. Start a new remote session.');
+          }
+        };
+        ws.onmessage = (ev) => { try { const msg = JSON.parse(String(ev.data)); const type = msg.type as string; if (type === 'desktop_ready') { setStatus('Desktop ready'); if (Array.isArray(msg.monitors)) setMonitors(msg.monitors); } else if (type === 'frame' || type === 'desktop_frame') { const b64 = msg.data || msg.frame || msg.image; if (typeof b64 === 'string') drawFrame(b64, msg.width, msg.height, msg.input_event_id); } else if (type === 'session_closed') { if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current); setStatus('Remote session closed'); } else if (type === 'terminal_output' || type === 'stdout') { const chunk = String(msg.data || msg.output || msg.text || ''); if (chunk) setTermLog((prev) => (prev + chunk).slice(-20000)); } else if (type === 'error') setError(String(msg.message || msg.error || 'Remote session error')); else if (type === 'status') setStatus(String(msg.message || msg.status || 'Active')); } catch {} };
+      };
+      connectDashboard();
       if (mode === 'desktop') {
         const inputToken = data?.payload?.input_token as string | undefined;
         if (!inputToken) throw new Error('Remote session did not return an authenticated input credential.');
@@ -104,7 +125,7 @@ export default function RemoteAccessConsole() {
       }
     } catch (e) { setError(e instanceof Error ? e.message : 'Failed to start session'); setStatus('Failed'); } finally { setBusy(false); }
   }
-  function stopSession() { inputWsRef.current?.close(); inputWsRef.current = null; wsRef.current?.close(); wsRef.current = null; setSessionId(null); setStatus('Disconnected'); setHasFrame(false); setInputLatencyMs(null); pendingInputsRef.current.clear(); }
+  function stopSession() { if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current); reconnectTimerRef.current = null; reconnectAttemptsRef.current = 0; inputWsRef.current?.close(); inputWsRef.current = null; wsRef.current?.close(); wsRef.current = null; setSessionId(null); setStatus('Disconnected'); setHasFrame(false); setInputLatencyMs(null); pendingInputsRef.current.clear(); }
   function sendTerm() { const cmd = termInput.trim(); if (!cmd) return; sendInput({ type: 'terminal_input', data: cmd + '\n' }); setTermLog((prev) => prev + `\n> ${cmd}\n`); setTermInput(''); }
   function canvasCoords(e: React.MouseEvent<HTMLCanvasElement>) { const canvas = canvasRef.current; if (!canvas) return { x: 0, y: 0 }; const rect = canvas.getBoundingClientRect(); if (rect.width <= 0 || rect.height <= 0) return { x: 0, y: 0 }; const localX = Math.max(0, Math.min(rect.width, e.clientX - rect.left)); const localY = Math.max(0, Math.min(rect.height, e.clientY - rect.top)); return { x: Number((localX / rect.width).toFixed(6)), y: Number((localY / rect.height).toFixed(6)) }; }
   function onCanvasMouseDown(e: React.MouseEvent<HTMLCanvasElement>) { e.preventDefault(); e.currentTarget.focus(); const { x, y } = canvasCoords(e); sendInput({ type: 'mousedown', button: mouseButtonName(e.button), x, y }); }
