@@ -237,7 +237,13 @@ func runDesktopSession(wsURL, sessionID, sessionMode, displayProtocol string, mo
 				frame["input_event_id"] = eventID
 				frame["windows_input_at_ms"] = windowsInputAt
 			}
-			_ = writeJSON(conn, frame)
+			if err := writeJSON(conn, frame); err != nil {
+				// Do not keep a failed WebSocket in the capture loop. A blocked or
+				// backpressured dashboard can otherwise make the remote desktop
+				// appear frozen while the Bhudi portal itself remains responsive.
+				fmt.Printf("[remote-desktop] frame write failed seq=%d: %v\\n", seq, err)
+				return
+			}
 		}
 	}
 }
