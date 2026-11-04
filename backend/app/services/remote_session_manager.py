@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import secrets
 import time
 from collections import deque
@@ -672,11 +673,15 @@ class RemoteSessionManager:
         return state
 
     async def _broadcast_to_dashboards(self, state: RemoteSessionState, message: dict[str, Any]) -> None:
+        # A slow/stalled browser must never block the agent's frame producer.
+        # Without a bounded send, one backpressured WebSocket can make the
+        # agent's 200ms capture loop stop progressing and present as a frozen
+        # desktop while the rest of the portal remains responsive.
         dead: list[WebSocket] = []
-        for websocket in state.dashboard_connections:
+        for websocket in list(state.dashboard_connections):
             try:
-                await websocket.send_json(message)
-            except Exception:
+                await asyncio.wait_for(websocket.send_json(message), timeout=5.0)
+            except (asyncio.TimeoutError, Exception):
                 dead.append(websocket)
         for websocket in dead:
             if websocket in state.dashboard_connections:
