@@ -31,16 +31,19 @@ export default function AdministratorPage() {
   const [tenantFilter, setTenantFilter] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  const isPlatformAdmin = String(user?.role || '').toLowerCase() === 'enterprise_admin';
+  const [isPlatformAdmin, setIsPlatformAdmin] = useState<boolean | null>(null);
 
   const load = useCallback(async () => {
-    if (!isPlatformAdmin) return;
+    if (!user) return;
     setBusy(true);
     setError(null);
     try {
-      const [o, u, t, r, p] = await Promise.all([
-        getAdminOverview(),
+      // The API is the authorization source of truth. The /me role field can
+      // be stale/legacy while RBAC grants are assigned through user_roles.
+      // Overview must succeed before we unlock platform administration UI.
+      const o = await getAdminOverview();
+      setIsPlatformAdmin(true);
+      const [u, t, r, p] = await Promise.all([
         getAdminUsers(),
         getAdminTenants(),
         getAdminRoles(),
@@ -52,11 +55,13 @@ export default function AdministratorPage() {
       setRoles(r.roles || []);
       setPermissions(p.permissions || []);
     } catch (e: any) {
-      setError(e?.message || 'Administrator data could not be loaded');
+      const message = e?.message || 'Administrator data could not be loaded';
+      if (/403|forbidden|role rank/i.test(String(message))) setIsPlatformAdmin(false);
+      setError(message);
     } finally {
       setBusy(false);
     }
-  }, [isPlatformAdmin]);
+  }, [user]);
 
   useEffect(() => {
     if (!loading && !user) router.replace('/login');
@@ -89,6 +94,10 @@ export default function AdministratorPage() {
 
   if (loading) return <ModuleShell title="Administrator"><div className="text-slate-500">Verifying administrator access…</div></ModuleShell>;
   if (!user) return null;
+
+  if (isPlatformAdmin === null) {
+    return <ModuleShell title="Administrator" subtitle="Platform administration"><div className="text-slate-500">Checking administrator authorization…</div><Err error={error} /></ModuleShell>;
+  }
 
   if (!isPlatformAdmin) {
     return (
