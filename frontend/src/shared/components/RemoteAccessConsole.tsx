@@ -98,7 +98,7 @@ export default function RemoteAccessConsole() {
         ws.onopen = () => { reconnectAttemptsRef.current = 0; setStatus(mode === 'desktop' ? 'Video connected — waiting for agent' : 'Connected — waiting for agent'); setError(''); };
         ws.onerror = () => setError('Remote desktop stream encountered a connection error; recovery will be attempted.');
         ws.onclose = () => {
-          if (wsRef.current !== ws || !sessionId) return;
+          if (wsRef.current !== ws) return;
           wsRef.current = null;
           const attempt = reconnectAttemptsRef.current + 1;
           if (attempt <= 5) {
