@@ -16,12 +16,13 @@ concurrency:
 jobs:
   changes:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     outputs:
       backend: ${{ steps.filter.outputs.backend }}
       frontend: ${{ steps.filter.outputs.frontend }}
       agent: ${{ steps.filter.outputs.agent }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dorny/paths-filter@v3
         id: filter
         with:
@@ -42,23 +43,41 @@ jobs:
     needs: changes
     if: needs.changes.outputs.backend == 'true' || needs.changes.outputs.agent == 'true' || github.event_name == 'push'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: backend
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
           cache: pip
           cache-dependency-path: backend/requirements.txt
       - name: Install deps
         run: |
-          pip install -U pip
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-          pip install pytest
+          python -m pip install -U pip
+          if [ -f requirements.txt ]; then python -m pip install -r requirements.txt; fi
+          python -m pip install pytest pytest-timeout
+
+      - name: P0 diagnostic — stop at first failure
+        id: p0-diagnostic
+        continue-on-error: true
+        run: |
+          python -m pytest -q -x --maxfail=1 --tb=long --timeout=180
+
       - name: Unit tests
-        run: pytest -q
+        run: |
+          python -m pytest -q --timeout=180 --junitxml=test-results.xml
+
+      - name: Upload pytest results
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: backend-pytest-results-${{ github.run_id }}
+          path: backend/test-results.xml
+          if-no-files-found: warn
+          retention-days: 14
 
   agent-e2e:
     needs: [changes, backend-test]
@@ -67,10 +86,11 @@ jobs:
       needs.backend-test.result == 'success' &&
       (needs.changes.outputs.agent == 'true' || needs.changes.outputs.backend == 'true')
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
           cache: pip
@@ -78,9 +98,9 @@ jobs:
       - name: Install deps
         working-directory: backend
         run: |
-          pip install -U pip
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-          pip install pytest requests
+          python -m pip install -U pip
+          if [ -f requirements.txt ]; then python -m pip install -r requirements.txt; fi
+          python -m pip install pytest requests
       - name: Real agent E2E (non-blocking)
         run: python agent/test_real_agent_e2e.py
 
@@ -88,12 +108,13 @@ jobs:
     needs: changes
     if: needs.changes.outputs.frontend == 'true' || github.event_name == 'push'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: "20"
       - name: Install
@@ -116,11 +137,12 @@ jobs:
       github.event_name == 'push' &&
       github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
       packages: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
       - name: Log in to GHCR
