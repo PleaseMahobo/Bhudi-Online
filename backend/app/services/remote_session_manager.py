@@ -26,6 +26,19 @@ _INPUT_EVENT_TYPES = frozenset(
     }
 )
 
+# High-volume media / ack events must not fill the session transcript.
+_NON_TRANSCRIPT_TYPES = frozenset(
+    {
+        "frame",
+        "desktop_frame",
+        "input_ack",
+        "input_channel_ready",
+        "session_attached",
+        "agent_connected",
+        "agent_disconnected",
+    }
+)
+
 
 def _now_ms() -> int:
     return time.time_ns() // 1_000_000
@@ -45,7 +58,7 @@ class RemoteSessionState:
     agent_connection: WebSocket | None = None
     dashboard_input_connections: list[WebSocket] = field(default_factory=list)
     agent_input_connection: WebSocket | None = None
-    transcript: deque[dict[str, Any]] = field(default_factory=lambda: deque(maxlen=200))
+    transcript: deque[dict[str, Any]] = field(default_factory=lambda: deque(maxlen=50))
     pending_dashboard_messages: deque[dict[str, Any]] = field(default_factory=lambda: deque(maxlen=100))
     pending_input_messages: deque[dict[str, Any]] = field(default_factory=lambda: deque(maxlen=100))
 
@@ -261,8 +274,12 @@ class RemoteSessionManager:
         if state is None:
             return
 
-        state.transcript.append(message)
         event_type = str(message.get("type") or "")
+        # Never buffer full JPEG frames (or high-rate acks) in the transcript —
+        # that was a major source of lag and memory growth during remote desktop.
+        if event_type not in _NON_TRANSCRIPT_TYPES and not event_type.startswith("input_"):
+            state.transcript.append(message)
+
         if event_type in {"ready", "desktop_ready"}:
             state.status = "active"
         elif event_type == "session_closed":

@@ -44,9 +44,9 @@ const (
 	desktopHookControl     = 0x0010
 	desktopJournalRecord   = 0x0020
 	desktopJournalPlayback = 0x0040
-	maximumAllowed         = 0x02000000
-	winstaAllAccess        = 0x37F
-	genericAll             = 0x10000000
+	maximumAllowed        = 0x02000000
+	winstaAllAccess       = 0x37F
+	genericAll            = 0x10000000
 )
 
 func utf16Ptr(s string) *uint16 {
@@ -92,6 +92,9 @@ func openNamedDesktop(name string, access uintptr) (uintptr, error) {
 // ensureInteractiveDesktop switches this OS thread onto WinSta0 and the best
 // available interactive desktop (input → Default → Winlogon → Screen-saver).
 // Callers MUST runtime.LockOSThread() for capture/input.
+//
+// Fast path: once attached successfully, skip re-open every frame (was a major
+// contributor to remote desktop lag).
 func ensureInteractiveDesktop() error {
 	desktopMu.Lock()
 	defer desktopMu.Unlock()
@@ -103,6 +106,17 @@ func ensureInteractiveDesktop() error {
 		desktopReady = false
 		desktopLastErr = "no active console session (WTSGetActiveConsoleSessionId=0xFFFFFFFF)"
 		return fmt.Errorf("%s", desktopLastErr)
+	}
+
+	// Already attached for this process — re-assert thread desktop only.
+	if desktopReady && attachedDesk != 0 {
+		ok, _, errSet := procSetThreadDesktop.Call(attachedDesk)
+		if ok != 0 {
+			return nil
+		}
+		// Fall through and re-open if SetThreadDesktop failed (session switch).
+		desktopReady = false
+		desktopLastErr = fmt.Sprintf("SetThreadDesktop(cached) failed: %v", errSet)
 	}
 
 	winstaName := utf16Ptr("WinSta0")
