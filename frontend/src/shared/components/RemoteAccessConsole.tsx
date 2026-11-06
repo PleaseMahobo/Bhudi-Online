@@ -10,7 +10,7 @@ import { useMfaGate } from '@/shared/hooks/useMfaGate';
 type Device = { id: string; device_id?: string; agent_id?: string; hostname?: string; name?: string; status?: string; agent_version?: string };
 type MonitorInfo = { index: number; name: string; width: number; height: number; primary?: boolean };
 const API_BASE = '';
-const MIN_REMOTE_DESKTOP_AGENT_VERSION = '2.2.11';
+const MIN_REMOTE_DESKTOP_AGENT_VERSION = '2.2.12';
 const MAX_PENDING_INPUTS = 256;
 
 function parseVersion(value?: string): number[] | null {
@@ -40,6 +40,7 @@ export default function RemoteAccessConsole() {
   const selectedAgentVersion = selectedDevice?.agent_version; const remoteDesktopCompatible = isVersionAtLeast(selectedAgentVersion);
   const wsRef = useRef<WebSocket | null>(null); const inputWsRef = useRef<WebSocket | null>(null); const canvasRef = useRef<HTMLCanvasElement | null>(null); const frameSize = useRef({ w: 1280, h: 720 });
   const inputSeqRef = useRef(0); const pendingInputsRef = useRef(new Map<string, { browserSentAtMs: number; ackAtMs: number; windowsInputAtMs?: number }>());
+  const frameBusyRef = useRef(false); const latestFrameRef = useRef(0); const lastMouseSentRef = useRef(0);
   const loadDevices = useCallback(async () => { try { const rows = await getDevices().catch(() => []); setDevices(Array.isArray(rows) ? (rows as Device[]) : []); } catch { setDevices([]); } }, []);
   useEffect(() => { void loadDevices(); const id = setInterval(loadDevices, 15000); return () => clearInterval(id); }, [loadDevices]);
   useEffect(() => { const a = searchParams.get('agent') || searchParams.get('device') || ''; const m = searchParams.get('mode'); if (a) setAgentId(a); if (m === 'desktop' || m === 'terminal') setMode(m); }, [searchParams]);
@@ -60,28 +61,39 @@ export default function RemoteAccessConsole() {
     }
     try { ws.send(JSON.stringify(message)); } catch { pendingInputsRef.current.delete(eventId); }
   }
-  function drawFrame(b64: string, w?: number, h?: number, inputEventId?: string) {
+  function drawFrame(b64: string, w?: number, h?: number, inputEventId?: string, seq?: number) {
     const canvas = canvasRef.current; if (!canvas) return;
+    const frameSeq = typeof seq === 'number' ? seq : ++latestFrameRef.current;
+    if (typeof seq === 'number') latestFrameRef.current = Math.max(latestFrameRef.current, seq);
+    // Drop frames while a previous decode/paint is still in flight — prevents multi-second backlog.
+    if (frameBusyRef.current) return;
+    frameBusyRef.current = true;
     const img = new Image();
     img.onload = () => {
-      const displayedAtMs = Date.now();
-      const width = w || img.width || frameSize.current.w; const height = h || img.height || frameSize.current.h;
-      frameSize.current = { w: width, h: height }; canvas.width = width; canvas.height = height;
-      const ctx = canvas.getContext('2d'); if (!ctx) return; ctx.drawImage(img, 0, 0, width, height); setHasFrame(true);
-      if (inputEventId) {
-        const timing = pendingInputsRef.current.get(inputEventId);
-        if (timing?.browserSentAtMs) {
-          setInputLatencyMs(Math.max(0, displayedAtMs - timing.browserSentAtMs));
-          pendingInputsRef.current.delete(inputEventId);
+      try {
+        if (frameSeq < latestFrameRef.current) return; // a newer frame arrived
+        const displayedAtMs = Date.now();
+        const width = w || img.width || frameSize.current.w; const height = h || img.height || frameSize.current.h;
+        frameSize.current = { w: width, h: height }; canvas.width = width; canvas.height = height;
+        const ctx = canvas.getContext('2d'); if (!ctx) return; ctx.drawImage(img, 0, 0, width, height); setHasFrame(true);
+        if (inputEventId) {
+          const timing = pendingInputsRef.current.get(inputEventId);
+          if (timing?.browserSentAtMs) {
+            setInputLatencyMs(Math.max(0, displayedAtMs - timing.browserSentAtMs));
+            pendingInputsRef.current.delete(inputEventId);
+          }
         }
+      } finally {
+        frameBusyRef.current = false;
       }
     };
+    img.onerror = () => { frameBusyRef.current = false; };
     img.src = b64.startsWith('data:') ? b64 : `data:image/jpeg;base64,${b64}`;
   }
   async function startSession() {
     if (mfaBlocked) { setError('Enable MFA at /mfa/setup before remote access.'); return; }
     if (!agentId) { setError('Select a device / agent first.'); return; }
-    setBusy(true); setError(''); setStatus('Queueing session…'); setHasFrame(false); setTermLog(''); setInputLatencyMs(null); inputSeqRef.current = 0; pendingInputsRef.current.clear(); inputWsRef.current?.close(); wsRef.current?.close();
+    setBusy(true); setError(''); setStatus('Queueing session…'); setHasFrame(false); setTermLog(''); setInputLatencyMs(null); inputSeqRef.current = 0; pendingInputsRef.current.clear(); frameBusyRef.current = false; latestFrameRef.current = 0; inputWsRef.current?.close(); wsRef.current?.close();
     try {
       const path = mode === 'desktop' ? '/api/v1/remote-access/desktop' : '/api/v1/remote-access/terminal';
       const body = mode === 'desktop' ? { agent_id: agentId, session_mode: 'control', display_protocol: 'native', monitor_index: monitorIndex } : { agent_id: agentId, shell };
@@ -91,7 +103,7 @@ export default function RemoteAccessConsole() {
       const sid = data.session_id as string; if (!sid) throw new Error('No session_id returned'); setSessionId(sid); setStatus('Connecting…');
       const streamUrl = `${wsBase()}/api/v1/remote-access/sessions/${sid}/dashboard`; const ws = new WebSocket(streamUrl); wsRef.current = ws;
       ws.onopen = () => setStatus(mode === 'desktop' ? 'Video connected — waiting for agent' : 'Connected — waiting for agent'); ws.onerror = () => setError(`WebSocket error — check NEXT_PUBLIC_API_URL and agent online (stream: ${streamUrl})`); ws.onclose = () => { if (wsRef.current === ws) setStatus('Disconnected'); };
-      ws.onmessage = (ev) => { try { const msg = JSON.parse(String(ev.data)); const type = msg.type as string; if (type === 'desktop_ready') { setStatus('Desktop ready'); if (Array.isArray(msg.monitors)) setMonitors(msg.monitors); } else if (type === 'frame' || type === 'desktop_frame') { const b64 = msg.data || msg.frame || msg.image; if (typeof b64 === 'string') drawFrame(b64, msg.width, msg.height, msg.input_event_id); } else if (type === 'terminal_output' || type === 'stdout') { const chunk = String(msg.data || msg.output || msg.text || ''); if (chunk) setTermLog((prev) => (prev + chunk).slice(-20000)); } else if (type === 'error') setError(String(msg.message || msg.error || 'Remote session error')); else if (type === 'status') setStatus(String(msg.message || msg.status || 'Active')); } catch {} };
+      ws.onmessage = (ev) => { try { const msg = JSON.parse(String(ev.data)); const type = msg.type as string; if (type === 'desktop_ready') { setStatus('Desktop ready'); if (Array.isArray(msg.monitors)) setMonitors(msg.monitors); } else if (type === 'frame' || type === 'desktop_frame') { const b64 = msg.data || msg.frame || msg.image; if (typeof b64 === 'string') drawFrame(b64, msg.width, msg.height, msg.input_event_id, typeof msg.seq === 'number' ? msg.seq : undefined); } else if (type === 'terminal_output' || type === 'stdout') { const chunk = String(msg.data || msg.output || msg.text || ''); if (chunk) setTermLog((prev) => (prev + chunk).slice(-20000)); } else if (type === 'error') setError(String(msg.message || msg.error || 'Remote session error')); else if (type === 'status') setStatus(String(msg.message || msg.status || 'Active')); } catch {} };
       if (mode === 'desktop') {
         const inputToken = data?.payload?.input_token as string | undefined;
         if (!inputToken) throw new Error('Remote session did not return an authenticated input credential.');
@@ -104,13 +116,13 @@ export default function RemoteAccessConsole() {
       }
     } catch (e) { setError(e instanceof Error ? e.message : 'Failed to start session'); setStatus('Failed'); } finally { setBusy(false); }
   }
-  function stopSession() { inputWsRef.current?.close(); inputWsRef.current = null; wsRef.current?.close(); wsRef.current = null; setSessionId(null); setStatus('Disconnected'); setHasFrame(false); setInputLatencyMs(null); pendingInputsRef.current.clear(); }
+  function stopSession() { inputWsRef.current?.close(); inputWsRef.current = null; wsRef.current?.close(); wsRef.current = null; setSessionId(null); setStatus('Disconnected'); setHasFrame(false); setInputLatencyMs(null); pendingInputsRef.current.clear(); frameBusyRef.current = false; }
   function sendTerm() { const cmd = termInput.trim(); if (!cmd) return; sendInput({ type: 'terminal_input', data: cmd + '\n' }); setTermLog((prev) => prev + `\n> ${cmd}\n`); setTermInput(''); }
   function canvasCoords(e: React.MouseEvent<HTMLCanvasElement>) { const canvas = canvasRef.current; if (!canvas) return { x: 0, y: 0 }; const rect = canvas.getBoundingClientRect(); if (rect.width <= 0 || rect.height <= 0) return { x: 0, y: 0 }; const localX = Math.max(0, Math.min(rect.width, e.clientX - rect.left)); const localY = Math.max(0, Math.min(rect.height, e.clientY - rect.top)); return { x: Number((localX / rect.width).toFixed(6)), y: Number((localY / rect.height).toFixed(6)) }; }
   function onCanvasMouseDown(e: React.MouseEvent<HTMLCanvasElement>) { e.preventDefault(); e.currentTarget.focus(); const { x, y } = canvasCoords(e); sendInput({ type: 'mousedown', button: mouseButtonName(e.button), x, y }); }
   function onCanvasMouseUp(e: React.MouseEvent<HTMLCanvasElement>) { e.preventDefault(); const { x, y } = canvasCoords(e); sendInput({ type: 'mouseup', button: mouseButtonName(e.button), x, y }); }
   function onCanvasClick(e: React.MouseEvent<HTMLCanvasElement>) { e.preventDefault(); }
-  function onCanvasMouseMove(e: React.MouseEvent<HTMLCanvasElement>) { const { x, y } = canvasCoords(e); sendInput({ type: 'mousemove', x, y }); }
+  function onCanvasMouseMove(e: React.MouseEvent<HTMLCanvasElement>) { const now = Date.now(); if (now - lastMouseSentRef.current < 40) return; lastMouseSentRef.current = now; const { x, y } = canvasCoords(e); sendInput({ type: 'mousemove', x, y }); }
   function onCanvasWheel(e: React.WheelEvent<HTMLCanvasElement>) { e.preventDefault(); const { x, y } = canvasCoords(e); sendInput({ type: 'wheel', x, y, deltaY: e.deltaY }); }
   function onCanvasKeyDown(e: React.KeyboardEvent<HTMLCanvasElement>) { e.preventDefault(); sendInput({ type: 'keydown', key: e.key, code: e.code }); }
   function onCanvasKeyUp(e: React.KeyboardEvent<HTMLCanvasElement>) { e.preventDefault(); sendInput({ type: 'keyup', key: e.key, code: e.code }); }
