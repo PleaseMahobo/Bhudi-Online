@@ -35,10 +35,10 @@ def test_login_uses_supabase_identity_and_requires_mfa(monkeypatch):
     def fail_if_local_password_is_used(*args, **kwargs):
         raise AssertionError("Bhudi local password authentication must not run")
 
-    app.dependency_overrides[get_supabase_user] = override
+    monkeypatch.setattr("app.api.v1.endpoints.auth.resolve_supabase_user", lambda db, token: user)
     monkeypatch.setattr(AuthService, "authenticate", fail_if_local_password_is_used)
     try:
-        response = TestClient(app).post("/api/v1/auth/login", json={})
+        response = TestClient(app).post("/api/v1/auth/login", json={}, headers={"Authorization": "Bearer supabase-test-token"})
         assert response.status_code == 403
         assert response.json()["detail"] == "mfa_required"
     finally:
@@ -76,13 +76,18 @@ def test_login_promotes_supabase_session_after_valid_mfa(monkeypatch):
         def verify_code(self, user, code):
             return code == "123456"
 
-    app.dependency_overrides[get_supabase_user] = override
+    monkeypatch.setattr("app.api.v1.endpoints.auth.resolve_supabase_user", lambda db, token: user)
     monkeypatch.setattr(AuthService, "login", fake_login)
     monkeypatch.setattr("app.services.mfa_service.MfaService", FakeMfaService)
     try:
-        response = TestClient(app).post("/api/v1/auth/login", json={"mfa_code": "123456"})
+        response = TestClient(app).post("/api/v1/auth/login", json={"mfa_code": "123456"}, headers={"Authorization": "Bearer supabase-test-token"})
         assert response.status_code == 200
         assert response.json()["access_token"] == "bhudi-access"
         assert "access_token=bhudi-access" in response.headers.get("set-cookie", "")
     finally:
         app.dependency_overrides.pop(get_supabase_user, None)
+
+
+def test_login_rejects_missing_supabase_bearer_token():
+    response = TestClient(app).post("/api/v1/auth/login", json={"mfa_code": "123456"})
+    assert response.status_code == 401

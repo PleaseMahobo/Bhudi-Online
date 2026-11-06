@@ -56,9 +56,9 @@ jobs:
         run: |
           pip install -U pip
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-          pip install pytest
-      - name: Unit tests
-        run: pytest -q
+          pip install pytest pytest-timeout
+      - name: Unit tests (verbose diagnostics, 3-minute per-test limit)
+        run: pytest -vv --tb=long --durations=25 --timeout=180
 
   agent-e2e:
     needs: [changes, backend-test]

@@ -469,9 +469,13 @@ async def agent_session_stream(websocket: WebSocket, session_id: str, agent_id: 
     session = await remote_session_manager.connect_agent(session_id, agent_id, websocket)
     if session is None:
         return
+    is_input_channel = websocket.query_params.get("channel") == "input"
     try:
         while True:
             message = await websocket.receive_json()
-            await remote_session_manager.relay_agent_message(session_id, message)
+            if is_input_channel:
+                await remote_session_manager.relay_agent_input_message(session_id, message)
+            else:
+                await remote_session_manager.relay_agent_message(session_id, message)
     except WebSocketDisconnect:
         await remote_session_manager.disconnect_agent(session_id, websocket)
