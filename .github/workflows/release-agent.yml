@@ -16,7 +16,7 @@ permissions:
   contents: write
 
 env:
-  AGENT_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || '2.2.11' }}
+  AGENT_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || '2.2.13' }}
 
 jobs:
   build-windows:
@@ -33,7 +33,7 @@ jobs:
         shell: pwsh
         run: |
           $ver = "${{ env.AGENT_VERSION }}".TrimStart('agent-v')
-          if (-not $ver) { $ver = "2.2.11" }
+          if (-not $ver) { $ver = "2.2.13" }
           New-Item -ItemType Directory -Force dist | Out-Null
           $ld = "-s -w -X main.agentVersion=$ver"
           $env:CGO_ENABLED = "0"
@@ -151,7 +151,7 @@ jobs:
         run: |
           VER="${{ env.AGENT_VERSION }}"
           VER="${VER#agent-v}"
-          [ -n "$VER" ] || VER=2.2.11
+          [ -n "$VER" ] || VER=2.2.13
           mkdir -p dist
           go mod download
           CGO_ENABLED=0 GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} \
@@ -180,7 +180,7 @@ jobs:
           tag_name: agent-native-latest
           name: Bhudi Native Agent (enterprise)
           body: |
-            ## Enterprise native agent **2.2.11**
+            ## Enterprise native agent **2.2.13**
 
             | File | Platform |
             |------|----------|
@@ -190,6 +190,8 @@ jobs:
             | `bhudi-support.exe` | Windows tray / tickets |
             | `bhudi-agent-linux-*` | Linux |
             | `bhudi-agent-darwin-*` | macOS |
+
+            Remote desktop: adaptive JPEG FPS, write deadlines, backpressure recovery.
 
             ### Silent MSI
             ```bat
@@ -203,6 +205,8 @@ jobs:
 
             ### Customer EXE
             Download from the Bhudi portal — token is injected automatically.
+
+            After install: `bhudi-agent.exe version` must print **2.2.13**.
           files: release/*
           make_latest: true
         env:

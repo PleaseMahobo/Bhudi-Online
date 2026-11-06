@@ -66,7 +66,7 @@ def installer_info(
         logger.exception("enrollment token for installer info failed")
 
     return {
-        "version": os.getenv("BHUDI_AGENT_VERSION", "2.2.9"),
+        "version": os.getenv("BHUDI_AGENT_VERSION", "2.2.13"),
         "release_tag": "agent-native-latest",
         "server_url": os.getenv(
             "BHUDI_PUBLIC_API_URL",
@@ -87,8 +87,9 @@ def installer_info(
         },
         "notes": [
             "Prefer MSI or setup EXE for agent + tray in one install.",
-            "After install, confirm: bhudi-agent.exe version → 2.2.9",
+            "After install, confirm: bhudi-agent.exe version → 2.2.13",
             "Remote desktop requires a console user logged on to the PC.",
+            "Portal serves binaries from GitHub release tag agent-native-latest (not live main source).",
         ],
     }
 
