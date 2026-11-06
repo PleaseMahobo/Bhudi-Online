@@ -56,9 +56,9 @@ jobs:
         run: |
           pip install -U pip
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-          pip install pytest
-      - name: Unit tests
-        run: pytest -q
+          pip install pytest pytest-timeout
+      - name: Monitoring tests (P0)
+        run: python -m pytest -q tests/test_monitoring_aws.py tests/test_monitoring_catalog.py tests/test_monitoring_persistence.py --tb=long --timeout=180
 
   agent-e2e:
     needs: [changes, backend-test]
