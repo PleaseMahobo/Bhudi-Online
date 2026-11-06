@@ -4,10 +4,13 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"image"
 	"image/jpeg"
+	"net"
 	"net/url"
+	"os"
 	"runtime"
 	"strings"
 	"sync"
@@ -18,10 +21,14 @@ import (
 )
 
 // Interactive remote desktop defaults tuned for low latency over WebSocket JPEG.
+// Keep FPS moderate: too high fills the TCP/WebSocket buffer and freezes the stream.
 const (
-	desktopFrameInterval = 66 * time.Millisecond // ~15 FPS target
-	desktopMaxWidth      = 1280                  // was 2560 — heavy encode/transfer
-	desktopJPEGQuality   = 40                    // was 55
+	desktopFrameIntervalMin = 80 * time.Millisecond  // ~12.5 FPS ceiling
+	desktopFrameIntervalMax = 250 * time.Millisecond // ~4 FPS under backpressure
+	desktopFrameInterval    = 100 * time.Millisecond // ~10 FPS default
+	desktopMaxWidth         = 1280
+	desktopJPEGQuality      = 40
+	desktopWriteTimeout     = 1500 * time.Millisecond
 )
 
 type desktopInputTiming struct {
@@ -64,7 +71,7 @@ func startRemoteDesktop(serverURL, agentID string, command map[string]any) map[s
 	if sessionMode == "control" && inputToken == "" {
 		return resultErr("input_token is required for interactive remote desktop")
 	}
-	monitorIndex := -1 // full virtual desktop (extended displays)
+	monitorIndex := -1
 	if v, ok := payload["monitor_index"]; ok {
 		switch n := v.(type) {
 		case float64:
@@ -124,6 +131,22 @@ func inputWSURL(wsURL, token string) string {
 	return wsURL + "?channel=input&token=" + url.QueryEscape(token)
 }
 
+func isTimeoutErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, os.ErrDeadlineExceeded) {
+		return true
+	}
+	var ne net.Error
+	if errors.As(err, &ne) && ne.Timeout() {
+		return true
+	}
+	// gorilla often wraps deadline messages as plain errors
+	s := strings.ToLower(err.Error())
+	return strings.Contains(s, "timeout") || strings.Contains(s, "deadline exceeded") || strings.Contains(s, "i/o timeout")
+}
+
 func runDesktopSession(wsURL, sessionID, sessionMode, displayProtocol string, monitorIndex int, inputToken string) {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
@@ -141,6 +164,12 @@ func runDesktopSession(wsURL, sessionID, sessionMode, displayProtocol string, mo
 	}
 	defer conn.Close()
 
+	// Keepalive so middleboxes don't idle-kill the video socket.
+	conn.SetPongHandler(func(string) error {
+		_ = conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+		return nil
+	})
+
 	_ = conn.SetReadDeadline(time.Now().Add(30 * time.Second))
 	_, msg, err := conn.ReadMessage()
 	if err != nil {
@@ -148,7 +177,7 @@ func runDesktopSession(wsURL, sessionID, sessionMode, displayProtocol string, mo
 		return
 	}
 	fmt.Println("[remote-desktop] attached:", string(msg)[:min(120, len(msg))])
-	_ = conn.SetReadDeadline(time.Time{})
+	_ = conn.SetReadDeadline(time.Now().Add(60 * time.Second))
 
 	if err := ensureInteractiveDesktop(); err != nil {
 		_ = writeJSON(conn, map[string]any{
@@ -198,9 +227,31 @@ func runDesktopSession(wsURL, sessionID, sessionMode, displayProtocol string, mo
 		go runDesktopInputChannel(inputWSURL(wsURL, inputToken), sessionID, inputToken, nativeW, nativeH, ox, oy, inputTiming, closeStop)
 	}
 
+	// Ping ticker keeps the link alive through proxies.
+	go func() {
+		t := time.NewTicker(20 * time.Second)
+		defer t.Stop()
+		for {
+			select {
+			case <-stop:
+				return
+			case <-t.C:
+				_ = conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+				err := conn.WriteControl(websocket.PingMessage, []byte("bhudi"), time.Now().Add(5*time.Second))
+				_ = conn.SetWriteDeadline(time.Time{})
+				if err != nil {
+					fmt.Println("[remote-desktop] ping:", err)
+					closeStop()
+					return
+				}
+			}
+		}
+	}()
+
 	go func() {
 		defer closeStop()
 		for {
+			_ = conn.SetReadDeadline(time.Now().Add(60 * time.Second))
 			_, raw, err := conn.ReadMessage()
 			if err != nil {
 				return
@@ -219,15 +270,16 @@ func runDesktopSession(wsURL, sessionID, sessionMode, displayProtocol string, mo
 		}
 	}()
 
-	// Serialize writes; if a previous frame is still flushing, skip capture (drop stale frames).
 	var writeBusy atomic.Bool
 	var writeMu sync.Mutex
 
-	ticker := time.NewTicker(desktopFrameInterval)
+	interval := desktopFrameInterval
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	seq := 0
 	failStreak := 0
 	skipped := 0
+	slowStreak := 0
 	for {
 		select {
 		case <-stop:
@@ -236,6 +288,7 @@ func runDesktopSession(wsURL, sessionID, sessionMode, displayProtocol string, mo
 		case <-ticker.C:
 			if writeBusy.Load() {
 				skipped++
+				// If stuck busy longer than write timeout, force-clear so we can recover.
 				continue
 			}
 			img, err := captureScreenRegion(monitorIndex)
@@ -265,15 +318,56 @@ func runDesktopSession(wsURL, sessionID, sessionMode, displayProtocol string, mo
 				frame["input_event_id"] = eventID
 				frame["windows_input_at_ms"] = windowsInputAt
 			}
+
 			writeBusy.Store(true)
 			writeMu.Lock()
+			startWrite := time.Now()
+			_ = conn.SetWriteDeadline(time.Now().Add(desktopWriteTimeout))
 			err = writeJSON(conn, frame)
+			_ = conn.SetWriteDeadline(time.Time{})
 			writeMu.Unlock()
 			writeBusy.Store(false)
+			writeDur := time.Since(startWrite)
+
 			if err != nil {
+				if isTimeoutErr(err) {
+					slowStreak++
+					skipped++
+					// Back off FPS under congestion instead of ending the session.
+					if interval < desktopFrameIntervalMax {
+						interval += 40 * time.Millisecond
+						if interval > desktopFrameIntervalMax {
+							interval = desktopFrameIntervalMax
+						}
+						ticker.Reset(interval)
+						fmt.Println("[remote-desktop] write timeout — adaptive interval", interval)
+					}
+					continue
+				}
 				fmt.Println("[remote-desktop] write frame:", err)
 				closeStop()
 				return
+			}
+
+			// Adaptive: slow writes → lower FPS; healthy writes → climb back toward default.
+			if writeDur > 400*time.Millisecond {
+				slowStreak++
+				if interval < desktopFrameIntervalMax {
+					interval += 20 * time.Millisecond
+					if interval > desktopFrameIntervalMax {
+						interval = desktopFrameIntervalMax
+					}
+					ticker.Reset(interval)
+				}
+			} else if writeDur < 80*time.Millisecond && slowStreak > 0 {
+				slowStreak--
+				if interval > desktopFrameIntervalMin && slowStreak == 0 {
+					interval -= 10 * time.Millisecond
+					if interval < desktopFrameIntervalMin {
+						interval = desktopFrameIntervalMin
+					}
+					ticker.Reset(interval)
+				}
 			}
 		}
 	}
@@ -357,7 +451,10 @@ func runDesktopInputChannel(wsURL, sessionID, inputToken string, frameW, frameH,
 			"ack_sent_at_ms":         time.Now().UnixMilli(),
 			"input_type":             strVal(ev["type"]),
 		}
-		if err := writeJSON(conn, ack); err != nil {
+		_ = conn.SetWriteDeadline(time.Now().Add(3 * time.Second))
+		err = writeJSON(conn, ack)
+		_ = conn.SetWriteDeadline(time.Time{})
+		if err != nil {
 			closeSession()
 			return
 		}
@@ -365,8 +462,6 @@ func runDesktopInputChannel(wsURL, sessionID, inputToken string, frameW, frameH,
 	}
 }
 
-// maybeScale downscales with nearest-neighbor using stride-friendly loops.
-// Avoids the previous per-pixel image.At/Set path which was extremely slow at 2560px.
 func maybeScale(img image.Image, maxWidth int) image.Image {
 	b := img.Bounds()
 	w, h := b.Dx(), b.Dy()
@@ -379,7 +474,6 @@ func maybeScale(img image.Image, maxWidth int) image.Image {
 		nh = 1
 	}
 
-	// Fast path for *image.RGBA (BitBlt capture path).
 	if src, ok := img.(*image.RGBA); ok {
 		dst := image.NewRGBA(image.Rect(0, 0, nw, nh))
 		for y := 0; y < nh; y++ {

@@ -8,8 +8,8 @@ import (
 	"strings"
 )
 
-// Set at link time: -ldflags "-X main.agentVersion=2.2.12"
-var agentVersion = "2.2.12"
+// Set at link time: -ldflags "-X main.agentVersion=2.2.13"
+var agentVersion = "2.2.13"
 
 func main() {
 	if len(os.Args) < 2 {
@@ -89,26 +89,6 @@ Commands:
   run             [-server URL]   Foreground run (debug)
   desktop-worker  [-server URL]   Internal interactive-session desktop capture worker
   version
-
-Windows (Administrator):
-  bhudi-agent.exe install -server https://api.example.com
-  bhudi-agent.exe upgrade -server https://api.example.com
-  bhudi-agent.exe uninstall
-
-Linux (prefer sudo for boot-wide systemd unit):
-  sudo ./bhudi-agent-linux-amd64 install -server https://api.example.com
-
-macOS:
-  sudo ./bhudi-agent-darwin-arm64 install -server https://api.example.com
-
-Install log:
-  Windows: %ProgramData%\\Bhudi\\Agent\\install.log
-  Linux:   /var/log/bhudi-agent-install.log (root) or ~/.local/share/bhudi-agent/install.log
-  macOS:   ~/Library/Logs/Bhudi/install.log
-
-MSI / enterprise deploy:
-  Use bhudi-agent-setup.msi (per-machine, auto-start service) from the Bhudi portal or
-  GitHub release tag agent-native-latest.
 `)
 	default:
 		runAgent(parseRunFlags(os.Args[1:]))
