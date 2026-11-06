@@ -11,9 +11,17 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
+)
+
+// Interactive remote desktop defaults tuned for low latency over WebSocket JPEG.
+const (
+	desktopFrameInterval = 66 * time.Millisecond // ~15 FPS target
+	desktopMaxWidth      = 1280                  // was 2560 — heavy encode/transfer
+	desktopJPEGQuality   = 40                    // was 55
 )
 
 type desktopInputTiming struct {
@@ -84,6 +92,9 @@ func startRemoteDesktop(serverURL, agentID string, command map[string]any) map[s
 				"input_stream_path": "/api/v1/remote-access/sessions/" + sessionID + "/dashboard?channel=input",
 				"session_type": "desktop", "session_mode": sessionMode,
 				"display_protocol": displayProtocol, "monitor_index": monitorIndex,
+				"frame_interval_ms": int(desktopFrameInterval / time.Millisecond),
+				"max_width":         desktopMaxWidth,
+				"jpeg_quality":      desktopJPEGQuality,
 			},
 		}
 	}
@@ -99,6 +110,9 @@ func startRemoteDesktop(serverURL, agentID string, command map[string]any) map[s
 			"input_stream_path": "/api/v1/remote-access/sessions/" + sessionID + "/dashboard?channel=input",
 			"session_type": "desktop", "session_mode": sessionMode,
 			"display_protocol": displayProtocol, "monitor_index": monitorIndex,
+			"frame_interval_ms": int(desktopFrameInterval / time.Millisecond),
+			"max_width":         desktopMaxWidth,
+			"jpeg_quality":      desktopJPEGQuality,
 		},
 	}
 }
@@ -165,8 +179,13 @@ func runDesktopSession(wsURL, sessionID, sessionMode, displayProtocol string, mo
 		"monitor_index": monitorIndex, "origin_x": ox, "origin_y": oy,
 		"encoding": "jpeg", "monitors": mons,
 		"agent_version": agentVersion, "console_session": activeConsoleSessionID(),
+		"frame_interval_ms": int(desktopFrameInterval / time.Millisecond),
+		"max_width":         desktopMaxWidth,
+		"jpeg_quality":      desktopJPEGQuality,
 	})
-	fmt.Printf("[remote-desktop] monitor=%d origin=(%d,%d) size=%dx%d count=%d version=%s\n", monitorIndex, ox, oy, fw, fh, len(mons), agentVersion)
+	fmt.Printf("[remote-desktop] monitor=%d origin=(%d,%d) size=%dx%d count=%d version=%s fps~%d maxw=%d q=%d\n",
+		monitorIndex, ox, oy, fw, fh, len(mons), agentVersion,
+		int(time.Second/desktopFrameInterval), desktopMaxWidth, desktopJPEGQuality)
 
 	stop := make(chan struct{})
 	var once sync.Once
@@ -200,16 +219,25 @@ func runDesktopSession(wsURL, sessionID, sessionMode, displayProtocol string, mo
 		}
 	}()
 
-	ticker := time.NewTicker(200 * time.Millisecond)
+	// Serialize writes; if a previous frame is still flushing, skip capture (drop stale frames).
+	var writeBusy atomic.Bool
+	var writeMu sync.Mutex
+
+	ticker := time.NewTicker(desktopFrameInterval)
 	defer ticker.Stop()
 	seq := 0
 	failStreak := 0
+	skipped := 0
 	for {
 		select {
 		case <-stop:
-			fmt.Println("[remote-desktop] session ended", sessionID)
+			fmt.Println("[remote-desktop] session ended", sessionID, "skipped_frames", skipped)
 			return
 		case <-ticker.C:
+			if writeBusy.Load() {
+				skipped++
+				continue
+			}
 			img, err := captureScreenRegion(monitorIndex)
 			if err != nil {
 				failStreak++
@@ -219,9 +247,9 @@ func runDesktopSession(wsURL, sessionID, sessionMode, displayProtocol string, mo
 				continue
 			}
 			failStreak = 0
-			img = maybeScale(img, 2560)
+			img = maybeScale(img, desktopMaxWidth)
 			var buf bytes.Buffer
-			if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: 55}); err != nil {
+			if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: desktopJPEGQuality}); err != nil {
 				continue
 			}
 			bw, bh := img.Bounds().Dx(), img.Bounds().Dy()
@@ -237,7 +265,16 @@ func runDesktopSession(wsURL, sessionID, sessionMode, displayProtocol string, mo
 				frame["input_event_id"] = eventID
 				frame["windows_input_at_ms"] = windowsInputAt
 			}
-			_ = writeJSON(conn, frame)
+			writeBusy.Store(true)
+			writeMu.Lock()
+			err = writeJSON(conn, frame)
+			writeMu.Unlock()
+			writeBusy.Store(false)
+			if err != nil {
+				fmt.Println("[remote-desktop] write frame:", err)
+				closeStop()
+				return
+			}
 		}
 	}
 }
@@ -310,15 +347,15 @@ func runDesktopInputChannel(wsURL, sessionID, inputToken string, frameW, frameH,
 		windowsInputAt := time.Now().UnixMilli()
 		timing.set(eventID, windowsInputAt)
 		ack := map[string]any{
-			"type": "input_ack",
-			"session_id": sessionID,
-			"event_id": eventID,
-			"browser_sent_at_ms": ev["browser_sent_at_ms"],
+			"type":                   "input_ack",
+			"session_id":             sessionID,
+			"event_id":               eventID,
+			"browser_sent_at_ms":     ev["browser_sent_at_ms"],
 			"backend_received_at_ms": ev["backend_received_at_ms"],
-			"agent_received_at_ms": agentReceivedAt,
-			"windows_input_at_ms": windowsInputAt,
-			"ack_sent_at_ms": time.Now().UnixMilli(),
-			"input_type": strVal(ev["type"]),
+			"agent_received_at_ms":   agentReceivedAt,
+			"windows_input_at_ms":    windowsInputAt,
+			"ack_sent_at_ms":         time.Now().UnixMilli(),
+			"input_type":             strVal(ev["type"]),
 		}
 		if err := writeJSON(conn, ack); err != nil {
 			closeSession()
@@ -328,14 +365,40 @@ func runDesktopInputChannel(wsURL, sessionID, inputToken string, frameW, frameH,
 	}
 }
 
+// maybeScale downscales with nearest-neighbor using stride-friendly loops.
+// Avoids the previous per-pixel image.At/Set path which was extremely slow at 2560px.
 func maybeScale(img image.Image, maxWidth int) image.Image {
 	b := img.Bounds()
 	w, h := b.Dx(), b.Dy()
-	if w <= maxWidth {
+	if w <= maxWidth || maxWidth <= 0 {
 		return img
 	}
 	nw := maxWidth
 	nh := h * maxWidth / w
+	if nh < 1 {
+		nh = 1
+	}
+
+	// Fast path for *image.RGBA (BitBlt capture path).
+	if src, ok := img.(*image.RGBA); ok {
+		dst := image.NewRGBA(image.Rect(0, 0, nw, nh))
+		for y := 0; y < nh; y++ {
+			sy := y * h / nh
+			srcOff := sy * src.Stride
+			dstOff := y * dst.Stride
+			for x := 0; x < nw; x++ {
+				sx := x * w / nw
+				si := srcOff + sx*4
+				di := dstOff + x*4
+				dst.Pix[di] = src.Pix[si]
+				dst.Pix[di+1] = src.Pix[si+1]
+				dst.Pix[di+2] = src.Pix[si+2]
+				dst.Pix[di+3] = src.Pix[si+3]
+			}
+		}
+		return dst
+	}
+
 	dst := image.NewRGBA(image.Rect(0, 0, nw, nh))
 	for y := 0; y < nh; y++ {
 		sy := y * h / nh
