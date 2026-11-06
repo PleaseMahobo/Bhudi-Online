@@ -244,10 +244,33 @@ export interface Asset {
 }
 export type TicketType = "incident" | "service_request" | "problem" | "change" | string;
 export type TicketStatus = "new" | "open" | "in_progress" | "on_hold" | "resolved" | "closed" | string;
+
+/** Asset linked to a service ticket (ITSM). */
+export interface TicketAssetLink {
+  id: string;
+  asset_id: string;
+  asset_name?: string | null;
+  asset_tag?: string | null;
+  asset_status?: string | null;
+  relationship?: string | null;
+}
+
 export interface ServiceTicket {
-  id: string; number: string; title: string; description?: string | null; ticket_type: TicketType; status: TicketStatus;
-  priority: string; device_id?: string | null; requester?: string | null; assignee?: string | null; created_at: string; updated_at: string;
+  id: string;
+  number: string;
+  title: string;
+  description?: string | null;
+  ticket_type: TicketType;
+  status: TicketStatus;
+  priority: string;
+  device_id?: string | null;
+  requester?: string | null;
+  assignee?: string | null;
+  created_at: string;
+  updated_at: string;
   resolved_at?: string | null;
+  /** Present when API returns linked assets on the ticket payload. */
+  asset_links?: TicketAssetLink[];
 }
 export interface WorkNote { id: string; ticket_id: string; body: string; author?: string | null; created_at: string; }
 
@@ -258,7 +281,68 @@ export interface DepreciationInfo { asset_id: string; method: string; purchase_c
 export interface WarrantyInfo { asset_id: string; serial_number?: string | null; warranty_end?: string | null; warranty_active: boolean; days_remaining?: number | null; source?: string | null; }
 export interface LifecycleEvent { id: string; asset_id: string; from_status?: string | null; to_status: string; reason?: string | null; changed_by?: string | null; created_at: string; }
 export type PackageType = "msi" | "exe" | "chocolatey" | "winget" | "custom" | string;
-export interface SoftwarePackage { id: string; name: string; version: string; publisher?: string | null; description?: string | null; package_type: PackageType; is_active: boolean; created_at: string; updated_at: string; }
-export interface DeploymentJob { id: string; package_id: string; name: string; action: string; status: string; targets_total: number; targets_success: number; targets_pending: number; created_at: string; updated_at: string; }
-export interface DeploymentJobSummary { job_id: string; status: string; targets_total: number; targets_success: number; targets_failed: number; targets_pending: number; success_rate: number; finished_at?: string | null; }
+
+export interface SoftwarePackage {
+  id: string;
+  name: string;
+  version: string;
+  publisher?: string | null;
+  description?: string | null;
+  package_type: PackageType;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+  source_url?: string | null;
+  file_name?: string | null;
+  sha256?: string | null;
+  choco_id?: string | null;
+  winget_id?: string | null;
+  install_args?: string | null;
+  uninstall_args?: string | null;
+  uninstall_command?: string | null;
+  requires_reboot?: boolean;
+  requires_elevation?: boolean;
+  timeout_seconds?: number;
+  architecture?: string | null;
+  success_exit_codes?: number[];
+}
+
+export interface DeploymentTarget {
+  id: string;
+  device_id?: string | null;
+  hostname?: string | null;
+  status: string;
+  message?: string | null;
+  exit_code?: number | null;
+  started_at?: string | null;
+  finished_at?: string | null;
+}
+
+export interface DeploymentJob {
+  id: string;
+  package_id: string;
+  name: string;
+  action: string;
+  status: string;
+  targets_total: number;
+  targets_success: number;
+  targets_pending: number;
+  targets_failed?: number;
+  rollback_of_job_id?: string | null;
+  targets?: DeploymentTarget[];
+  notes?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DeploymentJobSummary {
+  job_id: string;
+  status: string;
+  targets_total: number;
+  targets_success: number;
+  targets_failed: number;
+  targets_pending: number;
+  success_rate: number;
+  finished_at?: string | null;
+}
 export interface DeploymentEvent { id: string; job_id: string; target_id?: string | null; level: string; message: string; created_at: string; }
