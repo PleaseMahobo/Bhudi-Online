@@ -4,9 +4,9 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import ForeignKey, Text, text
+from sqlalchemy import ForeignKey, Text, String, Uuid, text
 from sqlalchemy import JSON
-from sqlalchemy.dialects.postgresql import TIMESTAMP, UUID
+from sqlalchemy.dialects.postgresql import TIMESTAMP
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base
@@ -16,13 +16,14 @@ class IncidentTimeline(Base):
     __tablename__ = "incident_timeline"
 
     id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        Uuid(as_uuid=True),
         primary_key=True,
-        server_default=text("gen_random_uuid()"),
+        default=uuid.uuid4,
     )
 
-    incident_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+    # Match Incident.id (String(36)) — not Uuid — so FK joins work on SQLite and Postgres.
+    incident_id: Mapped[str] = mapped_column(
+        String(36),
         ForeignKey("incidents.id", ondelete="CASCADE"),
         nullable=False,
     )
