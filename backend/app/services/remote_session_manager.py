@@ -284,6 +284,18 @@ class RemoteSessionManager:
             state.status = "active"
         elif event_type == "session_closed":
             state.status = "closed"
+        if event_type == "input_ack":
+            dead: list[WebSocket] = []
+            for websocket in state.dashboard_input_connections:
+                try:
+                    await websocket.send_json(message)
+                except Exception:
+                    dead.append(websocket)
+            for websocket in dead:
+                if websocket in state.dashboard_input_connections:
+                    state.dashboard_input_connections.remove(websocket)
+            return
+
         if event_type.startswith("input_") or event_type == "input_channel_ready":
             return
         await self._broadcast_to_dashboards(state, message)
