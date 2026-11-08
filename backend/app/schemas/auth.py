@@ -57,3 +57,9 @@ class TokenResponse(BaseModel):
 
 class MessageResponse(BaseModel):
     message: str
+
+
+class SupabaseProvisionRequest(BaseModel):
+    first_name: str | None = Field(default=None, max_length=100)
+    last_name: str | None = Field(default=None, max_length=100)
+    company: str | None = Field(default=None, max_length=200, description="Optional organisation name")
