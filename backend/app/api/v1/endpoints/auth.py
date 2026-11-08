@@ -25,6 +25,7 @@ from app.schemas.auth import (
     MfaLoginRequest,
     RefreshTokenRequest,
     RegisterRequest,
+    SupabaseProvisionRequest,
     TokenResponse,
     UserResponse,
 )
@@ -64,6 +65,24 @@ def register(request: RegisterRequest, db: Session = Depends(get_db)):
         company=request.company,
     )
 
+
+@router.post("/provision", response_model=UserResponse, status_code=status.HTTP_200_OK)
+def provision(
+    request: SupabaseProvisionRequest,
+    http_request: Request,
+    db: Session = Depends(get_db),
+):
+    """Provision/link the Bhudi profile and tenant from a verified Supabase session."""
+    token = get_access_token(http_request)
+    try:
+        return AuthService(db).provision_supabase_user(
+            access_token=token,
+            first_name=request.first_name,
+            last_name=request.last_name,
+            company=request.company,
+        )
+    except SupabaseIdentityError as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
 
 @router.post("/login", response_model=TokenResponse, status_code=status.HTTP_200_OK)
 def login(
