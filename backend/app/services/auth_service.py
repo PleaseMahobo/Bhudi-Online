@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -22,6 +23,7 @@ from app.core.security import (
 from app.models.refresh_token import RefreshToken
 from app.models.tenant import Tenant
 from app.models.user import User
+from app.services.supabase_identity import _verified_auth_identity, SupabaseIdentityError
 from app.repositories.refresh_token_repository import RefreshTokenRepository
 from app.repositories.user_repository import UserRepository
 
@@ -77,6 +79,68 @@ class AuthService:
                 ),
             ) from exc
         return self.users.get_by_email(email) or user
+
+    def provision_supabase_user(
+        self,
+        *,
+        access_token: str,
+        first_name: str | None = None,
+        last_name: str | None = None,
+        company: str | None = None,
+    ) -> User:
+        """Idempotently provision the Bhudi profile/tenant for a verified Supabase identity."""
+        auth_id, email = _verified_auth_identity(access_token)
+        user = self.users.get_by_email(email)
+        if user is not None:
+            if user.supabase_auth_id is not None and user.supabase_auth_id != auth_id:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Bhudi account is linked to a different Supabase identity",
+                )
+            user.supabase_auth_id = auth_id
+            if first_name and not user.first_name:
+                user.first_name = first_name
+            if last_name and not user.last_name:
+                user.last_name = last_name
+            if user.tenant is None:
+                tenant_name = (
+                    (company or "").strip()
+                    or " ".join(part for part in (first_name, last_name) if part).strip()
+                    or email.split("@", 1)[0]
+                )
+                user.tenant = Tenant(name=tenant_name)
+            self.db.commit()
+            self.db.refresh(user)
+            return user
+
+        tenant_name = (
+            (company or "").strip()
+            or " ".join(part for part in (first_name, last_name) if part).strip()
+            or email.split("@", 1)[0]
+        )
+        user = User(
+            email=email,
+            password_hash=hash_password(secrets.token_urlsafe(32)),
+            supabase_auth_id=auth_id,
+            first_name=first_name,
+            last_name=last_name,
+            role="user",
+        )
+        user.tenant = Tenant(name=tenant_name)
+        try:
+            self.db.add(user)
+            self.db.commit()
+            self.db.refresh(user)
+        except Exception as exc:
+            self.db.rollback()
+            existing = self.users.get_by_email(email)
+            if existing is not None and existing.supabase_auth_id == auth_id:
+                return existing
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Bhudi identity provisioning failed",
+            ) from exc
+        return user
 
     def authenticate(self, email: str, password: str) -> User:
         email = self._normalize_email(email)

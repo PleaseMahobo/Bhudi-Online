@@ -63,3 +63,45 @@ def test_login_promotes_supabase_session_after_valid_mfa(monkeypatch):
     assert response.status_code == 200
     assert response.json()["access_token"] == "bhudi-access"
     assert "access_token=bhudi-access" in response.headers.get("set-cookie", "")
+
+
+def test_provision_uses_verified_supabase_credential(monkeypatch):
+    user = User(
+        id=uuid4(),
+        email="user@example.com",
+        password_hash="generated",
+        role="user",
+        active=True,
+        tenant_id=uuid4(),
+        mfa_enabled=False,
+    )
+
+    def fake_provision(self, **kwargs):
+        assert kwargs["access_token"] == "supabase-access-token"
+        assert kwargs["first_name"] == "Trust"
+        assert kwargs["company"] == "Cyber Bastion"
+        return user
+
+    monkeypatch.setattr(AuthService, "provision_supabase_user", fake_provision)
+    response = TestClient(app).post(
+        "/api/v1/auth/provision",
+        headers={"Authorization": "Bearer supabase-access-token"},
+        json={"first_name": "Trust", "company": "Cyber Bastion"},
+    )
+    assert response.status_code == 200
+    assert response.json()["email"] == user.email
+
+
+def test_provision_rejects_unverified_supabase_identity(monkeypatch):
+    def fake_provision(self, **kwargs):
+        from app.services.supabase_identity import SupabaseIdentityError
+        raise SupabaseIdentityError("Supabase email address is not verified")
+
+    monkeypatch.setattr(AuthService, "provision_supabase_user", fake_provision)
+    response = TestClient(app).post(
+        "/api/v1/auth/provision",
+        headers={"Authorization": "Bearer supabase-access-token"},
+        json={},
+    )
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Supabase email address is not verified"
