@@ -16,6 +16,7 @@ from app.models.tenant import Tenant
 from app.models.user import User
 from app.models.user_role import UserRole
 from app.services.authorization_service import AuthorizationService
+from app.services.supabase_reconciliation import SupabaseReconciliationError, reconcile_supabase_identities
 
 router = APIRouter(prefix="/admin", tags=["Administrator Portal"])
 
@@ -217,4 +218,33 @@ def update_user(
         "roles": [role.name for role in authz.get_user_roles(target.id)],
         "active": bool(target.active),
         "tenant_id": str(target.tenant_id) if target.tenant_id else None,
+    }
+
+
+class IdentityReconciliationRequest(BaseModel):
+    apply: bool = False
+
+
+@router.post("/identity-reconciliation")
+def reconcile_identities(
+    payload: IdentityReconciliationRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Dry-run by default; apply only exact verified Supabase email matches."""
+    _require_platform_admin(current_user, db)
+    try:
+        result = reconcile_supabase_identities(db, apply=payload.apply)
+    except SupabaseReconciliationError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return {
+        "status": result.status,
+        "dry_run": result.dry_run,
+        "supabase_users": result.supabase_users,
+        "bhudi_users": result.bhudi_users,
+        "matched": result.matched,
+        "repaired": result.repaired,
+        "conflicts": result.conflicts,
+        "unchanged": result.unchanged,
+        "rows": result.rows,
     }
