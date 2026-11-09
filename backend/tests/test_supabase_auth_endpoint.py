@@ -73,6 +73,7 @@ def test_provision_uses_verified_supabase_credential(monkeypatch):
         role="user",
         active=True,
         tenant_id=uuid4(),
+        mfa_enabled=False,
     )
 
     def fake_provision(self, **kwargs):
