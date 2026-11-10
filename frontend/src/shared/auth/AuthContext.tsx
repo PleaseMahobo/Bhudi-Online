@@ -88,6 +88,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (error) throw new Error(error.message);
       if (!data.session?.access_token) throw new Error("Supabase authentication succeeded but no session was returned");
 
+      // Verified Supabase identities can predate their Bhudi profile. Provision
+      // idempotently before session promotion so normal login is also the
+      // recovery path for partial or legacy registrations.
+      const provisionResponse = await fetch("/api/auth/provision", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Accept": "application/json",
+          "Authorization": "Bearer " + data.session.access_token,
+        },
+        body: JSON.stringify({}),
+        credentials: "include",
+        cache: "no-store",
+      });
+      if (!provisionResponse.ok) {
+        const body = await provisionResponse.json().catch(() => null);
+        const detail = body?.detail;
+        throw new Error(typeof detail === "string" ? detail : "Unable to provision Bhudi account");
+      }
+
       try {
         await authenticateBhudiLogin(supabase, mfaCode);
       } catch (error) {
