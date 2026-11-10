@@ -18,11 +18,13 @@ export default function SignupPage() {
   const [lastName, setLastName] = useState('');
   const [company, setCompany] = useState('');
   const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
   const [loading, setLoading] = useState(false);
 
   async function onRegister(e: React.FormEvent) {
     e.preventDefault();
     setError('');
+    setSuccess('');
     if (!firstName.trim() || !lastName.trim()) {
       setError('Please enter your first and last name.');
       return;
@@ -33,13 +35,18 @@ export default function SignupPage() {
     }
     setLoading(true);
     try {
-      await registerUser({
+      const result = await registerUser({
         email,
         password,
         first_name: firstName.trim(),
         last_name: lastName.trim(),
         company: company.trim() || undefined,
       });
+      if (result.requiresEmailVerification) {
+        setSuccess('Account created. Check ' + email + ' for the verification link, then return here and sign in.');
+        setPassword('');
+        return;
+      }
       if (typeof window !== 'undefined') {
         localStorage.setItem('bhudi_access_tier', 'starter');
         if (company.trim()) localStorage.setItem('bhudi_company', company.trim());
@@ -128,6 +135,11 @@ export default function SignupPage() {
           {error && (
             <p className="rounded-xl border border-red-500/40 bg-red-950/40 px-3 py-2 text-sm text-red-300">
               {error}
+            </p>
+          )}
+          {success && (
+            <p className="rounded-xl border border-emerald-500/40 bg-emerald-950/30 px-3 py-2 text-sm text-emerald-300">
+              {success}
             </p>
           )}
 
