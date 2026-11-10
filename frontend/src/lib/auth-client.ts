@@ -82,6 +82,17 @@ export async function registerUser(input: {
     throw new Error(signUpError.message);
   }
 
+  // Supabase may intentionally mask an existing confirmed email. When it
+  // returns a user with no identities, treat that as an existing account rather
+  // than pretending a new signup was created.
+  if (
+    signUpData?.user &&
+    Array.isArray(signUpData.user.identities) &&
+    signUpData.user.identities.length === 0
+  ) {
+    throw new Error('An account already exists for this email address. Please sign in instead.');
+  }
+
   // Do not attempt password login from the signup flow when confirmation is
   // required. That produced the misleading "Invalid login credentials" state
   // and could generate unnecessary authentication/email traffic.
