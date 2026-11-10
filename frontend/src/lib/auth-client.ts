@@ -69,29 +69,28 @@ export async function registerUser(input: {
 
   if (signUpError) {
     const msg = String(signUpError.message || '').toLowerCase();
-    const already = msg.includes('already') || msg.includes('registered') || msg.includes('exists');
-    if (!already) throw new Error(signUpError.message);
-  }
 
-  // If confirmation is required, provisioning is completed on the first
-  // successful verified sign-in. This avoids creating an orphan Bhudi account
-  // for an unverified Supabase identity.
-  let accessToken = signUpData?.session?.access_token;
-  if (!accessToken) {
-    const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
-      email: input.email,
-      password: input.password,
-    });
-    if (signInError) {
-      throw new Error(
-        signInError.message || 'Account created. Check your email to confirm the address before signing in.',
-      );
+    if (msg.includes('rate limit') || msg.includes('email rate limit') || msg.includes('over_email_send_rate_limit')) {
+      throw new Error('Email verification is temporarily rate-limited. Please wait before requesting another verification email.');
     }
-    accessToken = signInData.session?.access_token;
+
+    const already = msg.includes('already') || msg.includes('registered') || msg.includes('exists');
+    if (already) {
+      throw new Error('An account already exists for this email address. Please sign in instead.');
+    }
+
+    throw new Error(signUpError.message);
   }
 
+  // Do not attempt password login from the signup flow when confirmation is
+  // required. That produced the misleading "Invalid login credentials" state
+  // and could generate unnecessary authentication/email traffic.
+  const accessToken = signUpData?.session?.access_token;
   if (!accessToken) {
-    throw new Error('Account created. Check your email to confirm the address before signing in.');
+    return {
+      email: input.email,
+      requiresEmailVerification: true,
+    };
   }
 
   await postJson(
