@@ -19,6 +19,7 @@ export default function SignupPage() {
   const [company, setCompany] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [accepted, setAccepted] = useState(false);
 
   async function onRegister(e: React.FormEvent) {
     e.preventDefault();
@@ -29,6 +30,10 @@ export default function SignupPage() {
     }
     if (password.length < 12) {
       setError('Password must be at least 12 characters.');
+      return;
+    }
+    if (!accepted) {
+      setError('Accept the terms, including the refund, cancellation, and delivery policies, to create an account.');
       return;
     }
     setLoading(true);
@@ -64,7 +69,7 @@ export default function SignupPage() {
           </Link>
           <p className="mt-3 text-sm text-slate-400">Create your account</p>
           <p className="mt-1 text-xs text-slate-500">
-            Sign up with your details. After payment you can download the agent.
+            This is the only sign-up page for Cyber Bastion and Bhudi. Payment happens here after you sign in.
           </p>
         </div>
 
@@ -124,6 +129,35 @@ export default function SignupPage() {
             After you subscribe, a Download agent button appears on your dashboard.
             Remote control and commands require multi-factor authentication.
           </div>
+
+          <label className="flex items-start gap-2 text-xs leading-relaxed text-slate-400">
+            <input
+              type="checkbox"
+              checked={accepted}
+              onChange={(e) => setAccepted(e.target.checked)}
+              className="mt-0.5"
+              required
+            />
+            <span>
+              I agree to the{' '}
+              <Link href="/terms" className="text-indigo-400 hover:text-indigo-300">
+                terms and conditions
+              </Link>
+              , including the{' '}
+              <Link href="/terms#refunds" className="text-indigo-400 hover:text-indigo-300">
+                refund
+              </Link>
+              ,{' '}
+              <Link href="/terms#cancellation" className="text-indigo-400 hover:text-indigo-300">
+                cancellation
+              </Link>
+              , and{' '}
+              <Link href="/terms#delivery" className="text-indigo-400 hover:text-indigo-300">
+                delivery
+              </Link>{' '}
+              policies. The same account is used on cyberbastion.co.za and bhudi.online.
+            </span>
+          </label>
 
           {error && (
             <p className="rounded-xl border border-red-500/40 bg-red-950/40 px-3 py-2 text-sm text-red-300">

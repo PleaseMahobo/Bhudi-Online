@@ -87,6 +87,10 @@ const FAQ = [
     a: 'The production native agent is optimised for Windows. Linux and macOS binaries are available for monitoring workloads.',
   },
   {
+    q: 'How do refunds, cancellation, and delivery work?',
+    a: 'Bhudi is delivered digitally — portal access and the agent download, usually within minutes and no later than 3 business days. You can cancel before the next renewal. A 7-day cooling-off refund applies to electronic transactions where the law allows it. The same terms cover cyberbastion.co.za and bhudi.online. Read the full policy on the terms page.',
+  },
+  {
     q: 'Need a custom contract or MSP white-label?',
     a: 'Enterprise covers scale and dedicated support. For partner or volume pricing, contact us from the contact page.',
   },
@@ -107,7 +111,19 @@ export default function PricingPage() {
 
       <section className="mx-auto max-w-6xl px-4 py-16 sm:px-6">
         <p className="mb-8 text-center text-sm text-slate-500">
-          USD · cancel anytime · trial available · same plans as portal billing
+          USD · cancel anytime · digital delivery ·{' '}
+          <Link href="/terms#refunds" className="text-indigo-600 hover:underline">
+            refund
+          </Link>
+          ,{' '}
+          <Link href="/terms#cancellation" className="text-indigo-600 hover:underline">
+            cancellation
+          </Link>{' '}
+          and{' '}
+          <Link href="/terms#delivery" className="text-indigo-600 hover:underline">
+            delivery
+          </Link>{' '}
+          policies · same account as Cyber Bastion
         </p>
         <div className="grid gap-6 lg:grid-cols-3">
           {PLANS.map((plan) => (

@@ -131,10 +131,15 @@ export default function LoginPage() {
           </button>
         </form>
         <p className="mt-8 text-center text-xs text-slate-500">
-          New to Bhudi?{' '}
+          New to Bhudi or Cyber Bastion?{' '}
           <Link href="/signup" className="font-medium text-indigo-400 hover:text-indigo-300">
             Create an account
           </Link>
+          . This is the only sign-in for both websites.{' '}
+          <Link href="/terms" className="font-medium text-indigo-400 hover:text-indigo-300">
+            Terms, refunds, cancellation & delivery
+          </Link>
+          .
         </p>
       </div>
     </div>

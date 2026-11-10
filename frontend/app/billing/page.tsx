@@ -113,24 +113,43 @@ function BillingInner() {
         </div>
       )}
 
-      <div className="mb-6 flex flex-wrap items-center gap-3 rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-600 shadow-sm">
-        <Shield size={16} className="text-indigo-600" />
-        <span>
-          Secure checkout via Stripe. Pay with <strong>credit/debit card</strong>
-          {status?.paypal_via_stripe ? ' or PayPal' : ''}.
-        </span>
-        {status && (
-          <span
-            className={
-              'ml-auto rounded-full px-2.5 py-0.5 text-xs font-medium ' +
-              (status.stripe_configured
-                ? 'bg-emerald-50 text-emerald-800'
-                : 'bg-amber-50 text-amber-900')
-            }
-          >
-            {status.mode || 'unconfigured'}
+      <div className="mb-6 rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-600 shadow-sm">
+        <div className="flex flex-wrap items-center gap-3">
+          <Shield size={16} className="text-indigo-600" />
+          <span>
+            Secure checkout via Stripe. Pay with <strong>credit/debit card</strong>
+            {status?.paypal_via_stripe ? ' or PayPal' : ''}. This is the only payment page for Cyber
+            Bastion and Bhudi.
           </span>
-        )}
+          {status && (
+            <span
+              className={
+                'ml-auto rounded-full px-2.5 py-0.5 text-xs font-medium ' +
+                (status.stripe_configured
+                  ? 'bg-emerald-50 text-emerald-800'
+                  : 'bg-amber-50 text-amber-900')
+              }
+            >
+              {status.mode || 'unconfigured'}
+            </span>
+          )}
+        </div>
+        <p className="mt-3 text-xs leading-relaxed text-slate-500">
+          Digital delivery within 3 business days of payment. Cancel any time before renewal. A
+          7-day electronic cooling-off refund applies where the law allows.{' '}
+          <Link href="/terms#delivery" className="text-indigo-600 hover:underline">
+            Delivery
+          </Link>
+          {' · '}
+          <Link href="/terms#cancellation" className="text-indigo-600 hover:underline">
+            Cancellation
+          </Link>
+          {' · '}
+          <Link href="/terms#refunds" className="text-indigo-600 hover:underline">
+            Refunds
+          </Link>
+          .
+        </p>
       </div>
 
       {error && (
