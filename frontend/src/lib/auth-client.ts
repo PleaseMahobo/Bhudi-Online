@@ -46,13 +46,17 @@ async function postJson<T>(path: string, body?: unknown, init?: RequestInit): Pr
  * Create a Bhudi local user + tenant, create the Supabase identity, and
  * promote the Supabase session into Bhudi cookies.
  */
+type RegisterResult =
+  | { email: string; requiresEmailVerification: true }
+  | { email: string; requiresEmailVerification: false };
+
 export async function registerUser(input: {
   email: string;
   password: string;
   first_name?: string;
   last_name?: string;
   company?: string;
-}) {
+}) : Promise<RegisterResult> {
   // Supabase is the identity/password authority. Create that identity first.
   const supabase = getSupabaseBrowserClient();
   const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
@@ -76,7 +80,7 @@ export async function registerUser(input: {
 
     const already = msg.includes('already') || msg.includes('registered') || msg.includes('exists');
     if (already) {
-      throw new Error('An account already exists for this email address. Please sign in instead.');
+      throw new Error('If this email can be registered, a verification message will be sent. If you already have an account, please use Sign in.');
     }
 
     throw new Error(signUpError.message);
@@ -120,7 +124,7 @@ export async function registerUser(input: {
     { headers: { Authorization: `Bearer ${accessToken}` } },
   );
 
-  return { email: input.email };
+  return { email: input.email, requiresEmailVerification: false };
 }
 
 export async function loginUser(
