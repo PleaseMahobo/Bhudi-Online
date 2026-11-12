@@ -11,12 +11,12 @@ ENV WS_PING_INTERVAL=20
 ENV WS_PING_TIMEOUT=20
 ENV WS_PER_MESSAGE_DEFLATE=true
 
-COPY backend/requirements.txt .
+COPY requirements.txt .
 
 RUN pip install --upgrade pip
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY backend/ .
+COPY . .
 
 EXPOSE 8000
 
