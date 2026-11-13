@@ -464,6 +464,7 @@ def install_device_patches(
 def get_device_command(
     device_id: str,
     command_id: str,
+    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     if current_user.tenant_id is None:
@@ -471,7 +472,7 @@ def get_device_command(
     try:
         from app.api.v1.endpoints import agent_runtime
 
-        agent = _find_agent(device_id, current_user.tenant_id)
+        agent = _find_agent(device_id, current_user.tenant_id, db)
         if not agent:
             raise HTTPException(404, "Device not found")
         agent_id = str(agent.get("agent_id") or device_id)
