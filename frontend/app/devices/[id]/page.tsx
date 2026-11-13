@@ -29,12 +29,61 @@ import {
 
 type Tab = 'overview' | 'patches' | 'processes' | 'software' | 'remote';
 
+function parseCsvLine(line: string): string[] {
+  const cells: string[] = [];
+  let cell = '';
+  let quoted = false;
+  for (let i = 0; i < line.length; i += 1) {
+    const ch = line[i];
+    if (ch === '"') {
+      if (quoted && line[i + 1] === '"') { cell += '"'; i += 1; }
+      else quoted = !quoted;
+    } else if (ch === ',' && !quoted) {
+      cells.push(cell.trim());
+      cell = '';
+    } else {
+      cell += ch;
+    }
+  }
+  cells.push(cell.trim());
+  return cells;
+}
+
+function parseSoftwareInventory(raw: string): any[] {
+  const text = raw.trim();
+  if (!text) return [];
+  try {
+    const parsed = JSON.parse(text);
+    const values = Array.isArray(parsed) ? parsed : [parsed];
+    if (values.some((v) => v && typeof v === 'object')) return values;
+  } catch {}
+
+  const lines = text.split(/\r?\n/).filter((line) => line.trim());
+  if (!lines.length) return [];
+
+  const first = lines[0].trim();
+  const looksCsv = first.includes(',') || /\t/.test(first);
+  if (looksCsv) {
+    const delimiter = first.includes(',') ? ',' : '\t';
+    const headers = delimiter === ',' ? parseCsvLine(first) : first.split('\t').map((v) => v.trim());
+    const normalized = headers.map((h) => h.toLowerCase().replace(/[^a-z0-9]/g, ''));
+    return lines.slice(1).map((line) => {
+      const cells = delimiter === ',' ? parseCsvLine(line) : line.split('\t').map((v) => v.trim());
+      const row: Record<string, string> = {};
+      normalized.forEach((key, i) => { row[key] = cells[i] ?? ''; });
+      return {
+        DisplayName: row.displayname || row.name || row.package || row.packageName,
+        DisplayVersion: row.displayversion || row.version,
+        Publisher: row.publisher,
+      };
+    }).filter((r) => r.DisplayName);
+  }
+
+  return lines.map((line) => ({ DisplayName: line }));
+}
+
 function SoftwareTable({ raw }: { raw: string }) {
-  const rows = raw.split(/\r?\n/).filter(Boolean).map((line) => {
-    try { return JSON.parse(line); } catch { return null; }
-  }).filter(Boolean) as any[];
-  const fallback = raw.split(/\r?\n/).filter(Boolean).map((name) => ({ DisplayName: name }));
-  const data = rows.length ? rows : fallback;
+  const data = parseSoftwareInventory(raw);
   return <div className="overflow-auto rounded-xl border border-slate-200">
     <table className="min-w-full text-sm">
       <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500"><tr><th className="px-4 py-3">Software</th><th className="px-4 py-3">Version</th><th className="px-4 py-3">Publisher</th></tr></thead>
@@ -106,6 +155,9 @@ export default function DeviceDetailPage() {
         throw new Error(result.stderr || 'Patch scan failed');
       }
       const parsed = JSON.parse((result.stdout || '').trim() || '{}');
+      if (String(parsed?.platform || device.platform || '').toLowerCase().includes('win') === false) {
+        throw new Error('Patch management is currently supported on Windows devices only.');
+      }
       setPatchOut(Array.isArray(parsed?.updates) ? parsed.updates : []);
       setPatchScanMeta(parsed);
     } catch (e: any) {
@@ -291,6 +343,9 @@ export default function DeviceDetailPage() {
 
           {tab === 'patches' && (
             <div className="space-y-4">
+              {mfaBlocked ? (
+                <MfaRequiredPanel title="Patch management locked" />
+              ) : (
               <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
@@ -300,12 +355,12 @@ export default function DeviceDetailPage() {
                     </p>
                   </div>
                   <div className="flex gap-2">
-                    <button type="button" disabled={patchBusy || device.status !== 'online'}
+                    <button type="button" disabled={mfaBlocked || patchBusy || device.status !== 'online' || !String(device.platform || '').toLowerCase().includes('win')}
                       onClick={runPatchScan}
                       className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50">
                       <RefreshCw size={16} /> {patchBusy ? 'Working…' : 'Scan for updates'}
                     </button>
-                    <button type="button" disabled={patchBusy || device.status !== 'online'}
+                    <button type="button" disabled={mfaBlocked || patchBusy || device.status !== 'online' || !String(device.platform || '').toLowerCase().includes('win')}
                       onClick={installPatches}
                       className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-500 disabled:opacity-50">
                       <Package size={16} /> Install missing
@@ -323,6 +378,8 @@ export default function DeviceDetailPage() {
                 {patchOut.length === 0 ? <div className="p-8 text-center text-sm text-slate-500">No missing updates reported. Run a scan to populate live results.</div> :
                   <div className="overflow-auto"><table className="min-w-full text-sm"><thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500"><tr><th className="px-4 py-3">Update</th><th className="px-4 py-3">KB</th><th className="px-4 py-3">Severity</th><th className="px-4 py-3">Size</th></tr></thead><tbody>{patchOut.map((u, i) => <tr key={u.update_id || i} className="border-t border-slate-100"><td className="px-4 py-3 font-medium text-slate-800">{u.title || 'Windows Update'}</td><td className="px-4 py-3 font-mono text-xs text-slate-500">{u.kb || '—'}</td><td className="px-4 py-3"><span className="rounded-full bg-slate-100 px-2 py-1 text-xs">{u.severity || 'unspecified'}</span></td><td className="px-4 py-3 text-slate-500">{u.size_bytes ? Math.round(Number(u.size_bytes) / 1048576) + ' MB' : '—'}</td></tr>)}</tbody></table></div>}
               </div>
+            </div>
+              )}
             </div>
           )}
 
