@@ -10,7 +10,11 @@ services:
       RABBITMQ_URL: amqp://bhudi:bhudi@rabbitmq:5672/
       SMTP_ENABLED: ${SMTP_ENABLED:-false}
       STRIPE_ENABLED: ${STRIPE_ENABLED:-false}
+      # Bhudi AI (side panel + /ai console) — see docs/AI_DEPLOYMENT.md
       AI_ENABLED: ${AI_ENABLED:-false}
+      AI_API_KEY: ${AI_API_KEY:-}
+      AI_BASE_URL: ${AI_BASE_URL:-https://api.openai.com/v1}
+      AI_MODEL: ${AI_MODEL:-gpt-4o-mini}
       RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-120}
       OTEL_ENABLED: ${OTEL_ENABLED:-true}
       OTEL_SERVICE_NAME: bhudi-api

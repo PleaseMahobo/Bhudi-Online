@@ -32,6 +32,19 @@ OTEL_ENVIRONMENT=staging
 OTEL_SERVICE_NAME=bhudi-api-staging
 ```
 
+### Optional — live Bhudi AI (staging)
+
+See [docs/AI_DEPLOYMENT.md](../../docs/AI_DEPLOYMENT.md). Prefer a **staging-only** key:
+
+```text
+AI_ENABLED=true
+AI_API_KEY=<STAGING_OPENAI_COMPATIBLE_KEY>
+AI_BASE_URL=https://api.openai.com/v1
+AI_MODEL=gpt-4o-mini
+```
+
+Omit these (or set `AI_ENABLED=false`) to keep **Guided mode** only.
+
 Keep the runtime store separate even when other services use shared infrastructure.
 
 ## Gate
@@ -47,5 +60,6 @@ Keep the runtime store separate even when other services use shared infrastructu
 9. Verify command result persistence.
 10. Verify dashboard device state, alert generation and ITSM synchronization.
 11. Verify invalid agent credentials are rejected.
+12. (Optional) With `AI_*` set, confirm `/api/v1/ai/chat` returns `mode: "live"`.
 
 Do not mark staging green until the real installed agent completes the complete lifecycle.
