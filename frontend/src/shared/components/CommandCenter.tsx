@@ -1,12 +1,13 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   CheckCircle2,
   Clock3,
   Command,
   Loader2,
   Play,
+  RefreshCw,
   Terminal,
   XCircle,
 } from 'lucide-react';
@@ -37,40 +38,201 @@ type QueueResult = {
   command_type: string;
 };
 
+/** Local fallback so the library is never empty if the catalog API fails. */
+const FALLBACK_CATALOG: CommandDefinition[] = [
+  {
+    type: 'inventory',
+    name: 'Inventory',
+    description: 'Collect operating system, hardware, network, and runtime inventory.',
+    read_only: true,
+  },
+  {
+    type: 'processes',
+    name: 'Processes',
+    description: 'List running processes and their resource ownership.',
+    read_only: true,
+  },
+  {
+    type: 'services',
+    name: 'Services',
+    description: 'List installed services and service state.',
+    read_only: true,
+  },
+  {
+    type: 'software',
+    name: 'Software',
+    description: 'Enumerate installed applications and packages.',
+    read_only: true,
+  },
+  {
+    type: 'windows_updates',
+    name: 'Windows Updates',
+    description: 'Collect installed Windows updates or package update status on supported platforms.',
+    read_only: true,
+  },
+  {
+    type: 'event_logs',
+    name: 'Event Logs',
+    description: 'Read recent operating-system event or journal entries.',
+    read_only: true,
+  },
+  {
+    type: 'network',
+    name: 'Network',
+    description: 'Collect interfaces, addresses, routes, DNS, and listening sockets where supported.',
+    read_only: true,
+  },
+  {
+    type: 'disks',
+    name: 'Disks',
+    description: 'Collect mounted disks, capacity, filesystem, and utilization.',
+    read_only: true,
+  },
+  {
+    type: 'printers',
+    name: 'Printers',
+    description: 'Enumerate printers, queues, status, and default printer information.',
+    read_only: true,
+  },
+  {
+    type: 'endpoint_security',
+    name: 'Endpoint Security Scan',
+    description: 'Run an endpoint security posture scan on the target agent.',
+    read_only: true,
+  },
+  {
+    type: 'remote_script',
+    name: 'Remote Script',
+    description: 'Execute an administrator-supplied script using an explicit interpreter.',
+    read_only: false,
+    requires_confirmation: true,
+  },
+  {
+    type: 'remote_powershell',
+    name: 'Remote PowerShell',
+    description: 'Execute an administrator-supplied PowerShell command on a target agent.',
+    read_only: false,
+    requires_confirmation: true,
+  },
+];
+
 const API_BASE = '';
+
+function agentKey(d: Device): string {
+  return String(d.device_id || d.id || '');
+}
+
+function deviceLabel(d: Device): string {
+  return `${d.hostname || d.name || d.id} · ${d.status || 'unknown'}`;
+}
 
 export default function CommandCenter() {
   const { blocked: mfaBlocked } = useMfaGate();
-  const [commands, setCommands] = useState<CommandDefinition[]>([]);
+  const [commands, setCommands] = useState<CommandDefinition[]>(FALLBACK_CATALOG);
   const [devices, setDevices] = useState<Device[]>([]);
   const [commandType, setCommandType] = useState('inventory');
   const [deviceId, setDeviceId] = useState('');
   const [script, setScript] = useState('');
   const [interpreter, setInterpreter] = useState('powershell');
+  const [eventLogName, setEventLogName] = useState('Application');
+  const [eventLogLimit, setEventLogLimit] = useState(100);
+  const [timeoutSeconds, setTimeoutSeconds] = useState(300);
   const [queueResult, setQueueResult] = useState<QueueResult | null>(null);
+  const [commandStatus, setCommandStatus] = useState<string>('');
   const [busy, setBusy] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [loadNote, setLoadNote] = useState('');
+
+  const loadData = useCallback(async () => {
+    setLoading(true);
+    setLoadNote('');
+    try {
+      const [catalogRes, deviceRows] = await Promise.all([
+        fetch(`${API_BASE}/api/v1/command-catalog`, {
+          credentials: 'include',
+          cache: 'no-store',
+          headers: { Accept: 'application/json' },
+        })
+          .then(async (r) => {
+            if (!r.ok) throw new Error(`catalog ${r.status}`);
+            return r.json();
+          })
+          .catch(() => null),
+        getDevices().catch(() => []),
+      ]);
+
+      const apiCommands = Array.isArray(catalogRes?.commands) ? catalogRes.commands : [];
+      if (apiCommands.length > 0) {
+        setCommands(apiCommands as CommandDefinition[]);
+      } else {
+        setCommands(FALLBACK_CATALOG);
+        setLoadNote('Using built-in command library (catalog API unavailable).');
+      }
+
+      const rows = Array.isArray(deviceRows) ? (deviceRows as Device[]) : [];
+      setDevices(rows);
+      if (rows.length === 1 && !deviceId) {
+        setDeviceId(agentKey(rows[0]));
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, [deviceId]);
 
   useEffect(() => {
-    void Promise.all([
-      fetch(`${API_BASE}/api/v1/command-catalog`, {
-        credentials: 'include',
-        cache: 'no-store',
-        headers: { Accept: 'application/json' },
-      })
-        .then((r) => r.json())
-        .catch(() => ({ commands: [] })),
-      getDevices().catch(() => []),
-    ]).then(([catalog, deviceRows]) => {
-      setCommands(Array.isArray(catalog.commands) ? catalog.commands : []);
-      setDevices(Array.isArray(deviceRows) ? (deviceRows as Device[]) : []);
-    });
-  }, []);
+    void loadData();
+  }, [loadData]);
 
   const selected = useMemo(
-    () => commands.find((c) => c.type === commandType),
+    () => commands.find((c) => c.type === commandType) || FALLBACK_CATALOG.find((c) => c.type === commandType),
     [commands, commandType],
   );
+
+  function buildPayload(): Record<string, unknown> {
+    const payload: Record<string, unknown> = {};
+
+    if (commandType === 'remote_script') {
+      payload.script = script;
+      payload.interpreter = interpreter;
+      payload.timeout_seconds = timeoutSeconds;
+    } else if (commandType === 'remote_powershell') {
+      payload.command = script;
+      payload.timeout_seconds = timeoutSeconds;
+    } else if (commandType === 'event_logs') {
+      payload.log_name = eventLogName || 'Application';
+      payload.limit = Math.min(500, Math.max(1, Number(eventLogLimit) || 100));
+    }
+
+    return payload;
+  }
+
+  async function pollStatus(commandId: string) {
+    setCommandStatus('queued');
+    for (let i = 0; i < 12; i++) {
+      await new Promise((r) => setTimeout(r, 2500));
+      try {
+        const res = await fetch(`${API_BASE}/api/v1/agent-commands/${commandId}`, {
+          credentials: 'include',
+          cache: 'no-store',
+          headers: { Accept: 'application/json' },
+        });
+        if (!res.ok) {
+          // Fallback: try listing by agent if single-command endpoint differs
+          setCommandStatus((prev) => prev || 'queued');
+          continue;
+        }
+        const data = await res.json();
+        const status = String(data.status || data.state || '');
+        if (status) setCommandStatus(status);
+        if (['completed', 'success', 'failed', 'timed_out', 'cancelled', 'error'].includes(status.toLowerCase())) {
+          break;
+        }
+      } catch {
+        // keep polling
+      }
+    }
+  }
 
   async function execute() {
     if (mfaBlocked) {
@@ -99,16 +261,10 @@ export default function CommandCenter() {
     setBusy(true);
     setError('');
     setQueueResult(null);
+    setCommandStatus('');
 
     try {
-      const payload: Record<string, unknown> = {};
-      if (commandType === 'remote_script') {
-        payload.script = script;
-        payload.interpreter = interpreter;
-      }
-      if (commandType === 'remote_powershell') {
-        payload.command = script;
-      }
+      const payload = buildPayload();
 
       const response = await fetch(`${API_BASE}/api/v1/commands`, {
         method: 'POST',
@@ -123,14 +279,28 @@ export default function CommandCenter() {
           command_type: commandType,
           payload,
           priority: selected?.requires_confirmation ? 90 : 50,
+          timeout_seconds: timeoutSeconds,
         }),
       });
 
-      const data = await response.json();
+      const data = await response.json().catch(() => ({}));
       if (!response.ok) {
-        throw new Error(data.detail || 'Command could not be queued');
+        const detail =
+          typeof data.detail === 'string'
+            ? data.detail
+            : Array.isArray(data.detail)
+              ? data.detail.map((d: { msg?: string }) => d.msg || JSON.stringify(d)).join('; ')
+              : data.message || 'Command could not be queued';
+        throw new Error(detail);
       }
-      setQueueResult(data as QueueResult);
+
+      const result = data as QueueResult;
+      setQueueResult(result);
+      setCommandStatus(result.status || 'queued');
+
+      if (result.id) {
+        void pollStatus(String(result.id));
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Command could not be queued');
     } finally {
@@ -138,10 +308,29 @@ export default function CommandCenter() {
     }
   }
 
+  const needsScript = commandType === 'remote_script' || commandType === 'remote_powershell';
+  const needsEventLogOpts = commandType === 'event_logs';
+
   return (
     <div className="space-y-6">
-      {mfaBlocked ? (
-        <MfaRequiredPanel title="Command execution locked" />
+      {mfaBlocked ? <MfaRequiredPanel title="Command execution locked" /> : null}
+
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="text-sm text-slate-500">
+          Select a library action, choose a target agent, then queue the operation.
+        </p>
+        <button
+          type="button"
+          onClick={() => void loadData()}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+        >
+          <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+          Refresh devices & catalog
+        </button>
+      </div>
+
+      {loadNote ? (
+        <div className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">{loadNote}</div>
       ) : null}
 
       <div className="grid gap-5 lg:grid-cols-[280px_1fr]">
@@ -150,7 +339,7 @@ export default function CommandCenter() {
             <Command size={17} className="text-indigo-600" />
             Command library
           </div>
-          <div className="mt-4 space-y-1">
+          <div className="mt-4 max-h-[28rem] space-y-1 overflow-y-auto">
             {commands.map((command) => (
               <button
                 key={command.type}
@@ -158,6 +347,7 @@ export default function CommandCenter() {
                 onClick={() => {
                   setCommandType(command.type);
                   setQueueResult(null);
+                  setCommandStatus('');
                   setError('');
                 }}
                 className={
@@ -167,7 +357,10 @@ export default function CommandCenter() {
                     : 'text-slate-600 hover:bg-slate-50')
                 }
               >
-                {command.name}
+                <span className="block">{command.name}</span>
+                <span className="mt-0.5 block text-[11px] font-normal text-slate-400">
+                  {command.read_only ? 'Read only' : 'Action'}
+                </span>
               </button>
             ))}
           </div>
@@ -176,9 +369,7 @@ export default function CommandCenter() {
         <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <div className="flex items-start justify-between gap-4">
             <div>
-              <p className="text-lg font-semibold text-slate-900">
-                {selected?.name || commandType}
-              </p>
+              <p className="text-lg font-semibold text-slate-900">{selected?.name || commandType}</p>
               <p className="mt-1 text-sm text-slate-500">{selected?.description}</p>
             </div>
             {selected?.read_only ? (
@@ -202,11 +393,16 @@ export default function CommandCenter() {
               >
                 <option value="">Select device</option>
                 {devices.map((d) => (
-                  <option key={d.id} value={d.device_id || d.id}>
-                    {d.hostname || d.name || d.id} · {d.status || 'unknown'}
+                  <option key={agentKey(d)} value={agentKey(d)}>
+                    {deviceLabel(d)}
                   </option>
                 ))}
               </select>
+              {devices.length === 0 && !loading ? (
+                <span className="mt-1 block text-xs text-amber-600">
+                  No devices found. Enroll an agent, then refresh.
+                </span>
+              ) : null}
             </label>
 
             {commandType === 'remote_script' ? (
@@ -223,10 +419,50 @@ export default function CommandCenter() {
                   <option value="python">Python</option>
                 </select>
               </label>
-            ) : null}
+            ) : (
+              <label className="block text-sm font-medium text-slate-700">
+                Timeout (seconds)
+                <input
+                  type="number"
+                  min={30}
+                  max={3600}
+                  value={timeoutSeconds}
+                  onChange={(e) => setTimeoutSeconds(Number(e.target.value) || 300)}
+                  className="mt-2 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm"
+                />
+              </label>
+            )}
           </div>
 
-          {commandType === 'remote_script' || commandType === 'remote_powershell' ? (
+          {needsEventLogOpts ? (
+            <div className="mt-4 grid gap-4 md:grid-cols-2">
+              <label className="block text-sm font-medium text-slate-700">
+                Log name
+                <select
+                  value={eventLogName}
+                  onChange={(e) => setEventLogName(e.target.value)}
+                  className="mt-2 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm"
+                >
+                  <option value="Application">Application</option>
+                  <option value="System">System</option>
+                  <option value="Security">Security</option>
+                </select>
+              </label>
+              <label className="block text-sm font-medium text-slate-700">
+                Entry limit
+                <input
+                  type="number"
+                  min={1}
+                  max={500}
+                  value={eventLogLimit}
+                  onChange={(e) => setEventLogLimit(Number(e.target.value) || 100)}
+                  className="mt-2 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm"
+                />
+              </label>
+            </div>
+          ) : null}
+
+          {needsScript ? (
             <label className="mt-4 block text-sm font-medium text-slate-700">
               {commandType === 'remote_powershell' ? 'PowerShell command' : 'Script'}
               <textarea
@@ -251,19 +487,23 @@ export default function CommandCenter() {
           ) : null}
 
           {queueResult ? (
-            <div className="mt-4 flex items-center gap-3 rounded-lg bg-emerald-50 px-3 py-3 text-sm text-emerald-800">
-              <CheckCircle2 size={17} />
-              <div>
+            <div className="mt-4 space-y-1 rounded-lg bg-emerald-50 px-3 py-3 text-sm text-emerald-800">
+              <div className="flex items-center gap-2">
+                <CheckCircle2 size={17} />
                 <b>Command queued.</b>
-                <div className="text-xs">ID: {queueResult.id}</div>
               </div>
+              <div className="text-xs">ID: {queueResult.id}</div>
+              <div className="text-xs">Type: {queueResult.command_type || commandType}</div>
+              {commandStatus ? (
+                <div className="text-xs">Status: {commandStatus}</div>
+              ) : null}
             </div>
           ) : null}
 
           <button
             type="button"
             onClick={() => void execute()}
-            disabled={busy || !deviceId || mfaBlocked}
+            disabled={busy || !deviceId || mfaBlocked || loading}
             className="mt-5 inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {busy ? <Loader2 size={16} className="animate-spin" /> : <Play size={16} />}
