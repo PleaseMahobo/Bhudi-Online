@@ -7,7 +7,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from app.core.dependencies import get_current_user
 from app.database.session import get_db
+from app.models.user import User
 from app.schemas.device_management import PatchRingResponse, PatchRolloutResponse
 from app.services.device_management_service import DeviceManagementService
 
@@ -140,5 +142,10 @@ def rollback_rollout(rollout_id: str, service: DeviceManagementService = Depends
 
 
 @router.get("/compliance")
-def compliance_report(service: DeviceManagementService = Depends(_service)) -> dict[str, Any]:
-    return service.compliance_summary()
+def compliance_report(
+    service: DeviceManagementService = Depends(_service),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    if current_user.tenant_id is None:
+        raise HTTPException(status_code=403, detail="Tenant context required")
+    return service.compliance_summary(tenant_id=current_user.tenant_id)
