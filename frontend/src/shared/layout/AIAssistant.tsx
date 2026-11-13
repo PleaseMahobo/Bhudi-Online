@@ -16,14 +16,17 @@ type Message = { role: 'user' | 'assistant'; content: string };
 async function askBhudiAi(
   message: string,
   history: Message[]
-): Promise<{ reply: string; mode?: string; suggestions?: string[] }> {
+): Promise<{ reply: string; mode?: string; suggestions?: string[]; model?: string }> {
   const res = await fetch('/api/v1/ai/chat', {
     method: 'POST',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
     body: JSON.stringify({
       message,
-      history: history.slice(-8).map((m) => ({ role: m.role, content: m.content })),
+      history: history
+        .filter((m) => m.content?.trim())
+        .slice(-8)
+        .map((m) => ({ role: m.role, content: m.content })),
     }),
   });
   const data = await res.json().catch(() => ({}));
@@ -60,7 +63,8 @@ export default function AIAssistant() {
     const text = (textOverride ?? message).trim();
     if (!text || loading) return;
 
-    setMessages((prev) => [...prev, { role: 'user', content: text }]);
+    const nextHistory = [...messages, { role: 'user' as const, content: text }];
+    setMessages(nextHistory);
     setMessage('');
     setLoading(true);
 
@@ -74,16 +78,13 @@ export default function AIAssistant() {
       if (Array.isArray(result.suggestions) && result.suggestions.length) {
         setSuggestions(result.suggestions);
       }
-    } catch (err: any) {
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: 'assistant',
-          content:
-            err?.message ||
-            'Could not reach the AI service. Check API deploy and that /api/v1/ai/chat is routed.',
-        },
-      ]);
+    } catch (err: unknown) {
+      const msg =
+        err instanceof Error
+          ? err.message
+          : 'Could not reach the AI service. Check API deploy and that /api/v1/ai/chat is routed.';
+      setMessages((prev) => [...prev, { role: 'assistant', content: msg }]);
+      setMode('error');
     } finally {
       setLoading(false);
     }
@@ -103,6 +104,15 @@ export default function AIAssistant() {
     );
   }
 
+  const modeLabel =
+    mode === 'live'
+      ? 'Live model'
+      : mode === 'heuristic'
+        ? 'Guided mode'
+        : mode === 'error'
+          ? 'Service error'
+          : 'Always here to help';
+
   return (
     <aside className="flex h-full w-72 shrink-0 flex-col border-l border-slate-200 bg-white xl:w-80">
       <div className="flex h-12 shrink-0 items-center justify-between border-b border-slate-200 px-3">
@@ -112,13 +122,7 @@ export default function AIAssistant() {
           </div>
           <div>
             <p className="text-sm font-semibold text-slate-900">Bhudi AI</p>
-            <p className="text-[10px] text-slate-500">
-              {mode === 'live'
-                ? 'Live model'
-                : mode === 'heuristic'
-                  ? 'Guided mode'
-                  : 'Always here to help'}
-            </p>
+            <p className="text-[10px] text-slate-500">{modeLabel}</p>
           </div>
         </div>
         <button
@@ -154,7 +158,7 @@ export default function AIAssistant() {
 
       <div className="shrink-0 border-t border-slate-200 p-2.5">
         <div className="mb-1.5 flex flex-wrap gap-1">
-          {suggestions.slice(0, 2).map((s) => (
+          {suggestions.slice(0, 3).map((s) => (
             <button
               key={s}
               type="button"
