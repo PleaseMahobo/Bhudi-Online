@@ -438,7 +438,13 @@ class DeviceManagementService:
         }
 
     def compliance_summary(self, tenant_id: UUID) -> dict[str, Any]:
-        rollouts = []
+        tenant_agents = self.db.query(Agent).filter(Agent.tenant_id == tenant_id, Agent.revoked.is_(False)).all()
+        tenant_refs = {str(a.id) for a in tenant_agents} | {str(a.agent_uuid) for a in tenant_agents}
+        tenant_refs |= {str(a.hostname) for a in tenant_agents if a.hostname}
+        rollouts = [
+            rollout for rollout in self.db.query(PatchRollout).all()
+            if any(str(ref) in tenant_refs for ref in (rollout.device_ids or []))
+        ]
         evidence = []
         for rollout in rollouts:
             evidence.append(
