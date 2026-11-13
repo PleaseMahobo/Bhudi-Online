@@ -346,7 +346,7 @@ export default function DeviceDetailPage() {
               {mfaBlocked ? (
                 <MfaRequiredPanel title="Patch management locked" />
               ) : (
-              <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
                     <h2 className="font-semibold text-slate-900">Windows Update</h2>
