@@ -65,6 +65,13 @@ class AgentDispatcher:
         self.db.refresh(command)
         return command
 
+    def claim_pending_commands(
+        self,
+        agent_id: uuid.UUID,
+        limit: int = 50,
+    ) -> list[AgentCommand]:
+        return self.command_repo.claim_pending_commands(agent_id, limit=limit)
+
     def get_pending_commands(
         self,
         agent_id: uuid.UUID,
