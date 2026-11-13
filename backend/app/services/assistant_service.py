@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 import time
+import urllib.error
 import urllib.request
 from typing import Any
 
@@ -31,18 +32,28 @@ class AssistantService:
             }
 
         hist = history or []
-        prior = ""
-        for turn in hist[-6:]:
-            prior += f"{turn.get('role', 'user')}: {turn.get('content', '')}\n"
+        messages: list[dict[str, str]] = [
+            {
+                "role": "system",
+                "content": (
+                    "You are Bhudi AI, an MSP / IT operations copilot for the Bhudi RMM platform. "
+                    "Answer clearly about monitoring, patching, remote access, print, security, and MFA. "
+                    "Keep answers under 200 words unless asked for detail. Prefer concrete Bhudi console steps."
+                ),
+            }
+        ]
+        for turn in hist[-8:]:
+            role = turn.get("role") or "user"
+            if role not in ("user", "assistant", "system"):
+                role = "user"
+            content = str(turn.get("content") or "").strip()
+            if content:
+                messages.append({"role": role, "content": content})
+        messages.append({"role": "user", "content": message})
 
-        live = self._live_chat(prior, message)
-        if live and not live.startswith(self._heuristic(message)[:40]):
-            # Prefer live when we got model text that is not only heuristic fallback
-            reply, mode = live, "live" if self.enabled and self.api_key else "heuristic"
-            if "Live model unavailable" in live:
-                mode = "heuristic"
-        elif live:
-            reply, mode = live, "heuristic" if "Live model unavailable" in live else "live"
+        live = self._live_chat(messages)
+        if live is not None:
+            reply, mode = live, "live"
         else:
             reply, mode = self._heuristic(message), "heuristic"
 
@@ -51,23 +62,15 @@ class AssistantService:
             "mode": mode,
             "latency_ms": int((time.perf_counter() - t0) * 1000),
             "suggestions": self._followups(message),
+            "model": self.model if mode == "live" else "heuristic",
         }
 
-    def _live_chat(self, prior: str, message: str) -> str | None:
+    def _live_chat(self, messages: list[dict[str, str]]) -> str | None:
         if not self.enabled or not self.api_key:
             return None
-        system = (
-            "You are Bhudi AI, an MSP / IT operations copilot for the Bhudi RMM platform. "
-            "Answer clearly about monitoring, patching, remote access, print, security, and MFA. "
-            "Keep answers under 200 words unless asked for detail."
-        )
-        user = f"{prior}user: {message}" if prior else message
         body = {
             "model": self.model,
-            "messages": [
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
+            "messages": messages,
             "temperature": 0.2,
         }
         try:
@@ -83,8 +86,10 @@ class AssistantService:
             with urllib.request.urlopen(req, timeout=60) as resp:
                 payload = json.loads(resp.read().decode("utf-8"))
             return str(payload["choices"][0]["message"]["content"]).strip()
-        except Exception as exc:
-            return f"{self._heuristic(message)}\n\n_(Live model unavailable: {exc})_"
+        except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, KeyError, IndexError, json.JSONDecodeError):
+            return None
+        except Exception:
+            return None
 
     def _followups(self, message: str) -> list[str]:
         m = message.lower()
@@ -108,7 +113,7 @@ class AssistantService:
             return (
                 "High CPU is often a runaway process, AV scan, backup job, or undersized host.\n\n"
                 "**In Bhudi**\n"
-                "1. **Devices** → host → **Processes**\n"
+                "1. **Devices** → host → **Processes** (or Automation → Processes)\n"
                 "2. Check **Metrics** for sustained vs spike CPU\n"
                 "3. **Remote** or queue a script if you need to stop the offender\n\n"
                 "Tell me the hostname for a tighter checklist."
@@ -125,7 +130,7 @@ class AssistantService:
             return (
                 "Use **Print Management** for queues, drivers, and offline printers.\n\n"
                 "1. Offline devices / failed jobs on the print dashboard\n"
-                "2. Restart Print Spooler via **Scripts** or remote command\n"
+                "2. Restart Print Spooler via **Automation** → Remote Script\n"
                 "3. Verify driver versions and toner/paper levels"
             )
         if "mfa" in m:
