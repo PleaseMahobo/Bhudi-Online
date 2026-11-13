@@ -398,7 +398,7 @@ def _queue_agent_command(
         raise HTTPException(404, "Agent not found — device must be enrolled and online")
     if not bool(agent.get("enabled", True)) or not bool(agent.get("trusted", True)):
         raise HTTPException(403, "Device is not licensed/supported for patch actions")
-    if str(agent.get("status") or "").lower() != "online":
+    if _status_from_last_seen(agent.get("last_seen"), agent.get("status")) != "online":
         raise HTTPException(409, "Device must be online for patch actions")
     agent_id = str(agent.get("agent_id") or device_id)
     try:
