@@ -351,6 +351,72 @@ def request_inventory(
         raise HTTPException(500, f"Failed to queue inventory: {exc}") from exc
 
 
+
+
+def _queue_agent_command(
+    device_id: str,
+    current_user: User,
+    command_type: str,
+    payload: dict[str, Any] | None = None,
+    command: str = "",
+):
+    if current_user.tenant_id is None:
+        raise HTTPException(status_code=403, detail="Tenant context required")
+    agent = _find_agent(device_id, current_user.tenant_id)
+    if not agent:
+        raise HTTPException(404, "Agent not found — device must be enrolled and online")
+    agent_id = str(agent.get("agent_id") or device_id)
+    try:
+        from app.api.v1.endpoints import agent_runtime
+        if agent_id not in agent_runtime._agents:
+            raise HTTPException(404, "Runtime agent not found")
+        body = agent_runtime.CommandCreate(
+            command=command or command_type,
+            shell=False,
+            command_type=command_type,
+            payload=payload or {},
+        )
+        result = agent_runtime.create_command(agent_id, body)
+        return {
+            "accepted": True,
+            "command_id": result.get("command_id") or result.get("id"),
+            "command_type": command_type,
+            "agent_id": agent_id,
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(500, f"Failed to queue {command_type}: {exc}") from exc
+
+
+@router.post("/{device_id}/patches/scan")
+def scan_device_patches(
+    device_id: str,
+    current_user: User = Depends(get_current_user),
+):
+    return _queue_agent_command(device_id, current_user, "patch_scan", payload={})
+
+
+@router.post("/{device_id}/patches/install")
+def install_device_patches(
+    device_id: str,
+    payload: dict[str, Any] | None = None,
+    current_user: User = Depends(get_current_user),
+):
+    body = payload or {}
+    max_updates = body.get("max_updates", 20)
+    try:
+        max_updates = max(1, min(int(max_updates), 100))
+    except (TypeError, ValueError):
+        max_updates = 20
+    safe = {
+        "kb": str(body.get("kb") or "").strip(),
+        "update_id": str(body.get("update_id") or "").strip(),
+        "max_updates": max_updates,
+    }
+    return _queue_agent_command(device_id, current_user, "patch_install", payload=safe)
+
+
 @router.get("/{device_id}/commands/{command_id}")
 def get_device_command(
     device_id: str,
