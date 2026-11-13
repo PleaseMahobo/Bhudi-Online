@@ -18,6 +18,7 @@ COMMAND_CATALOG: tuple[dict[str, Any], ...] = (
     {"type": "network", "name": "Network", "description": "Collect interfaces, addresses, routes, DNS, and listening sockets where supported.", "read_only": True},
     {"type": "disks", "name": "Disks", "description": "Collect mounted disks, capacity, filesystem, and utilization.", "read_only": True},
     {"type": "printers", "name": "Printers", "description": "Enumerate printers, queues, status, and default printer information.", "read_only": True},
+    {"type": "endpoint_security", "name": "Endpoint Security Scan", "description": "Run an endpoint security posture scan on the target agent.", "read_only": True},
     {"type": "remote_script", "name": "Remote Script", "description": "Execute an administrator-supplied script using an explicit interpreter.", "read_only": False, "requires_confirmation": True},
     {"type": "remote_powershell", "name": "Remote PowerShell", "description": "Execute an administrator-supplied PowerShell command on a target agent.", "read_only": False, "requires_confirmation": True},
 )
