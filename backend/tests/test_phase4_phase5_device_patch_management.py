@@ -1,15 +1,25 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+from uuid import UUID
+
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.api.v1.endpoints import device_management, patch_management
+from app.core.dependencies import get_current_user
 
 
 def _build_client() -> TestClient:
     app = FastAPI()
     app.include_router(device_management.router, prefix="/device-management")
     app.include_router(patch_management.router, prefix="/patch-management")
+    app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(
+        id=UUID("00000000-0000-0000-0000-000000000099"),
+        tenant_id=UUID("00000000-0000-0000-0000-0000000000a1"),
+        email="patch-test@example.test",
+        active=True,
+    )
     return TestClient(app)
 
 
