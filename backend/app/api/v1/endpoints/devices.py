@@ -353,7 +353,7 @@ def request_inventory(
                 "powershell -NoProfile -Command "
                 '"Get-ItemProperty HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\* '
                 ", HKLM:\\Software\\Wow6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\* "
-                "| Select-Object DisplayName, DisplayVersion | Where-Object DisplayName | "
+                "| Select-Object DisplayName, DisplayVersion, Publisher | Where-Object DisplayName | "
                 'ConvertTo-Csv -NoTypeInformation"'
             )
         elif "darwin" in platform or "macos" in platform:
