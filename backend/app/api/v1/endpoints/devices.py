@@ -359,6 +359,7 @@ def _queue_agent_command(
     command_type: str,
     payload: dict[str, Any] | None = None,
     command: str = "",
+    db: Session | None = None,
 ):
     if current_user.tenant_id is None:
         raise HTTPException(status_code=403, detail="Tenant context required")
@@ -367,24 +368,28 @@ def _queue_agent_command(
         raise HTTPException(404, "Agent not found — device must be enrolled and online")
     agent_id = str(agent.get("agent_id") or device_id)
     try:
-        from app.api.v1.endpoints import agent_runtime
-        if agent_id not in agent_runtime._agents:
-            raise HTTPException(404, "Runtime agent not found")
-        body = agent_runtime.CommandCreate(
-            command=command or command_type,
-            shell=False,
+        # Use the persistent dispatcher so patch commands survive worker
+        # restarts and reach the same authenticated runtime poll used by the
+        # native agent.
+        if db is None:
+            raise HTTPException(500, "Database session required")
+        from app.services.agent_dispatcher import AgentDispatcher
+        command_row = AgentDispatcher(db).queue_command(
+            agent_id=UUID(agent_id),
             command_type=command_type,
             payload=payload or {},
+            requested_by=current_user.id,
         )
-        result = agent_runtime.create_command(agent_id, body)
         return {
             "accepted": True,
-            "command_id": result.get("command_id") or result.get("id"),
+            "command_id": str(command_row.id),
             "command_type": command_type,
             "agent_id": agent_id,
         }
     except HTTPException:
         raise
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
     except Exception as exc:
         raise HTTPException(500, f"Failed to queue {command_type}: {exc}") from exc
 
@@ -392,15 +397,17 @@ def _queue_agent_command(
 @router.post("/{device_id}/patches/scan")
 def scan_device_patches(
     device_id: str,
+    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return _queue_agent_command(device_id, current_user, "patch_scan", payload={})
+    return _queue_agent_command(device_id, current_user, "patch_scan", payload={}, db=db)
 
 
 @router.post("/{device_id}/patches/install")
 def install_device_patches(
     device_id: str,
     payload: dict[str, Any] | None = None,
+    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     body = payload or {}
@@ -414,7 +421,7 @@ def install_device_patches(
         "update_id": str(body.get("update_id") or "").strip(),
         "max_updates": max_updates,
     }
-    return _queue_agent_command(device_id, current_user, "patch_install", payload=safe)
+    return _queue_agent_command(device_id, current_user, "patch_install", payload=safe, db=db)
 
 
 @router.get("/{device_id}/commands/{command_id}")
