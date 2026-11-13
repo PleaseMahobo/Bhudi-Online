@@ -20,6 +20,7 @@ def fake_supabase(auth_id, email, *, verified=True):
         user=SimpleNamespace(
             id=str(auth_id),
             email=email,
+            user_metadata={},
             email_confirmed_at="2026-01-01T00:00:00Z" if verified else None,
         )
     )

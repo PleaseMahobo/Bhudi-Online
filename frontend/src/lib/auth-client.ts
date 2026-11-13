@@ -46,13 +46,17 @@ async function postJson<T>(path: string, body?: unknown, init?: RequestInit): Pr
  * Create a Bhudi local user + tenant, create the Supabase identity, and
  * promote the Supabase session into Bhudi cookies.
  */
+type RegisterResult =
+  | { email: string; requiresEmailVerification: true }
+  | { email: string; requiresEmailVerification: false };
+
 export async function registerUser(input: {
   email: string;
   password: string;
   first_name?: string;
   last_name?: string;
   company?: string;
-}) {
+}) : Promise<RegisterResult> {
   // Supabase is the identity/password authority. Create that identity first.
   const supabase = getSupabaseBrowserClient();
   const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
@@ -69,29 +73,39 @@ export async function registerUser(input: {
 
   if (signUpError) {
     const msg = String(signUpError.message || '').toLowerCase();
-    const already = msg.includes('already') || msg.includes('registered') || msg.includes('exists');
-    if (!already) throw new Error(signUpError.message);
-  }
 
-  // If confirmation is required, provisioning is completed on the first
-  // successful verified sign-in. This avoids creating an orphan Bhudi account
-  // for an unverified Supabase identity.
-  let accessToken = signUpData?.session?.access_token;
-  if (!accessToken) {
-    const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
-      email: input.email,
-      password: input.password,
-    });
-    if (signInError) {
-      throw new Error(
-        signInError.message || 'Account created. Check your email to confirm the address before signing in.',
-      );
+    if (msg.includes('rate limit') || msg.includes('email rate limit') || msg.includes('over_email_send_rate_limit')) {
+      throw new Error('Email verification is temporarily rate-limited. Please wait before requesting another verification email.');
     }
-    accessToken = signInData.session?.access_token;
+
+    const already = msg.includes('already') || msg.includes('registered') || msg.includes('exists');
+    if (already) {
+      throw new Error('If this email can be registered, a verification message will be sent. If you already have an account, please use Sign in.');
+    }
+
+    throw new Error(signUpError.message);
   }
 
+  // Supabase may intentionally mask an existing confirmed email. When it
+  // returns a user with no identities, treat that as an existing account rather
+  // than pretending a new signup was created.
+  if (
+    signUpData?.user &&
+    Array.isArray(signUpData.user.identities) &&
+    signUpData.user.identities.length === 0
+  ) {
+    throw new Error('An account already exists for this email address. Please sign in instead.');
+  }
+
+  // Do not attempt password login from the signup flow when confirmation is
+  // required. That produced the misleading "Invalid login credentials" state
+  // and could generate unnecessary authentication/email traffic.
+  const accessToken = signUpData?.session?.access_token;
   if (!accessToken) {
-    throw new Error('Account created. Check your email to confirm the address before signing in.');
+    return {
+      email: input.email,
+      requiresEmailVerification: true,
+    };
   }
 
   await postJson(
@@ -110,7 +124,7 @@ export async function registerUser(input: {
     { headers: { Authorization: `Bearer ${accessToken}` } },
   );
 
-  return { email: input.email };
+  return { email: input.email, requiresEmailVerification: false };
 }
 
 export async function loginUser(

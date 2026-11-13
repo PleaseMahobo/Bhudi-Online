@@ -14,7 +14,7 @@ class SupabaseIdentityError(Exception):
     """Raised when a Supabase identity cannot be mapped to Bhudi."""
 
 
-def _verified_auth_identity(access_token: str) -> tuple[UUID, str]:
+def _verified_auth_identity(access_token: str) -> tuple[UUID, str, dict[str, Any]]:
     """Validate a Supabase access token and return its verified auth id/email."""
     if not supabase:
         raise SupabaseIdentityError("Supabase authentication is not configured")
@@ -40,12 +40,16 @@ def _verified_auth_identity(access_token: str) -> tuple[UUID, str]:
     except (TypeError, ValueError) as exc:
         raise SupabaseIdentityError("Invalid Supabase identity id") from exc
 
-    return auth_id, email
+    metadata = getattr(auth_user, "user_metadata", None) or {}
+    if not isinstance(metadata, dict):
+        metadata = {}
+
+    return auth_id, email, metadata
 
 
 def resolve_supabase_user(db: Session, access_token: str) -> User:
     """Verify a Supabase identity and resolve its Bhudi user mapping."""
-    auth_id, email = _verified_auth_identity(access_token)
+    auth_id, email, _metadata = _verified_auth_identity(access_token)
 
     user = db.scalar(select(User).where(User.supabase_auth_id == auth_id))
 

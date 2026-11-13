@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import HTTPException, status
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.jwt import (
@@ -51,15 +52,15 @@ class AuthService:
         self._validate_password(password)
         password_hash = hash_password(password)
         tenant_name = (
-            (company or "").strip()
-            or " ".join(part for part in (first_name, last_name) if part).strip()
+            (profile_company or "").strip()
+            or " ".join(part for part in (profile_first_name, profile_last_name) if part).strip()
             or email.split("@", 1)[0]
         )
         user = User(
             email=email,
             password_hash=password_hash,
-            first_name=first_name,
-            last_name=last_name,
+            first_name=profile_first_name,
+            last_name=profile_last_name,
             role="user",
         )
         tenant = Tenant(name=tenant_name)
@@ -89,8 +90,17 @@ class AuthService:
         company: str | None = None,
     ) -> User:
         """Idempotently provision the Bhudi profile/tenant for a verified Supabase identity."""
-        auth_id, email = _verified_auth_identity(access_token)
-        user = self.users.get_by_email(email)
+        auth_id, email, metadata = _verified_auth_identity(access_token)
+        profile_first_name = first_name or metadata.get("first_name")
+        profile_last_name = last_name or metadata.get("last_name")
+        profile_company = company or metadata.get("company")
+
+        # Lock matching user rows before deciding whether a tenant must be created.
+        # This makes concurrent provisioning requests converge on one tenant.
+        matches = list(self.db.scalars(select(User).where(func.lower(User.email) == email).with_for_update()).all())
+        if len(matches) > 1:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Multiple Bhudi accounts match this email")
+        user = matches[0] if matches else None
         if user is not None:
             if user.supabase_auth_id is not None and user.supabase_auth_id != auth_id:
                 raise HTTPException(
@@ -98,14 +108,14 @@ class AuthService:
                     detail="Bhudi account is linked to a different Supabase identity",
                 )
             user.supabase_auth_id = auth_id
-            if first_name and not user.first_name:
-                user.first_name = first_name
-            if last_name and not user.last_name:
-                user.last_name = last_name
+            if profile_first_name and not user.first_name:
+                user.first_name = profile_first_name
+            if profile_last_name and not user.last_name:
+                user.last_name = profile_last_name
             if user.tenant is None:
                 tenant_name = (
-                    (company or "").strip()
-                    or " ".join(part for part in (first_name, last_name) if part).strip()
+                    (profile_company or "").strip()
+                    or " ".join(part for part in (profile_first_name, profile_last_name) if part).strip()
                     or email.split("@", 1)[0]
                 )
                 user.tenant = Tenant(name=tenant_name)
