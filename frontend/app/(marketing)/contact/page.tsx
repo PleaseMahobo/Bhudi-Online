@@ -143,6 +143,25 @@ export default function ContactPage() {
                 </div>
               </div>
             ))}
+
+          <div className="mt-10 rounded-2xl border border-slate-200 bg-slate-50 p-5">
+            <SectionLabel>Packages</SectionLabel>
+            <div className="mt-4 grid gap-3 sm:grid-cols-3">
+              {[
+                { name: 'Starter', price: '$49/mo', detail: '1 managed device' },
+                { name: 'Professional', price: '$149/mo', detail: 'Up to 250 devices' },
+                { name: 'Enterprise', price: '$399/mo', detail: 'Unlimited scale' },
+              ].map((plan) => (
+                <div key={plan.name} className="rounded-xl border border-slate-200 bg-white p-4">
+                  <p className="font-semibold text-slate-900">{plan.name}</p>
+                  <p className="mt-1 text-lg font-bold text-indigo-700">{plan.price}</p>
+                  <p className="text-xs text-slate-500">{plan.detail}</p>
+                  <a href="/pricing" className="mt-2 inline-block text-xs font-semibold text-indigo-600 hover:underline">View package →</a>
+                </div>
+              ))}
+            </div>
+          </div>
+
           </div>
 
           <div className="lg:col-span-3">
@@ -207,6 +226,21 @@ export default function ContactPage() {
                     {error}
                   </p>
                 )}
+
+                <div className="mt-8 rounded-2xl border border-indigo-100 bg-indigo-50/60 p-5">
+                  <p className="text-xs font-bold uppercase tracking-wide text-indigo-700">Free IT health check</p>
+                  <h2 className="mt-1 text-lg font-semibold text-slate-900">Book a free Bhudi environment health check</h2>
+                  <p className="mt-1 text-sm text-slate-600">We'll review your endpoint setup, device coverage and operational readiness.</p>
+                  <form onSubmit={onSubmit} className="mt-4 grid gap-3 sm:grid-cols-2">
+                    <input type="hidden" name="healthCheck" value="free-it-health-check" />
+                    <label className="text-sm"><span className="font-medium text-slate-700">Name</span><input required name="name" maxLength={120} className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2" /></label>
+                    <label className="text-sm"><span className="font-medium text-slate-700">Work email</span><input required type="email" name="email" maxLength={200} className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2" /></label>
+                    <label className="text-sm sm:col-span-2"><span className="font-medium text-slate-700">Company</span><input name="company" maxLength={200} className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2" /></label>
+                    <label className="text-sm sm:col-span-2"><span className="font-medium text-slate-700">What should we check?</span><textarea required name="message" rows={3} minLength={10} maxLength={5000} placeholder="Devices, onboarding, monitoring, remote support, ticketing, or security." className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2" /></label>
+                    <button type="submit" disabled={busy} className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-indigo-500 disabled:opacity-60 sm:w-fit">Book free health check</button>
+                  </form>
+                </div>
+
                 <button
                   type="submit"
                   disabled={busy}
