@@ -10,6 +10,7 @@ type ContactBody = {
   company?: string;
   message?: string;
   source?: string;
+  healthCheck?: string;
 };
 
 function isEmail(v: string) {
@@ -97,6 +98,7 @@ export async function POST(req: NextRequest) {
   const company = String(body.company || '').trim();
   const message = String(body.message || '').trim();
   const source = String(body.source || 'website-contact').trim();
+  const healthCheck = String(body.healthCheck || '').trim();
 
   if (!name || name.length > 120) {
     return NextResponse.json({ error: 'Name is required' }, { status: 400 });
@@ -117,6 +119,7 @@ export async function POST(req: NextRequest) {
     company,
     message,
     source,
+    health_check: healthCheck || undefined,
     user_agent: req.headers.get('user-agent') || '',
     ip: req.headers.get('x-forwarded-for') || req.headers.get('x-real-ip') || '',
   };
