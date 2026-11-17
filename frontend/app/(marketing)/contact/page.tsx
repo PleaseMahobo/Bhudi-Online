@@ -237,7 +237,6 @@ export default function ContactPage() {
                   {busy ? <Loader2 size={16} className="animate-spin" /> : null}
                   Send message
                 </button>
-              </form>
                 <div className="mt-8 rounded-2xl border border-indigo-100 bg-indigo-50/60 p-5">
                   <p className="text-xs font-bold uppercase tracking-wide text-indigo-700">Free IT health check</p>
                   <h2 className="mt-1 text-lg font-semibold text-slate-900">Book a free Bhudi environment health check</h2>
@@ -252,7 +251,8 @@ export default function ContactPage() {
                   </div>
                 </div>
 
-          </div>
+
+              </form>          </div>
         </div>
       </section>
     </>
