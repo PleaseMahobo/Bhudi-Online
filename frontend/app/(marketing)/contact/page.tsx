@@ -251,7 +251,7 @@ export default function ContactPage() {
                     <button type="submit" disabled={busy} className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-indigo-500 disabled:opacity-60 sm:w-fit">Book free health check</button>
                   </div>
                 </div>
-            )}
+
           </div>
         </div>
       </section>

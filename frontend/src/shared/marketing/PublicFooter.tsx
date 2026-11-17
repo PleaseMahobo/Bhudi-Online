@@ -39,13 +39,20 @@ const COLS = [
       { href: '/terms#delivery', label: 'Delivery policy' },
     ],
   },
+  {
+    title: 'Contact',
+    links: [
+      { href: 'tel:+27790382171', label: '+27 79 038 2171' },
+      { href: 'mailto:info@cyberbastion.co.za', label: 'info@cyberbastion.co.za' },
+    ],
+  },
 ];
 
 export default function PublicFooter() {
   return (
     <footer className="border-t border-slate-200 bg-[#0F172A] text-slate-300">
       <div className="mx-auto max-w-6xl px-4 py-14 sm:px-6">
-        <div className="grid gap-10 md:grid-cols-5">
+        <div className="grid gap-10 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6">
           <div>
             <BhudiLogo href="/" size="md" withWordmark inverted />
             <p className="mt-4 max-w-xs text-sm leading-relaxed text-slate-400">
