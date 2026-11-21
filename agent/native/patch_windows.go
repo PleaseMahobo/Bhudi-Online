@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"os"
 	"strings"
 	"time"
 )
@@ -74,11 +75,13 @@ func runPatchInstall(payload map[string]any) map[string]any {
 	if v, ok := payload["max_updates"].(float64); ok && v > 0 {
 		maxUpdates = int(v)
 	}
+	if maxUpdates < 1 { maxUpdates = 1 }
+	if maxUpdates > 20 { maxUpdates = 20 }
 
 	// Escape for embedding in PowerShell single-quoted string is limited; use env-style args.
 	ps := fmt.Sprintf(`
 $ErrorActionPreference = 'Stop'
-$kbFilter = %q
+$kbFilter = $env:BHUDI_KB_FILTER
 $max = %d
 try {
   $session = New-Object -ComObject Microsoft.Update.Session
@@ -133,7 +136,7 @@ try {
   exit 1
 }
 `, kbFilter, maxUpdates)
-	code, stdout, stderr := runPowerShell(ps, 45*time.Minute)
+	code, stdout, stderr := runPowerShellWithEnv(ps, 45*time.Minute, map[string]string{"BHUDI_KB_FILTER": kbFilter})
 	return map[string]any{
 		"exit_code": code,
 		"stdout":    strings.TrimSpace(stdout),
@@ -143,7 +146,18 @@ try {
 }
 
 func runPowerShell(script string, timeout time.Duration) (int, string, string) {
+	return runPowerShellWithEnv(script, timeout, nil)
+}
+
+func runPowerShellWithEnv(script string, timeout time.Duration, extraEnv map[string]string) (int, string, string) {
 	cmd := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script)
+	if len(extraEnv) > 0 {
+		env := os.Environ()
+		for key, value := range extraEnv {
+			env = append(env, key+"="+value)
+		}
+		cmd.Env = env
+	}
 	var stdout, stderr strings.Builder
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr

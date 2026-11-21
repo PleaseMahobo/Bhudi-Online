@@ -20,12 +20,77 @@ import { useMfaGate } from '@/shared/hooks/useMfaGate';
 import {
   getDevice,
   requestInventory,
+  requestPatchScan,
+  requestPatchInstall,
   waitForCommand,
   remoteDeepLink,
   type Device,
 } from '@/lib/devices';
 
-type Tab = 'overview' | 'processes' | 'software' | 'remote';
+type Tab = 'overview' | 'patches' | 'processes' | 'software' | 'remote';
+
+function parseCsvLine(line: string): string[] {
+  const cells: string[] = [];
+  let cell = '';
+  let quoted = false;
+  for (let i = 0; i < line.length; i += 1) {
+    const ch = line[i];
+    if (ch === '"') {
+      if (quoted && line[i + 1] === '"') { cell += '"'; i += 1; }
+      else quoted = !quoted;
+    } else if (ch === ',' && !quoted) {
+      cells.push(cell.trim());
+      cell = '';
+    } else {
+      cell += ch;
+    }
+  }
+  cells.push(cell.trim());
+  return cells;
+}
+
+function parseSoftwareInventory(raw: string): any[] {
+  const text = raw.trim();
+  if (!text) return [];
+  try {
+    const parsed = JSON.parse(text);
+    const values = Array.isArray(parsed) ? parsed : [parsed];
+    if (values.some((v) => v && typeof v === 'object')) return values;
+  } catch {}
+
+  const lines = text.split(/\r?\n/).filter((line) => line.trim());
+  if (!lines.length) return [];
+
+  const first = lines[0].trim();
+  const looksCsv = first.includes(',') || /\t/.test(first);
+  if (looksCsv) {
+    const delimiter = first.includes(',') ? ',' : '\t';
+    const headers = delimiter === ',' ? parseCsvLine(first) : first.split('\t').map((v) => v.trim());
+    const normalized = headers.map((h) => h.toLowerCase().replace(/[^a-z0-9]/g, ''));
+    return lines.slice(1).map((line) => {
+      const cells = delimiter === ',' ? parseCsvLine(line) : line.split('\t').map((v) => v.trim());
+      const row: Record<string, string> = {};
+      normalized.forEach((key, i) => { row[key] = cells[i] ?? ''; });
+      return {
+        DisplayName: row.displayname || row.name || row.package || row.packageName,
+        DisplayVersion: row.displayversion || row.version,
+        Publisher: row.publisher,
+      };
+    }).filter((r) => r.DisplayName);
+  }
+
+  return lines.map((line) => ({ DisplayName: line }));
+}
+
+function SoftwareTable({ raw }: { raw: string }) {
+  const data = parseSoftwareInventory(raw);
+  return <div className="overflow-auto rounded-xl border border-slate-200">
+    <table className="min-w-full text-sm">
+      <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500"><tr><th className="px-4 py-3">Software</th><th className="px-4 py-3">Version</th><th className="px-4 py-3">Publisher</th></tr></thead>
+      <tbody>{data.map((r, i) => <tr key={i} className="border-t border-slate-100"><td className="px-4 py-3 font-medium text-slate-800">{r.DisplayName || r.name || r.Name || '—'}</td><td className="px-4 py-3 text-slate-500">{r.DisplayVersion || r.version || r.Version || '—'}</td><td className="px-4 py-3 text-slate-500">{r.Publisher || r.publisher || '—'}</td></tr>)}</tbody>
+    </table>
+  </div>;
+}
 
 function statusClass(s?: string) {
   const v = (s || '').toLowerCase();
@@ -49,6 +114,10 @@ export default function DeviceDetailPage() {
   const [invBusy, setInvBusy] = useState(false);
   const [processOut, setProcessOut] = useState('');
   const [softwareOut, setSoftwareOut] = useState('');
+  const [patchOut, setPatchOut] = useState<any[]>([]);
+  const [patchScanMeta, setPatchScanMeta] = useState<any>(null);
+  const [patchBusy, setPatchBusy] = useState(false);
+  const [patchError, setPatchError] = useState('');
   const [invError, setInvError] = useState('');
   const { mfaEnabled, blocked: mfaBlocked } = useMfaGate();
 
@@ -72,8 +141,50 @@ export default function DeviceDetailPage() {
 
   useEffect(() => {
     const t = search.get('tab') as Tab;
-    if (t && ['overview', 'processes', 'software', 'remote'].includes(t)) setTab(t);
+    if (t && ['overview', 'patches', 'processes', 'software', 'remote'].includes(t)) setTab(t);
   }, [search]);
+
+  async function runPatchScan() {
+    if (!device?.id) return;
+    setPatchBusy(true);
+    setPatchError('');
+    try {
+      const queued = await requestPatchScan(device.id);
+      const result = await waitForCommand(device.id, queued.command_id, 180000);
+      if (result.status !== 'completed' || (result.exit_code ?? 0) !== 0) {
+        throw new Error(result.stderr || 'Patch scan failed');
+      }
+      const parsed = JSON.parse((result.stdout || '').trim() || '{}');
+      if (String(parsed?.platform || device.platform || '').toLowerCase().includes('win') === false) {
+        throw new Error('Patch management is currently supported on Windows devices only.');
+      }
+      setPatchOut(Array.isArray(parsed?.updates) ? parsed.updates : []);
+      setPatchScanMeta(parsed);
+    } catch (e: any) {
+      setPatchError(e?.message || 'Patch scan failed — is the Windows agent online?');
+    } finally {
+      setPatchBusy(false);
+    }
+  }
+
+  async function installPatches() {
+    if (!device?.id) return;
+    if (!confirm('Install the currently missing Windows updates on this device?')) return;
+    setPatchBusy(true);
+    setPatchError('');
+    try {
+      const queued = await requestPatchInstall(device.id, { max_updates: 20 });
+      const result = await waitForCommand(device.id, queued.command_id, 2700000);
+      if (result.status !== 'completed' || (result.exit_code ?? 0) !== 0) {
+        throw new Error(result.stderr || 'Patch installation failed');
+      }
+      await runPatchScan();
+    } catch (e: any) {
+      setPatchError(e?.message || 'Patch installation failed');
+    } finally {
+      setPatchBusy(false);
+    }
+  }
 
   async function runInventory(kind: 'processes' | 'software') {
     if (!device?.id) return;
@@ -96,6 +207,7 @@ export default function DeviceDetailPage() {
 
   const tabs: { key: Tab; label: string; icon: typeof Monitor }[] = [
     { key: 'overview', label: 'Overview', icon: Monitor },
+    { key: 'patches', label: 'Patches', icon: Package },
     { key: 'processes', label: 'Processes', icon: Cpu },
     { key: 'software', label: 'Software', icon: Package },
     { key: 'remote', label: 'Remote', icon: ScreenShare },
@@ -229,6 +341,48 @@ export default function DeviceDetailPage() {
             </>
           )}
 
+          {tab === 'patches' && (
+            <div className="space-y-4">
+              {mfaBlocked ? (
+                <MfaRequiredPanel title="Patch management locked" />
+              ) : (
+                <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <h2 className="font-semibold text-slate-900">Windows Update</h2>
+                    <p className="mt-1 text-sm text-slate-500">
+                      Scan live Windows Update state and install missing updates. Changes require the agent to be online.
+                    </p>
+                  </div>
+                  <div className="flex gap-2">
+                    <button type="button" disabled={mfaBlocked || patchBusy || device.status !== 'online' || !String(device.platform || '').toLowerCase().includes('win')}
+                      onClick={runPatchScan}
+                      className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50">
+                      <RefreshCw size={16} /> {patchBusy ? 'Working…' : 'Scan for updates'}
+                    </button>
+                    <button type="button" disabled={mfaBlocked || patchBusy || device.status !== 'online' || !String(device.platform || '').toLowerCase().includes('win')}
+                      onClick={installPatches}
+                      className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-500 disabled:opacity-50">
+                      <Package size={16} /> Install missing
+                    </button>
+                  </div>
+                </div>
+                {patchError && <div className="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{patchError}</div>}
+              </div>
+              <div className="grid gap-3 sm:grid-cols-3">
+                <div className="rounded-2xl border border-slate-200 bg-white p-4"><div className="text-xs text-slate-500">Missing</div><div className="mt-1 text-2xl font-bold text-slate-900">{patchOut.length}</div></div>
+                <div className="rounded-2xl border border-slate-200 bg-white p-4"><div className="text-xs text-slate-500">Critical / Important</div><div className="mt-1 text-2xl font-bold text-red-600">{patchOut.filter((u) => ['critical','important'].includes(String(u.severity || '').toLowerCase())).length}</div></div>
+                <div className="rounded-2xl border border-slate-200 bg-white p-4"><div className="text-xs text-slate-500">Last scan</div><div className="mt-1 text-sm font-semibold text-slate-900">{patchScanMeta?.scanned_at ? new Date(patchScanMeta.scanned_at).toLocaleString() : 'Not scanned'}</div></div>
+              </div>
+              <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+                {patchOut.length === 0 ? <div className="p-8 text-center text-sm text-slate-500">No missing updates reported. Run a scan to populate live results.</div> :
+                  <div className="overflow-auto"><table className="min-w-full text-sm"><thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500"><tr><th className="px-4 py-3">Update</th><th className="px-4 py-3">KB</th><th className="px-4 py-3">Severity</th><th className="px-4 py-3">Size</th></tr></thead><tbody>{patchOut.map((u, i) => <tr key={u.update_id || i} className="border-t border-slate-100"><td className="px-4 py-3 font-medium text-slate-800">{u.title || 'Windows Update'}</td><td className="px-4 py-3 font-mono text-xs text-slate-500">{u.kb || '—'}</td><td className="px-4 py-3"><span className="rounded-full bg-slate-100 px-2 py-1 text-xs">{u.severity || 'unspecified'}</span></td><td className="px-4 py-3 text-slate-500">{u.size_bytes ? Math.round(Number(u.size_bytes) / 1048576) + ' MB' : '—'}</td></tr>)}</tbody></table></div>}
+              </div>
+            </div>
+              )}
+            </div>
+          )}
+
           {(tab === 'processes' || tab === 'software') && (
             <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
               <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
@@ -250,10 +404,14 @@ export default function DeviceDetailPage() {
                   {invError}
                 </div>
               )}
-              <pre className="max-h-[480px] overflow-auto rounded-xl bg-slate-900 p-4 text-[11px] leading-relaxed text-slate-200">
-                {(tab === 'processes' ? processOut : softwareOut) ||
-                  'Click Refresh to pull a live list from the agent.'}
-              </pre>
+              {tab === 'software' && softwareOut ? (
+                <SoftwareTable raw={softwareOut} />
+              ) : (
+                <pre className="max-h-[480px] overflow-auto rounded-xl bg-slate-900 p-4 text-[11px] leading-relaxed text-slate-200">
+                  {(tab === 'processes' ? processOut : softwareOut) ||
+                    'Click Refresh to pull a live list from the agent.'}
+                </pre>
+              )}
             </div>
           )}
 

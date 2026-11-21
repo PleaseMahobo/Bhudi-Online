@@ -47,12 +47,19 @@ class AgentCommandRepository:
     # Agent Polling
     ############################################################
 
-    def get_pending_commands(
+    def claim_pending_commands(
         self,
         agent_id: uuid.UUID,
         limit: int = 50,
     ) -> list[AgentCommand]:
+        """Atomically claim pending commands before returning them to an agent.
 
+        A command is moved to dispatched in the same transaction as the poll
+        claim, so a lost response cannot cause the next poll to execute the
+        same install twice. Commands that remain dispatched are recovered by
+        the existing command-expiry/retry lifecycle rather than being treated
+        as pending on every poll.
+        """
         stmt = (
             select(AgentCommand)
             .where(
@@ -66,9 +73,22 @@ class AgentCommandRepository:
                 AgentCommand.queued_at.asc(),
             )
             .limit(limit)
+            .with_for_update(skip_locked=True)
         )
+        commands = list(self.db.scalars(stmt).all())
+        for command in commands:
+            command.status = CommandStatus.DISPATCHED.value
+            command.acknowledged = True
+        if commands:
+            self.db.flush()
+        return commands
 
-        return list(self.db.scalars(stmt).all())
+    def get_pending_commands(
+        self,
+        agent_id: uuid.UUID,
+        limit: int = 50,
+    ) -> list[AgentCommand]:
+        return self.claim_pending_commands(agent_id, limit=limit)
 
     ############################################################
     # Dispatch

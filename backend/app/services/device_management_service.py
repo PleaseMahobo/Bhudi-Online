@@ -359,14 +359,17 @@ class DeviceManagementService:
             "raw": True,
         }
 
-    def _live_agent_patch_compliance(self) -> dict[str, Any]:
+    def _live_agent_patch_compliance(self, tenant_id: UUID) -> dict[str, Any]:
         """
         Latest successful patch_scan per agent (from agent_commands).
         Devices with 0 missing updates are compliant.
         """
         scans = (
             self.db.query(AgentCommand)
+            .join(Agent, Agent.id == AgentCommand.agent_id)
             .filter(
+                Agent.tenant_id == tenant_id,
+                Agent.revoked.is_(False),
                 AgentCommand.command_type.in_(["patch_scan", "PATCH_SCAN"]),
                 AgentCommand.status == CommandStatus.COMPLETED.value,
                 AgentCommand.exit_code == 0,
@@ -434,8 +437,14 @@ class DeviceManagementService:
             "source": "agent_patch_scan",
         }
 
-    def compliance_summary(self) -> dict[str, Any]:
-        rollouts = self.db.query(PatchRollout).all()
+    def compliance_summary(self, tenant_id: UUID) -> dict[str, Any]:
+        tenant_agents = self.db.query(Agent).filter(Agent.tenant_id == tenant_id, Agent.revoked.is_(False)).all()
+        tenant_refs = {str(a.id) for a in tenant_agents} | {str(a.agent_uuid) for a in tenant_agents}
+        tenant_refs |= {str(a.hostname) for a in tenant_agents if a.hostname}
+        rollouts = [
+            rollout for rollout in self.db.query(PatchRollout).all()
+            if any(str(ref) in tenant_refs for ref in (rollout.device_ids or []))
+        ]
         evidence = []
         for rollout in rollouts:
             evidence.append(
@@ -453,7 +462,7 @@ class DeviceManagementService:
                 }
             )
 
-        live = self._live_agent_patch_compliance()
+        live = self._live_agent_patch_compliance(tenant_id)
 
         return {
             "summary": {

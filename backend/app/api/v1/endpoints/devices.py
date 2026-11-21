@@ -8,9 +8,11 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
+from app.core.access_tiers import require_mfa_for_actions
 from app.core.dependencies import get_current_user
 from app.database.session import get_db
 from app.models.agent import Agent
+from app.models.agent_command import AgentCommand
 from app.models.user import User
 from app.state import device_state
 from app.services import device_service
@@ -258,7 +260,34 @@ def list_devices_unified(
     return {"devices": devices, "count": len(devices), "counts": counts}
 
 
-def _find_agent(device_id: str, tenant_id: UUID) -> dict[str, Any] | None:
+def _find_agent(device_id: str, tenant_id: UUID, db: Session | None = None) -> dict[str, Any] | None:
+    if db is not None:
+        try:
+            agent = None
+            try:
+                agent = db.get(Agent, UUID(device_id))
+            except ValueError:
+                pass
+            if agent is None:
+                agent = (
+                    db.query(Agent)
+                    .filter(Agent.hostname == device_id, Agent.tenant_id == tenant_id)
+                    .order_by(Agent.last_seen.desc())
+                    .first()
+                )
+            if agent is not None and agent.tenant_id == tenant_id and not agent.revoked:
+                return {
+                    "agent_id": str(agent.id),
+                    "hostname": agent.hostname,
+                    "tenant_id": str(agent.tenant_id),
+                    "platform": agent.platform,
+                    "status": agent.status,
+                    "last_seen": agent.last_seen,
+                    "enabled": agent.enabled,
+                    "trusted": agent.trusted,
+                }
+        except Exception:
+            pass
     try:
         from app.api.v1.endpoints import agent_runtime
 
@@ -297,6 +326,7 @@ def get_device(
 def request_inventory(
     device_id: str,
     kind: str,
+    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     if current_user.tenant_id is None:
@@ -323,7 +353,7 @@ def request_inventory(
                 "powershell -NoProfile -Command "
                 '"Get-ItemProperty HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\* '
                 ", HKLM:\\Software\\Wow6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\* "
-                "| Select-Object DisplayName, DisplayVersion | Where-Object DisplayName | "
+                "| Select-Object DisplayName, DisplayVersion, Publisher | Where-Object DisplayName | "
                 'ConvertTo-Csv -NoTypeInformation"'
             )
         elif "darwin" in platform or "macos" in platform:
@@ -351,10 +381,90 @@ def request_inventory(
         raise HTTPException(500, f"Failed to queue inventory: {exc}") from exc
 
 
+
+
+def _queue_agent_command(
+    device_id: str,
+    current_user: User,
+    command_type: str,
+    payload: dict[str, Any] | None = None,
+    command: str = "",
+    db: Session | None = None,
+):
+    if current_user.tenant_id is None:
+        raise HTTPException(status_code=403, detail="Tenant context required")
+    agent = _find_agent(device_id, current_user.tenant_id, db)
+    if not agent:
+        raise HTTPException(404, "Agent not found — device must be enrolled and online")
+    if not bool(agent.get("enabled", True)) or not bool(agent.get("trusted", True)):
+        raise HTTPException(403, "Device is not licensed/supported for patch actions")
+    if _status_from_last_seen(agent.get("last_seen"), agent.get("status")) != "online":
+        raise HTTPException(409, "Device must be online for patch actions")
+    agent_id = str(agent.get("agent_id") or device_id)
+    try:
+        # Use the persistent dispatcher so patch commands survive worker
+        # restarts and reach the same authenticated runtime poll used by the
+        # native agent.
+        if db is None:
+            raise HTTPException(500, "Database session required")
+        from app.services.agent_dispatcher import AgentDispatcher
+        command_row = AgentDispatcher(db).queue_command(
+            agent_id=UUID(agent_id),
+            command_type=command_type,
+            payload=payload or {},
+            requested_by=current_user.id,
+        )
+        return {
+            "accepted": True,
+            "command_id": str(command_row.id),
+            "command_type": command_type,
+            "agent_id": agent_id,
+        }
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(500, f"Failed to queue {command_type}: {exc}") from exc
+
+
+@router.post("/{device_id}/patches/scan")
+def scan_device_patches(
+    device_id: str,
+    db: Session = Depends(get_db),
+    _mfa_user: User = Depends(require_mfa_for_actions),
+    current_user: User = Depends(get_current_user),
+):
+    return _queue_agent_command(device_id, current_user, "patch_scan", payload={}, db=db)
+
+
+@router.post("/{device_id}/patches/install")
+def install_device_patches(
+    device_id: str,
+    payload: dict[str, Any] | None = None,
+    db: Session = Depends(get_db),
+    _mfa_user: User = Depends(require_mfa_for_actions),
+    current_user: User = Depends(get_current_user),
+):
+    body = payload or {}
+    max_updates = body.get("max_updates", 20)
+    try:
+        max_updates = max(1, min(int(max_updates), 20))
+    except (TypeError, ValueError):
+        max_updates = 20
+    safe = {
+        "kb": str(body.get("kb") or "").strip(),
+        "update_id": str(body.get("update_id") or "").strip(),
+        "max_updates": max_updates,
+    }
+    return _queue_agent_command(device_id, current_user, "patch_install", payload=safe, db=db)
+
+
 @router.get("/{device_id}/commands/{command_id}")
 def get_device_command(
     device_id: str,
     command_id: str,
+    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     if current_user.tenant_id is None:
@@ -362,10 +472,28 @@ def get_device_command(
     try:
         from app.api.v1.endpoints import agent_runtime
 
-        agent = _find_agent(device_id, current_user.tenant_id)
+        agent = _find_agent(device_id, current_user.tenant_id, db)
         if not agent:
             raise HTTPException(404, "Device not found")
         agent_id = str(agent.get("agent_id") or device_id)
+        try:
+            command_uuid = UUID(command_id)
+        except ValueError:
+            command_uuid = None
+        if command_uuid is not None:
+            persistent = db.get(AgentCommand, command_uuid)
+            if persistent is not None and str(persistent.agent_id) == agent_id:
+                return {
+                    "command_id": command_id,
+                    "status": persistent.status,
+                    "command": persistent.command_type,
+                    "result": {
+                        "exit_code": persistent.exit_code,
+                        "stdout": persistent.stdout,
+                        "stderr": persistent.stderr,
+                    },
+                    "finished_at": persistent.completed_at,
+                }
         for c in agent_runtime._commands.get(agent_id, []):
             if c.get("command_id") == command_id or c.get("id") == command_id:
                 return {

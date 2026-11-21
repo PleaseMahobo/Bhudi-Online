@@ -37,7 +37,8 @@ def get_commands(
 ):
     _require_agent(agent_id, agent_token, db)
     dispatcher = AgentDispatcher(db)
-    commands = dispatcher.get_pending_commands(agent_id)
+    commands = dispatcher.claim_pending_commands(agent_id)
+    db.commit()
     return [
         {
             "id": str(command.id),

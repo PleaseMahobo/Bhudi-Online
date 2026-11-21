@@ -166,6 +166,32 @@ export async function getDevice(id: string): Promise<Device> {
   );
 }
 
+export type PatchUpdate = {
+  title?: string;
+  kb?: string;
+  severity?: string;
+  size_bytes?: number;
+  is_installed?: boolean;
+  update_id?: string;
+};
+
+export async function requestPatchScan(deviceId: string) {
+  return api<{ accepted: boolean; command_id: string; command_type: string; agent_id: string }>(
+    '/api/v1/devices/' + encodeURIComponent(deviceId) + '/patches/scan',
+    { method: 'POST' }
+  );
+}
+
+export async function requestPatchInstall(
+  deviceId: string,
+  options?: { kb?: string; update_id?: string; max_updates?: number }
+) {
+  return api<{ accepted: boolean; command_id: string; command_type: string; agent_id: string }>(
+    '/api/v1/devices/' + encodeURIComponent(deviceId) + '/patches/install',
+    { method: 'POST', body: JSON.stringify(options || {}) }
+  );
+}
+
 export async function requestInventory(
   deviceId: string,
   kind: 'processes' | 'software'
