@@ -32,31 +32,30 @@ export default function AdministratorPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const isPlatformAdmin = String(user?.role || '').toLowerCase() === 'enterprise_admin';
-
   const load = useCallback(async () => {
-    if (!isPlatformAdmin) return;
     setBusy(true);
     setError(null);
     try {
-      const [o, u, t, r, p] = await Promise.all([
-        getAdminOverview(),
-        getAdminUsers(),
-        getAdminTenants(),
-        getAdminRoles(),
-        getAdminPermissions(),
+      // Let the backend's current RBAC policy decide access. The legacy `user.role`
+      // projection can disagree with assigned roles and must not gate this screen.
+      const results = await Promise.allSettled([
+        getAdminOverview(), getAdminUsers(), getAdminTenants(), getAdminRoles(), getAdminPermissions(),
       ]);
-      setOverview(o);
-      setUsers(o?.users ? u.users || [] : u.users || []);
-      setTenants(t.tenants || []);
-      setRoles(r.roles || []);
-      setPermissions(p.permissions || []);
-    } catch (e: any) {
-      setError(e?.message || 'Administrator data could not be loaded');
+      const [o, u, t, r, p] = results;
+      if (o.status === 'fulfilled') setOverview(o.value);
+      if (u.status === 'fulfilled') setUsers(u.value.users || []);
+      if (t.status === 'fulfilled') setTenants(t.value.tenants || []);
+      if (r.status === 'fulfilled') setRoles(r.value.roles || []);
+      if (p.status === 'fulfilled') setPermissions(p.value.permissions || []);
+      const rejected = results.find((result) => result.status === 'rejected');
+      if (rejected?.status === 'rejected') {
+        const reason = rejected.reason;
+        setError(reason?.message || 'Some administrator data could not be loaded. Refresh to retry.');
+      }
     } finally {
       setBusy(false);
     }
-  }, [isPlatformAdmin]);
+  }, []);
 
   useEffect(() => {
     if (!loading && !user) router.replace('/login');
@@ -89,16 +88,6 @@ export default function AdministratorPage() {
 
   if (loading) return <ModuleShell title="Administrator"><div className="text-slate-500">Verifying administrator access…</div></ModuleShell>;
   if (!user) return null;
-
-  if (!isPlatformAdmin) {
-    return (
-      <ModuleShell title="Administrator" subtitle="Platform administration">
-        <Panel title="Access denied">
-          <p className="text-sm text-slate-600">This workspace is restricted to the enterprise administrator role.</p>
-        </Panel>
-      </ModuleShell>
-    );
-  }
 
   const statCards = [
     ['Users', overview?.users ?? '—', Users],
