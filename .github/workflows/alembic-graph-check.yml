@@ -11,23 +11,121 @@ on:
 jobs:
   alembic-graph:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: bhudi_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ci -d bhudi_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgresql+psycopg://ci:ci@localhost:5432/bhudi_ci
     defaults:
       run:
         working-directory: backend
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
       - name: Install dependencies
-        run: pip install -r requirements.txt
-      - run: alembic heads
-      - run: alembic branches
-      - run: alembic history --verbose
-      - name: Require exactly one canonical head
-        shell: bash
         run: |
-          count=$(alembic heads | grep -E '^[0-9a-f]+' | wc -l | tr -d ' ')
+          python -m pip install -U pip
+          python -m pip install -r requirements.txt
+      - name: Validate migration graph
+        run: |
+          alembic heads
+          alembic branches
+          alembic history --verbose
+          count=$(alembic heads | grep -F -c '(head)' || true)
           echo "Alembic head count: $count"
           test "$count" -eq 1
-      - run: alembic upgrade head --sql
+      - name: Prepare pre-RMM schema baseline in disposable PostgreSQL
+        run: |
+          python - <<'PY'
+          import os
+          from sqlalchemy import create_engine, text
+
+          engine = create_engine(os.environ["DATABASE_URL"])
+          tenant_id = "00000000-0000-4000-8000-000000000001"
+          organization_id = "00000000-0000-4000-8000-000000000002"
+          device_id = "00000000-0000-4000-8000-000000000003"
+          agent_id = "00000000-0000-4000-8000-000000000004"
+
+          # Phase 1 is a single forward migration from the deployed parent
+          # revision. Build only the pre-Phase-1 tables/columns that this
+          # migration depends on, avoiding unrelated legacy ORM type drift.
+          with engine.begin() as connection:
+              connection.execute(text("CREATE TABLE tenants (id UUID PRIMARY KEY)"))
+              connection.execute(text(
+                  "CREATE TABLE organizations (id UUID PRIMARY KEY, "
+                  "tenant_id UUID NOT NULL REFERENCES tenants(id))"
+              ))
+              connection.execute(text("CREATE TABLE sites (id UUID PRIMARY KEY)"))
+              connection.execute(text(
+                  "CREATE TABLE devices (id UUID PRIMARY KEY, "
+                  "tenant_id UUID REFERENCES tenants(id))"
+              ))
+              connection.execute(text(
+                  "CREATE TABLE agents (id UUID PRIMARY KEY, "
+                  "tenant_id UUID REFERENCES tenants(id), "
+                  "device_id UUID REFERENCES devices(id))"
+              ))
+              connection.execute(text("INSERT INTO tenants (id) VALUES (:id)"), {"id": tenant_id})
+              connection.execute(text(
+                  "INSERT INTO organizations (id, tenant_id) VALUES (:id, :tenant)"
+              ), {"id": organization_id, "tenant": tenant_id})
+              connection.execute(text(
+                  "INSERT INTO devices (id, tenant_id) VALUES (:id, :tenant)"
+              ), {"id": device_id, "tenant": tenant_id})
+              connection.execute(text(
+                  "INSERT INTO agents (id, tenant_id, device_id) "
+                  "VALUES (:id, :tenant, :device)"
+              ), {"id": agent_id, "tenant": tenant_id, "device": device_id})
+          PY
+          alembic stamp m7n8o9p0q1r2
+      - name: Apply migrations to disposable PostgreSQL
+        run: alembic upgrade head
+      - name: Verify canonical RMM schema, tenant-safe backfill, and revision
+        run: |
+          python - <<'PY'
+          import os
+          from sqlalchemy import create_engine, inspect, text
+
+          engine = create_engine(os.environ["DATABASE_URL"])
+          inspector = inspect(engine)
+          for table in ("agents", "devices"):
+              columns = {column["name"] for column in inspector.get_columns(table)}
+              missing = {"organization_id", "site_id"} - columns
+              assert not missing, f"{table} missing canonical columns: {sorted(missing)}"
+
+          expected_org = "00000000-0000-4000-8000-000000000002"
+          device_id = "00000000-0000-4000-8000-000000000003"
+          agent_id = "00000000-0000-4000-8000-000000000004"
+          with engine.connect() as connection:
+              revision = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
+              device_org = connection.execute(
+                  text("SELECT organization_id FROM devices WHERE id = :id"), {"id": device_id}
+              ).scalar_one()
+              agent_org = connection.execute(
+                  text("SELECT organization_id FROM agents WHERE id = :id"), {"id": agent_id}
+              ).scalar_one()
+              agent_site = connection.execute(
+                  text("SELECT site_id FROM agents WHERE id = :id"), {"id": agent_id}
+              ).scalar_one()
+          assert revision == "rmm_phase1_org_site_device_agent", revision
+          assert str(device_org) == expected_org, device_org
+          assert str(agent_org) == expected_org, agent_org
+          assert agent_site is None, agent_site
+          print(f"PostgreSQL migration and tenant-safe backfill verified at {revision}")
+          PY

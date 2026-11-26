@@ -42,7 +42,7 @@ from app.models.secret_entry import SecretEntry
 from app.models.tenant import Tenant
 from app.models.user import User
 from app.models.user_role import UserRole
-from app.models.msp import Organization, Technician, BillingPlan, TenantSubscription
+from app.models.msp import Organization, Site, Technician, BillingPlan, TenantSubscription
 from app.models.itsm import ServiceTicket, TicketAssetLink, TicketWorkNote
 from app.models.itsm_extended import (
     ITSMSLAPolicy,
@@ -103,6 +103,7 @@ def _bootstrap_metadata_for_engine() -> MetaData:
             Contract,
             Vendor,
             Organization,
+            Site,
             Technician,
             BillingPlan,
             TenantSubscription,

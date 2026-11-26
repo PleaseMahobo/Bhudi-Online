@@ -11,6 +11,8 @@ from sqlalchemy.orm import Session
 
 from app.models.agent import Agent
 from app.models.agent_enrollment import AgentEnrollment
+from app.models.device import Device
+from app.models.msp import Organization
 from app.models.tenant import Tenant
 from app.services.entitlement_service import EntitlementService
 
@@ -101,6 +103,45 @@ class AgentEnrollmentService:
             existing.last_heartbeat = now
             existing.revoked = False
             existing.enrollment_token = agent_token
+
+        # Phase 1 canonical RMM mapping: enrollment establishes the
+        # Organization -> Device -> Agent chain. Site remains nullable until
+        # an operator assigns the device to a specific site.
+        organization = self.db.query(Organization).filter(
+            Organization.tenant_id == tenant.id
+        ).first()
+        if organization is not None:
+            existing.organization_id = organization.id
+
+        device = self.db.get(Device, existing.device_id) if existing.device_id else None
+        if device is None:
+            # Use the persistent Agent id as the initial Device identity so
+            # legacy runtime/device lookups remain stable during migration.
+            device = self.db.get(Device, existing.id)
+        if device is None:
+            device = Device(
+                id=existing.id,
+                tenant_id=tenant.id,
+                organization_id=organization.id if organization else None,
+                hostname=hostname,
+                status="online",
+                agent_version=agent_version,
+                version=agent_version,
+                last_seen=now,
+            )
+            self.db.add(device)
+        else:
+            device.tenant_id = tenant.id
+            if organization is not None:
+                device.organization_id = organization.id
+            device.hostname = hostname
+            device.status = "online"
+            device.agent_version = agent_version
+            device.version = agent_version
+            device.last_seen = now
+
+        existing.device_id = device.id
+        existing.site_id = device.site_id
 
         # Seat check: supportable only within paid device_limit
         EntitlementService(self.db).assign_supportable_on_enroll(tenant.id, existing)

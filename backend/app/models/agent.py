@@ -9,12 +9,14 @@ from sqlalchemy.dialects.postgresql import TIMESTAMP, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
+from app.models.msp import Organization, Site
 
 if TYPE_CHECKING:
     from .agent_command import AgentCommand
     from .command import Command
     from .device import Device
     from .tenant import Tenant
+    from .msp import Organization, Site
 
 
 class Agent(Base):
@@ -92,9 +94,13 @@ class Agent(Base):
     last_error_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True), nullable=True)
 
     tenant_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="SET NULL"), nullable=True, index=True)
+    organization_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="SET NULL"), nullable=True, index=True)
+    site_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("sites.id", ondelete="SET NULL"), nullable=True, index=True)
     device_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("devices.id", ondelete="CASCADE"), nullable=True, unique=True, index=True)
 
     tenant: Mapped["Tenant | None"] = relationship("Tenant", back_populates="agents")
+    organization: Mapped["Organization | None"] = relationship("Organization")
+    site: Mapped["Site | None"] = relationship("Site")
     commands: Mapped[list["Command"]] = relationship("Command", back_populates="agent", cascade="all, delete-orphan")
     queued_commands: Mapped[list["AgentCommand"]] = relationship("AgentCommand", back_populates="agent", cascade="all, delete-orphan")
     device: Mapped["Device | None"] = relationship("Device", back_populates="agent", uselist=False, cascade="all, delete-orphan", single_parent=True)

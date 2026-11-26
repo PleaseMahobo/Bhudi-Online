@@ -9,6 +9,7 @@ from fastapi import HTTPException
 from sqlalchemy.exc import IntegrityError
 
 from app.models.agent import Agent
+from app.models.device import Device
 from app.models.agent_enrollment import AgentEnrollment
 from app.models.tenant import Tenant
 from app.services.entitlement_service import Entitlement
@@ -31,7 +32,8 @@ def test_secure_enrollment_runs_credential_tenant_machine_agent_commit():
     db = MagicMock()
     db.scalar.side_effect = [enrollment, None, 0]
     db.query.return_value.filter.return_value.order_by.return_value.first.return_value = None
-    db.get.return_value = tenant
+    # Enrollment now performs explicit Tenant and canonical Device lookups.
+    db.get.side_effect = lambda model, _identity: tenant if model is Tenant else None
     db.scalar.side_effect = [enrollment, None, 0]
     # Paid seat available: enrollment should remain approved/trusted.
     db.query.return_value.filter.return_value.order_by.return_value.first.return_value = SimpleNamespace(status="active", device_limit=1, meta={"plan_code": "starter"})
@@ -54,7 +56,7 @@ def test_secure_enrollment_runs_credential_tenant_machine_agent_commit():
     assert agent_token == row.enrollment_token
     assert enrollment.agent_id == row.id
 
-    db.get.assert_called_once_with(Tenant, tenant_id)
+    assert db.get.call_args_list == [call(Tenant, tenant_id), call(Device, row.id)]
     assert db.scalar.call_count == 3
     db.flush.assert_called_once_with()
     db.commit.assert_called_once_with()
@@ -106,7 +108,8 @@ def test_integrity_failure_is_available_for_endpoint_translation():
     tenant_id = uuid4()
     enrollment = _enrollment(tenant_id)
     db.scalar.side_effect = [enrollment, None, 0]
-    db.get.return_value = Tenant(id=tenant_id, name="Customer A")
+    tenant = Tenant(id=tenant_id, name="Customer A")
+    db.get.side_effect = lambda model, _identity: tenant if model is Tenant else None
 
     with pytest.raises(IntegrityError):
         service.enroll_agent(
