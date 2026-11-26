@@ -47,7 +47,7 @@ jobs:
           alembic heads
           alembic branches
           alembic history --verbose
-          count=$(alembic heads | grep -E '\\(head\\)$' | wc -l | tr -d ' ')
+          count=$(alembic heads | grep -F -c '(head)' || true)
           echo "Alembic head count: $count"
           test "$count" -eq 1
       - name: Apply migrations to disposable PostgreSQL
