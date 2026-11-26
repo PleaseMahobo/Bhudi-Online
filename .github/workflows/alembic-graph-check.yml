@@ -53,28 +53,50 @@ jobs:
       - name: Prepare pre-RMM schema baseline in disposable PostgreSQL
         run: |
           python - <<'PY'
-          from sqlalchemy import text
-          from app.core.bootstrap import engine
-          from app.models.base import Base
+          import os
+          from sqlalchemy import create_engine, text
 
-          # The repository's historical base migration assumes tables that
-          # already exist in deployed installations. Build the current ORM
-          # baseline, then remove only the four columns introduced by Phase 1.
-          Base.metadata.create_all(bind=engine)
+          engine = create_engine(os.environ["DATABASE_URL"])
+          tenant_id = "00000000-0000-4000-8000-000000000001"
+          organization_id = "00000000-0000-4000-8000-000000000002"
+          device_id = "00000000-0000-4000-8000-000000000003"
+          agent_id = "00000000-0000-4000-8000-000000000004"
+
+          # Phase 1 is a single forward migration from the deployed parent
+          # revision. Build only the pre-Phase-1 tables/columns that this
+          # migration depends on, avoiding unrelated legacy ORM type drift.
           with engine.begin() as connection:
+              connection.execute(text("CREATE TABLE tenants (id UUID PRIMARY KEY)"))
               connection.execute(text(
-                  "ALTER TABLE devices DROP COLUMN IF EXISTS organization_id, "
-                  "DROP COLUMN IF EXISTS site_id"
+                  "CREATE TABLE organizations (id UUID PRIMARY KEY, "
+                  "tenant_id UUID NOT NULL REFERENCES tenants(id))"
+              ))
+              connection.execute(text("CREATE TABLE sites (id UUID PRIMARY KEY)"))
+              connection.execute(text(
+                  "CREATE TABLE devices (id UUID PRIMARY KEY, "
+                  "tenant_id UUID REFERENCES tenants(id))"
               ))
               connection.execute(text(
-                  "ALTER TABLE agents DROP COLUMN IF EXISTS organization_id, "
-                  "DROP COLUMN IF EXISTS site_id"
+                  "CREATE TABLE agents (id UUID PRIMARY KEY, "
+                  "tenant_id UUID REFERENCES tenants(id), "
+                  "device_id UUID REFERENCES devices(id))"
               ))
+              connection.execute(text("INSERT INTO tenants (id) VALUES (:id)"), {"id": tenant_id})
+              connection.execute(text(
+                  "INSERT INTO organizations (id, tenant_id) VALUES (:id, :tenant)"
+              ), {"id": organization_id, "tenant": tenant_id})
+              connection.execute(text(
+                  "INSERT INTO devices (id, tenant_id) VALUES (:id, :tenant)"
+              ), {"id": device_id, "tenant": tenant_id})
+              connection.execute(text(
+                  "INSERT INTO agents (id, tenant_id, device_id) "
+                  "VALUES (:id, :tenant, :device)"
+              ), {"id": agent_id, "tenant": tenant_id, "device": device_id})
           PY
           alembic stamp m7n8o9p0q1r2
       - name: Apply migrations to disposable PostgreSQL
         run: alembic upgrade head
-      - name: Verify canonical RMM schema and revision
+      - name: Verify canonical RMM schema, tenant-safe backfill, and revision
         run: |
           python - <<'PY'
           import os
@@ -87,8 +109,23 @@ jobs:
               missing = {"organization_id", "site_id"} - columns
               assert not missing, f"{table} missing canonical columns: {sorted(missing)}"
 
+          expected_org = "00000000-0000-4000-8000-000000000002"
+          device_id = "00000000-0000-4000-8000-000000000003"
+          agent_id = "00000000-0000-4000-8000-000000000004"
           with engine.connect() as connection:
               revision = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
+              device_org = connection.execute(
+                  text("SELECT organization_id FROM devices WHERE id = :id"), {"id": device_id}
+              ).scalar_one()
+              agent_org = connection.execute(
+                  text("SELECT organization_id FROM agents WHERE id = :id"), {"id": agent_id}
+              ).scalar_one()
+              agent_site = connection.execute(
+                  text("SELECT site_id FROM agents WHERE id = :id"), {"id": agent_id}
+              ).scalar_one()
           assert revision == "rmm_phase1_org_site_device_agent", revision
-          print(f"PostgreSQL migration verified at {revision}")
+          assert str(device_org) == expected_org, device_org
+          assert str(agent_org) == expected_org, agent_org
+          assert agent_site is None, agent_site
+          print(f"PostgreSQL migration and tenant-safe backfill verified at {revision}")
           PY
