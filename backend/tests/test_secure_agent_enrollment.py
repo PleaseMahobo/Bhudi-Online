@@ -33,7 +33,7 @@ def test_secure_enrollment_runs_credential_tenant_machine_agent_commit():
     db.scalar.side_effect = [enrollment, None, 0]
     db.query.return_value.filter.return_value.order_by.return_value.first.return_value = None
     # Enrollment now performs explicit Tenant and canonical Device lookups.
-    db.get.side_effect = [tenant, None]
+    db.get.side_effect = lambda model, _identity: tenant if model is Tenant else None
     db.scalar.side_effect = [enrollment, None, 0]
     # Paid seat available: enrollment should remain approved/trusted.
     db.query.return_value.filter.return_value.order_by.return_value.first.return_value = SimpleNamespace(status="active", device_limit=1, meta={"plan_code": "starter"})
@@ -108,7 +108,8 @@ def test_integrity_failure_is_available_for_endpoint_translation():
     tenant_id = uuid4()
     enrollment = _enrollment(tenant_id)
     db.scalar.side_effect = [enrollment, None, 0]
-    db.get.side_effect = [Tenant(id=tenant_id, name="Customer A"), None]
+    tenant = Tenant(id=tenant_id, name="Customer A")
+    db.get.side_effect = lambda model, _identity: tenant if model is Tenant else None
 
     with pytest.raises(IntegrityError):
         service.enroll_agent(
