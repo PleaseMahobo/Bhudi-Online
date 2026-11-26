@@ -50,6 +50,28 @@ jobs:
           count=$(alembic heads | grep -F -c '(head)' || true)
           echo "Alembic head count: $count"
           test "$count" -eq 1
+      - name: Prepare pre-RMM schema baseline in disposable PostgreSQL
+        run: |
+          python - <<'PY'
+          from sqlalchemy import text
+          from app.core.bootstrap import engine
+          from app.models.base import Base
+
+          # The repository's historical base migration assumes tables that
+          # already exist in deployed installations. Build the current ORM
+          # baseline, then remove only the four columns introduced by Phase 1.
+          Base.metadata.create_all(bind=engine)
+          with engine.begin() as connection:
+              connection.execute(text(
+                  "ALTER TABLE devices DROP COLUMN IF EXISTS organization_id, "
+                  "DROP COLUMN IF EXISTS site_id"
+              ))
+              connection.execute(text(
+                  "ALTER TABLE agents DROP COLUMN IF EXISTS organization_id, "
+                  "DROP COLUMN IF EXISTS site_id"
+              ))
+          PY
+          alembic stamp m7n8o9p0q1r2
       - name: Apply migrations to disposable PostgreSQL
         run: alembic upgrade head
       - name: Verify canonical RMM schema and revision
