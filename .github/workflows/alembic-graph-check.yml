@@ -27,7 +27,7 @@ jobs:
       - name: Require exactly one canonical head
         shell: bash
         run: |
-          count=$(alembic heads | grep -E '^[0-9a-f]+' | wc -l | tr -d ' ')
+          count=$(alembic heads | grep -E '\(head\)$' | wc -l | tr -d ' ')
           echo "Alembic head count: $count"
           test "$count" -eq 1
       - run: alembic upgrade head --sql
