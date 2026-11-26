@@ -30,4 +30,4 @@ jobs:
           count=$(alembic heads | grep -E '\(head\)$' | wc -l | tr -d ' ')
           echo "Alembic head count: $count"
           test "$count" -eq 1
-      - run: alembic upgrade head --sql
+      - name: Render PostgreSQL migration SQL (offline; no database changes)\n        env:\n          DATABASE_URL: postgresql+psycopg://ci:ci@localhost:5432/bhudi_ci\n        run: alembic upgrade head --sql
