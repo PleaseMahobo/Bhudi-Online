@@ -8,6 +8,7 @@ from sqlalchemy import DateTime, ForeignKey, Index, Integer, Text, Uuid, func  #
 from sqlalchemy.orm import Mapped, mapped_column, relationship  # pyright: ignore[reportMissingImports]
 
 from app.models.base import Base
+from app.models.msp import Organization, Site
 
 if TYPE_CHECKING:
     from .agent import Agent
