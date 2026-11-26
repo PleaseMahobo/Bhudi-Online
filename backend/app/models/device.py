@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from .device_heartbeat import DeviceHeartbeat
     from .device_metric import DeviceMetric
     from .tenant import Tenant
+    from .msp import Organization, Site
     from .command import Command
     from .telemetry import Telemetry
     from .incident import Incident
@@ -93,6 +94,20 @@ class Device(Base):
         nullable=True,
     )
 
+    organization_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("organizations.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
+    site_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("sites.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
     agent_token: Mapped[str | None] = mapped_column(
         Text,
         nullable=True,
@@ -134,6 +149,9 @@ class Device(Base):
     tenant: Mapped["Tenant | None"] = relationship(
         back_populates="devices",
     )
+
+    organization: Mapped["Organization | None"] = relationship("Organization")
+    site: Mapped["Site | None"] = relationship("Site")
 
     alerts: Mapped[list["Alert"]] = relationship(
         back_populates="device",
