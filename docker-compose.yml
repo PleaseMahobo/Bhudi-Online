@@ -1,8 +1,8 @@
 services:
   api:
     build:
-      context: ./backend
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: backend/Dockerfile
     environment:
       DATABASE_URL: postgresql+psycopg2://bhudi:bhudi@postgres:5432/bhudi
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:-change-me-in-production}
