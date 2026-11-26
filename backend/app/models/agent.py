@@ -9,6 +9,7 @@ from sqlalchemy.dialects.postgresql import TIMESTAMP, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
+from app.models.msp import Organization, Site
 
 if TYPE_CHECKING:
     from .agent_command import AgentCommand
